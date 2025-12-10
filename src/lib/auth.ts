@@ -9,7 +9,7 @@ export const authOptions: NextAuthOptions = {
             clientSecret: process.env.FACEBOOK_CLIENT_SECRET!,
             authorization: {
                 params: {
-                    scope: 'email,public_profile,pages_show_list,pages_messaging,pages_read_engagement,pages_manage_metadata'
+                    scope: 'email,public_profile,pages_show_list,pages_messaging,pages_read_engagement,pages_manage_metadata,business_management'
                 }
             },
             checks: ['state'],

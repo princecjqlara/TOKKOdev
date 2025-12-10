@@ -2,19 +2,49 @@ import { FacebookPage, FacebookConversation } from '@/types';
 
 const FACEBOOK_GRAPH_URL = 'https://graph.facebook.com/v18.0';
 
-// Get user's Facebook pages
+// Get user's Facebook pages (including business pages)
+// /me/accounts returns all pages the user manages, including business pages
 export async function getFacebookPages(userAccessToken: string): Promise<FacebookPage[]> {
-    const response = await fetch(
-        `${FACEBOOK_GRAPH_URL}/me/accounts?fields=id,name,access_token,category,picture&access_token=${userAccessToken}`
-    );
+    try {
+        // Fetch all pages - this includes regular pages and business pages the user manages
+        const response = await fetch(
+            `${FACEBOOK_GRAPH_URL}/me/accounts?fields=id,name,access_token,category,picture,tasks&limit=100&access_token=${userAccessToken}`
+        );
 
-    if (!response.ok) {
-        const error = await response.json();
-        throw new Error(error.error?.message || 'Failed to fetch Facebook pages');
+        if (!response.ok) {
+            const error = await response.json();
+            throw new Error(error.error?.message || 'Failed to fetch Facebook pages');
+        }
+
+        const data = await response.json();
+        const pages = data.data || [];
+
+        // Handle pagination if there are more than 100 pages
+        let nextUrl = data.paging?.next;
+        while (nextUrl) {
+            try {
+                const nextResponse = await fetch(nextUrl);
+                if (nextResponse.ok) {
+                    const nextData = await nextResponse.json();
+                    if (nextData.data) {
+                        pages.push(...nextData.data);
+                    }
+                    nextUrl = nextData.paging?.next;
+                } else {
+                    break;
+                }
+            } catch (paginationError) {
+                console.warn('Error fetching paginated pages:', paginationError);
+                break;
+            }
+        }
+
+        console.log(`Fetched ${pages.length} Facebook pages (including business pages if available)`);
+        return pages;
+    } catch (error) {
+        console.error('Error fetching Facebook pages:', error);
+        throw error;
     }
-
-    const data = await response.json();
-    return data.data || [];
 }
 
 // Get ALL conversations for a page (handles pagination)
