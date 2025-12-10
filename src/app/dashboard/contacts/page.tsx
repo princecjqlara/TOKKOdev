@@ -164,10 +164,11 @@ export default function ContactsPage() {
 
         setSyncing(true);
         try {
+            // Manual sync button always does full sync to get all contacts
             const res = await fetch(`/api/pages/${selectedPageId}/sync`, { 
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ forceFullSync: false }) // Incremental sync by default
+                body: JSON.stringify({ forceFullSync: true }) // Full sync for manual button clicks
             });
             
             const data = await res.json();

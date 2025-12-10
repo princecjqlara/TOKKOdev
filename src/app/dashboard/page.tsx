@@ -84,8 +84,8 @@ export default function DashboardPage() {
         setSyncing(true);
 
         try {
-            // Check if user wants full sync (hold Shift while clicking)
-            const forceFullSync = false; // Can be changed to detect Shift key if needed
+            // Manual sync button always does full sync to get all contacts
+            const forceFullSync = true;
             
             const res = await fetch(`/api/pages/${selectedPageId}/sync`, {
                 method: 'POST',
