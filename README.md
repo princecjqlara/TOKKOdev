@@ -2,7 +2,7 @@
 
 A Next.js application for managing Facebook Page contacts, tags, and messaging campaigns.
 
-<!-- Last updated for Vercel deployment -->
+<!-- Last updated for Vercel deployment - Redeploy trigger -->
 
 ## Features
 
