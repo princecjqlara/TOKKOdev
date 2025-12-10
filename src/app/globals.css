@@ -1,0 +1,157 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --background: #ffffff;
+  --foreground: #000000;
+
+  --muted: #f4f4f5;
+  --muted-foreground: #71717a;
+
+  --card: #ffffff;
+  --card-foreground: #000000;
+
+  --popover: #ffffff;
+  --popover-foreground: #000000;
+
+  --primary: #000000;
+  --primary-foreground: #ffffff;
+
+  --secondary: #f4f4f5;
+  --secondary-foreground: #18181b;
+
+  --accent: #f4f4f5;
+  --accent-foreground: #18181b;
+
+  --destructive: #ef4444;
+  --destructive-foreground: #fafafa;
+
+  --border: #000000;
+  --input: #000000;
+  --ring: #000000;
+
+  --radius: 0px;
+}
+
+/* Reset basics */
+* {
+  border-color: var(--border);
+}
+
+body {
+  background-color: var(--background);
+  color: var(--foreground);
+  font-feature-settings: "rlig" 1, "calt" 1;
+}
+
+/* Typography Overrides */
+h1,
+h2,
+h3,
+h4,
+h5,
+h6 {
+  letter-spacing: -0.02em;
+  font-weight: 700;
+  text-transform: uppercase;
+}
+
+/* Wireframe Components */
+@layer components {
+
+  /* Wireframe Card */
+  .wireframe-card {
+    @apply border border-black bg-white p-6 relative;
+  }
+
+  /* Diagonal Split Background (Concept from inspo) */
+  .diagonal-split {
+    @apply relative overflow-hidden;
+  }
+
+  .diagonal-split::before {
+    content: '';
+    @apply absolute inset-0 border-b border-black;
+    transform: skewY(-10deg);
+    transform-origin: 0 100%;
+    pointer-events: none;
+  }
+
+  /* Sharp Button */
+  .btn-wireframe {
+    @apply inline-flex items-center justify-center border border-black bg-white text-black px-6 py-3 text-sm font-bold uppercase transition-colors hover:bg-black hover:text-white disabled:pointer-events-none disabled:opacity-50;
+  }
+
+  .btn-wireframe-dark {
+    @apply inline-flex items-center justify-center border border-black bg-black text-white px-6 py-3 text-sm font-bold uppercase transition-colors hover:bg-white hover:text-black disabled:pointer-events-none disabled:opacity-50;
+  }
+
+  /* Wireframe Input */
+  .input-wireframe {
+    @apply flex h-10 w-full border border-black bg-transparent px-3 py-2 text-sm placeholder:text-gray-400 focus:outline-none focus:ring-1 focus:ring-black disabled:cursor-not-allowed disabled:opacity-50;
+  }
+
+  /* Label */
+  .label-wireframe {
+    @apply text-xs font-bold uppercase tracking-wider mb-1 block;
+  }
+
+  /* Wireframe Modal */
+  .modal-backdrop {
+    @apply fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4;
+  }
+
+  .modal {
+    @apply bg-white border-2 border-black p-0 w-full max-h-[90vh] overflow-y-auto;
+  }
+
+  /* Wireframe Table */
+  .table-wireframe {
+    @apply w-full border-collapse border border-black text-sm;
+  }
+
+  .table-wireframe th {
+    @apply border-b border-black bg-gray-100 p-4 text-left font-bold uppercase tracking-wider;
+  }
+
+  .table-wireframe td {
+    @apply border-b border-black p-4;
+  }
+
+  .table-wireframe tr:last-child td {
+    @apply border-b-0;
+  }
+
+  /* Badge */
+  .badge-wireframe {
+    @apply inline-flex items-center rounded-none border border-black px-2.5 py-0.5 text-xs font-bold uppercase transition-colors focus:outline-none focus:ring-2 focus:ring-black focus:ring-offset-2;
+  }
+
+  /* Ghost Button (for pagination/modals) */
+  .btn-ghost-wireframe {
+    @apply inline-flex items-center justify-center p-2 text-black hover:bg-gray-100 transition-colors disabled:opacity-50;
+  }
+}
+
+/* Layout Utilities */
+.container-wide {
+  @apply max-w-[1400px] mx-auto px-4 md:px-8;
+}
+
+/* Animation Utilities */
+.fade-in {
+  animation: fadeIn 0.3s ease-out;
+}
+
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+    transform: translateY(5px);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
