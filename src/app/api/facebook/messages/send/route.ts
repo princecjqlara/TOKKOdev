@@ -9,6 +9,9 @@ interface ContactRecord {
     page_id: string;
 }
 
+// Increase timeout for sending messages (up to 5 minutes)
+export const maxDuration = 300;
+
 // POST /api/facebook/messages/send - Send messages to contacts
 export async function POST(request: NextRequest) {
     try {
@@ -211,18 +214,63 @@ export async function POST(request: NextRequest) {
             errors: [] as { contactId: string; error: string }[]
         };
 
-        for (const contact of allContacts) {
-            try {
-                await sendMessage(page.fb_page_id, page.access_token, contact.psid, messageText);
-                results.sent += 1;
-            } catch (error) {
-                results.failed += 1;
-                results.errors.push({
-                    contactId: contact.id,
-                    error: (error as Error).message
+        // Process messages in parallel batches to avoid timeout and respect rate limits
+        const SEND_BATCH_SIZE = 10; // Send 10 messages in parallel
+        const DELAY_BETWEEN_BATCHES = 100; // 100ms delay between batches to respect rate limits
+        const MAX_PROCESSING_TIME = 240000; // 4 minutes (leave 1 minute buffer before 5 min timeout)
+        const startTime = Date.now();
+
+        for (let i = 0; i < allContacts.length; i += SEND_BATCH_SIZE) {
+            // Check if we're approaching timeout
+            const elapsed = Date.now() - startTime;
+            if (elapsed > MAX_PROCESSING_TIME) {
+                console.warn(`Approaching timeout, processed ${i}/${allContacts.length} contacts. Returning partial results.`);
+                return NextResponse.json({
+                    success: true,
+                    partial: true,
+                    message: `Processed ${i} of ${allContacts.length} contacts before timeout. Please send remaining contacts in another batch.`,
+                    results: {
+                        ...results,
+                        processed: i,
+                        total: allContacts.length
+                    }
                 });
             }
+
+            const batch = allContacts.slice(i, i + SEND_BATCH_SIZE);
+            
+            // Process batch in parallel
+            const batchPromises = batch.map(async (contact) => {
+                try {
+                    await sendMessage(page.fb_page_id, page.access_token, contact.psid, messageText);
+                    results.sent += 1;
+                    return { success: true, contactId: contact.id };
+                } catch (error) {
+                    results.failed += 1;
+                    const errorMessage = (error as Error).message;
+                    results.errors.push({
+                        contactId: contact.id,
+                        error: errorMessage
+                    });
+                    return { success: false, contactId: contact.id, error: errorMessage };
+                }
+            });
+
+            // Wait for batch to complete
+            await Promise.all(batchPromises);
+
+            // Add delay between batches to respect Facebook rate limits (except for last batch)
+            if (i + SEND_BATCH_SIZE < allContacts.length) {
+                await new Promise(resolve => setTimeout(resolve, DELAY_BETWEEN_BATCHES));
+            }
+
+            // Log progress every 50 contacts
+            if ((i + SEND_BATCH_SIZE) % 50 === 0 || i + SEND_BATCH_SIZE >= allContacts.length) {
+                console.log(`Progress: ${Math.min(i + SEND_BATCH_SIZE, allContacts.length)}/${allContacts.length} contacts processed (Sent: ${results.sent}, Failed: ${results.failed})`);
+            }
         }
+
+        console.log(`Completed sending: ${results.sent} sent, ${results.failed} failed out of ${allContacts.length} total`);
 
         return NextResponse.json({
             success: true,
