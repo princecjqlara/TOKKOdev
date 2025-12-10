@@ -333,7 +333,11 @@ export default function ContactsPage() {
 
             const data = await response.json();
             if (data.success) {
-                alert(`Messages sent! Success: ${data.results.sent}, Failed: ${data.results.failed}`);
+                if (data.partial) {
+                    alert(`Partial completion: ${data.results.sent} sent, ${data.results.failed} failed out of ${data.results.total} total.\n\n${data.message}\n\nPlease send the remaining contacts in another batch.`);
+                } else {
+                    alert(`Messages sent! Success: ${data.results.sent}, Failed: ${data.results.failed}`);
+                }
                 setShowMessageModal(false);
                 setMessageText('');
                 clearSelection();
