@@ -173,9 +173,9 @@ export default function ContactsPage() {
             const data = await res.json();
             if (data.success) {
                 if (data.incremental) {
-                    console.log(`✅ Incremental sync: ${data.synced} new/updated contacts synced`);
+                    console.log(`✅ Incremental sync: ${data.synced} new/updated contacts synced${data.restored > 0 ? `, ${data.restored} deleted contacts restored` : ''}`);
                 } else {
-                    console.log(`✅ Full sync: ${data.synced} contacts synced`);
+                    console.log(`✅ Full sync: ${data.synced} contacts synced${data.restored > 0 ? `, ${data.restored} deleted contacts restored` : ''}`);
                 }
             }
             await fetchContacts();

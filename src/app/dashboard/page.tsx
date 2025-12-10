@@ -114,7 +114,12 @@ export default function DashboardPage() {
                     alert(`Partial sync complete!\n\nSynced: ${data.synced}\nFailed: ${data.failed}\nProcessed: ${data.processed} of ${data.total}\n\n${data.message}\n\nClick "Sync Now" again to continue syncing remaining contacts.`);
                 } else {
                     const syncType = data.incremental ? 'Incremental' : 'Full';
-                    alert(`${syncType} sync complete!\n\nSynced: ${data.synced}\nFailed: ${data.failed}\nTotal: ${data.total}\n\n${data.incremental ? 'Only new/updated contacts were synced. Use full sync to sync all contacts.' : 'All contacts have been synced.'}`);
+                    let message = `${syncType} sync complete!\n\nSynced: ${data.synced}\nFailed: ${data.failed}\nTotal: ${data.total}`;
+                    if (data.restored > 0) {
+                        message += `\n\n✅ Restored: ${data.restored} previously deleted contacts`;
+                    }
+                    message += `\n\n${data.incremental ? 'Only new/updated contacts were synced. Use full sync to sync all contacts.' : 'All contacts have been synced.'}`;
+                    alert(message);
                 }
                 await fetchStats(selectedPageId);
             } else {

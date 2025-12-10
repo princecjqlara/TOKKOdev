@@ -102,56 +102,38 @@ export async function POST(
             );
         }
 
-        // For incremental sync, also check for deleted contacts by sampling recent conversations
-        // This ensures deleted contacts are re-added if they still exist in Facebook
-        if (isIncremental) {
+        // Filter valid conversations first
+        const validConversations = conversations.filter(conv => {
+            const participant = conv.participants?.data?.find(p => p.id !== page.fb_page_id);
+            return participant && participant.id;
+        });
+
+        // Check for deleted contacts that should be re-added
+        // Get all PSIDs from fetched conversations
+        const conversationPsids = new Set<string>();
+        validConversations.forEach(conv => {
+            const participant = conv.participants?.data?.find(p => p.id !== page.fb_page_id);
+            if (participant?.id) {
+                conversationPsids.add(participant.id);
+            }
+        });
+
+        // Check which PSIDs are missing from database (deleted contacts)
+        let restoredCount = 0;
+        if (conversationPsids.size > 0) {
             try {
-                // Fetch a sample of the most recent conversations (first page, ~100) to check for missing contacts
-                // This is a lightweight check that doesn't require fetching all conversations
-                const sampleConversations = await getPageConversations(
-                    page.fb_page_id,
-                    page.access_token,
-                    100,
-                    false, // Just get first page (most recent)
-                    undefined // No since filter - get most recent conversations
-                );
-                
-                // Get all PSIDs from sample conversations
-                const samplePsids = new Set<string>();
-                sampleConversations.forEach(conv => {
-                    const participant = conv.participants?.data?.find(p => p.id !== page.fb_page_id);
-                    if (participant?.id) {
-                        samplePsids.add(participant.id);
-                    }
-                });
+                const { data: existingContacts } = await supabase
+                    .from('contacts')
+                    .select('psid')
+                    .eq('page_id', pageId)
+                    .in('psid', Array.from(conversationPsids));
 
-                // Check which PSIDs are missing from database
-                if (samplePsids.size > 0) {
-                    const { data: existingContacts } = await supabase
-                        .from('contacts')
-                        .select('psid')
-                        .eq('page_id', pageId)
-                        .in('psid', Array.from(samplePsids));
+                const existingPsids = new Set((existingContacts || []).map(c => c.psid));
+                const missingPsids = Array.from(conversationPsids).filter(psid => !existingPsids.has(psid));
 
-                    const existingPsids = new Set((existingContacts || []).map(c => c.psid));
-                    const missingPsids = Array.from(samplePsids).filter(psid => !existingPsids.has(psid));
-
-                    if (missingPsids.length > 0) {
-                        console.log(`🔵 Found ${missingPsids.length} deleted contacts to restore from recent conversations`);
-                        
-                        // Add missing conversations to the sync list
-                        const missingConversations = sampleConversations.filter(conv => {
-                            const participant = conv.participants?.data?.find(p => p.id !== page.fb_page_id);
-                            return participant?.id && missingPsids.includes(participant.id);
-                        });
-                        
-                        // Merge with existing conversations, avoiding duplicates by conversation ID
-                        const existingConvIds = new Set(conversations.map(c => c.id));
-                        const newConversations = missingConversations.filter(c => !existingConvIds.has(c.id));
-                        conversations.push(...newConversations);
-                        
-                        console.log(`🔵 Added ${newConversations.length} missing contacts to sync queue`);
-                    }
+                if (missingPsids.length > 0) {
+                    restoredCount = missingPsids.length;
+                    console.log(`🔵 Found ${restoredCount} deleted contacts to restore (they still exist in Facebook conversations)`);
                 }
             } catch (error) {
                 // Don't fail the sync if checking for deleted contacts fails
@@ -169,12 +151,6 @@ export async function POST(
         const MAX_PROCESSING_TIME = 240000; // 4 minutes (leave 1 minute buffer before 5 min timeout)
         const PROFILE_FETCH_TIMEOUT = 3000; // 3 seconds max per profile fetch
         const startTime = Date.now();
-
-        // Filter valid conversations first
-        const validConversations = conversations.filter(conv => {
-            const participant = conv.participants?.data?.find(p => p.id !== page.fb_page_id);
-            return participant && participant.id;
-        });
 
         console.log(`Processing ${validConversations.length} valid conversations in batches of ${SYNC_BATCH_SIZE}`);
 
@@ -298,7 +274,7 @@ export async function POST(
             }
         }
 
-        console.log(`✅ Sync complete: ${synced} synced, ${failed} failed`);
+        console.log(`✅ Sync complete: ${synced} synced, ${failed} failed${restoredCount > 0 ? `, ${restoredCount} deleted contacts restored` : ''}`);
 
         // Update last_synced_at timestamp
         await supabase
@@ -315,6 +291,7 @@ export async function POST(
             failed,
             total: conversations.length,
             incremental: isIncremental,
+            restored: restoredCount, // Number of deleted contacts that were re-added
             last_synced_at: syncStartTime,
             errors: errors.slice(0, 10) // Return first 10 errors
         });
