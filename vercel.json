@@ -1,0 +1,22 @@
+{
+  "buildCommand": "npm run build",
+  "devCommand": "npm run dev",
+  "installCommand": "npm install",
+  "framework": "nextjs",
+  "functions": {
+    "src/app/api/pages/[pageId]/sync/route.ts": {
+      "maxDuration": 300
+    },
+    "src/app/api/cron/sync/route.ts": {
+      "maxDuration": 300
+    },
+    "src/app/api/campaigns/[campaignId]/send/route.ts": {
+      "maxDuration": 300
+    },
+    "src/app/api/facebook/messages/send/route.ts": {
+      "maxDuration": 300
+    }
+  },
+  "regions": ["iad1"]
+}
+

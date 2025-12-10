@@ -99,6 +99,34 @@ src/
 - `npm start` - Start production server
 - `npm run lint` - Run ESLint
 
+## Deployment
+
+### Vercel Deployment
+
+1. Push your code to GitHub (already done)
+2. Go to [Vercel](https://vercel.com) and sign in with GitHub
+3. Click "New Project" and import your repository: `princecjqlara/TOKKOdev`
+4. Configure environment variables in Vercel dashboard:
+   - `NEXTAUTH_URL` - Your Vercel deployment URL (e.g., `https://your-app.vercel.app`)
+   - `NEXTAUTH_SECRET` - Generate a random secret
+   - `FACEBOOK_CLIENT_ID` - Your Facebook App ID
+   - `FACEBOOK_CLIENT_SECRET` - Your Facebook App Secret
+   - `FACEBOOK_APP_SECRET` - Your Facebook App Secret
+   - `NEXT_PUBLIC_SUPABASE_URL` - Your Supabase project URL
+   - `NEXT_PUBLIC_SUPABASE_ANON_KEY` - Your Supabase anon key
+   - `SUPABASE_SERVICE_ROLE_KEY` - Your Supabase service role key
+   - `CRON_SECRET` - Optional, for cron job authentication
+
+5. Update Facebook App settings:
+   - Add your Vercel URL to Facebook App redirect URIs:
+     - `https://your-app.vercel.app/api/auth/callback/facebook`
+   - Update webhook URL to:
+     - `https://your-app.vercel.app/api/facebook/webhook`
+
+6. Deploy! Vercel will automatically build and deploy your app.
+
+**Note:** The `vercel.json` file is configured with extended function timeouts (5 minutes) for sync operations.
+
 ## License
 
 Private project
