@@ -85,53 +85,118 @@ export async function POST(
         let failed = 0;
         const errors: string[] = [];
 
-        for (const conversation of conversations) {
-            const participant = conversation.participants?.data?.find(
-                p => p.id !== page.fb_page_id
-            );
+        // Process contacts in parallel batches to avoid timeout
+        const SYNC_BATCH_SIZE = 20; // Process 20 contacts in parallel
+        const DELAY_BETWEEN_BATCHES = 50; // 50ms delay between batches
+        const MAX_PROCESSING_TIME = 240000; // 4 minutes (leave 1 minute buffer before 5 min timeout)
+        const startTime = Date.now();
 
-            if (!participant || !participant.id) {
-                console.warn(`⚠️ Skipping conversation - no valid participant`);
-                continue;
+        // Filter valid conversations first
+        const validConversations = conversations.filter(conv => {
+            const participant = conv.participants?.data?.find(p => p.id !== page.fb_page_id);
+            return participant && participant.id;
+        });
+
+        console.log(`Processing ${validConversations.length} valid conversations in batches of ${SYNC_BATCH_SIZE}`);
+
+        for (let i = 0; i < validConversations.length; i += SYNC_BATCH_SIZE) {
+            // Check if we're approaching timeout
+            const elapsed = Date.now() - startTime;
+            if (elapsed > MAX_PROCESSING_TIME) {
+                console.warn(`⚠️ Approaching timeout, processed ${i}/${validConversations.length} conversations. Returning partial results.`);
+                return NextResponse.json({
+                    success: true,
+                    partial: true,
+                    message: `Processed ${i} of ${validConversations.length} conversations before timeout. Please sync again to continue.`,
+                    synced,
+                    failed,
+                    total: conversations.length,
+                    processed: i,
+                    errors: errors.slice(0, 10)
+                });
             }
 
-            try {
-                let profilePic: string | undefined;
-                let name = participant.name;
+            const batch = validConversations.slice(i, i + SYNC_BATCH_SIZE);
+
+            // Process batch in parallel - use allSettled to continue even if some fail
+            const batchPromises = batch.map(async (conversation) => {
+                const participant = conversation.participants?.data?.find(
+                    p => p.id !== page.fb_page_id
+                );
+
+                if (!participant || !participant.id) {
+                    return { success: false, psid: 'unknown', error: 'No valid participant' };
+                }
 
                 try {
-                    const profile = await getUserProfile(participant.id, page.access_token);
-                    name = profile.name || name;
-                    profilePic = profile.profile_pic;
-                } catch (profileError) {
-                    // Profile fetch failed, use basic info
-                    console.warn(`⚠️ Failed to fetch profile for ${participant.id}:`, (profileError as Error).message);
+                    let profilePic: string | undefined;
+                    let name = participant.name;
+
+                    // Try to fetch profile, but don't let it block the sync
+                    try {
+                        const profile = await getUserProfile(participant.id, page.access_token);
+                        name = profile.name || name;
+                        profilePic = profile.profile_pic;
+                    } catch (profileError) {
+                        // Profile fetch failed, use basic info - continue anyway
+                        console.warn(`⚠️ Failed to fetch profile for ${participant.id}:`, (profileError as Error).message);
+                    }
+
+                    const { error: upsertError } = await supabase
+                        .from('contacts')
+                        .upsert({
+                            page_id: pageId,
+                            psid: participant.id,
+                            name,
+                            profile_pic: profilePic,
+                            last_interaction_at: conversation.updated_time,
+                            updated_at: new Date().toISOString()
+                        }, {
+                            onConflict: 'page_id,psid'
+                        });
+
+                    if (upsertError) {
+                        console.error(`🔴 Error upserting contact ${participant.id}:`, upsertError);
+                        return { success: false, psid: participant.id, error: upsertError.message };
+                    } else {
+                        return { success: true, psid: participant.id };
+                    }
+                } catch (error) {
+                    console.error(`🔴 Error processing contact ${participant.id}:`, error);
+                    return { success: false, psid: participant.id, error: (error as Error).message };
                 }
+            });
 
-                const { error: upsertError } = await supabase
-                    .from('contacts')
-                    .upsert({
-                        page_id: pageId,
-                        psid: participant.id,
-                        name,
-                        profile_pic: profilePic,
-                        last_interaction_at: conversation.updated_time,
-                        updated_at: new Date().toISOString()
-                    }, {
-                        onConflict: 'page_id,psid'
-                    });
+            // Wait for all promises to settle (complete or fail)
+            const batchResults = await Promise.allSettled(batchPromises);
 
-                if (upsertError) {
-                    console.error(`🔴 Error upserting contact ${participant.id}:`, upsertError);
-                    failed++;
-                    errors.push(`Contact ${participant.id}: ${upsertError.message}`);
+            // Process results
+            for (const result of batchResults) {
+                if (result.status === 'fulfilled') {
+                    if (result.value.success) {
+                        synced++;
+                    } else {
+                        failed++;
+                        if (result.value.error) {
+                            errors.push(`Contact ${result.value.psid}: ${result.value.error}`);
+                        }
+                    }
                 } else {
-                    synced++;
+                    // Promise itself was rejected
+                    failed++;
+                    const errorMsg = result.reason instanceof Error ? result.reason.message : String(result.reason || 'Unknown error');
+                    errors.push(`Unknown contact: ${errorMsg}`);
                 }
-            } catch (error) {
-                console.error(`🔴 Error processing contact:`, error);
-                failed++;
-                errors.push((error as Error).message);
+            }
+
+            // Add delay between batches to avoid rate limiting
+            if (i + SYNC_BATCH_SIZE < validConversations.length) {
+                await new Promise(resolve => setTimeout(resolve, DELAY_BETWEEN_BATCHES));
+            }
+
+            // Log progress every 100 contacts
+            if ((i + SYNC_BATCH_SIZE) % 100 === 0 || i + SYNC_BATCH_SIZE >= validConversations.length) {
+                console.log(`Progress: ${Math.min(i + SYNC_BATCH_SIZE, validConversations.length)}/${validConversations.length} conversations processed (Synced: ${synced}, Failed: ${failed})`);
             }
         }
 
