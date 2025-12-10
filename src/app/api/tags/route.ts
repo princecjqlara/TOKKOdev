@@ -69,19 +69,25 @@ export async function GET(request: NextRequest) {
 
             // Complex OR condition - get user tags, page tags, and business tags
             // Build OR conditions array, avoiding trailing commas
-            const orConditions: string[] = [
-                `owner_type.eq.user.and.owner_id.eq.${session.user.id}`
-            ];
+            const orConditions: string[] = [];
             
+            // Always add user condition
+            orConditions.push(`owner_type.eq.user.and.owner_id.eq.${session.user.id}`);
+            
+            // Add page conditions if any
             if (pageIds.length > 0) {
                 orConditions.push(`owner_type.eq.page.and.owner_id.in.(${pageIds.join(',')})`);
             }
             
+            // Add business conditions if any
             if (businessIds.length > 0) {
                 orConditions.push(`owner_type.eq.business.and.owner_id.in.(${businessIds.join(',')})`);
             }
             
-            query = query.or(orConditions.join(','));
+            // Join with comma and apply OR filter
+            if (orConditions.length > 0) {
+                query = query.or(orConditions.join(','));
+            }
         }
 
         // Apply pagination

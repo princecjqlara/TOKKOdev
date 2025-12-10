@@ -59,6 +59,12 @@ export async function POST(request: NextRequest) {
             );
         }
 
+        // Log total contacts to send
+        console.log(`📤 Received request to send to ${contactIds.length} contacts`);
+        
+        // Ensure we process ALL contacts, not just first 1000
+        // The batchSize is only for database queries, not for limiting sends
+
         const supabase = getSupabaseAdmin();
 
         // Verify user has access to page
