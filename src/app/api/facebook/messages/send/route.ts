@@ -239,25 +239,43 @@ export async function POST(request: NextRequest) {
 
             const batch = allContacts.slice(i, i + SEND_BATCH_SIZE);
             
-            // Process batch in parallel
+            // Process batch in parallel - use allSettled to continue even if some fail
             const batchPromises = batch.map(async (contact) => {
                 try {
                     await sendMessage(page.fb_page_id, page.access_token, contact.psid, messageText);
-                    results.sent += 1;
-                    return { success: true, contactId: contact.id };
+                    return { success: true as const, contactId: contact.id, error: undefined };
                 } catch (error) {
-                    results.failed += 1;
-                    const errorMessage = (error as Error).message;
-                    results.errors.push({
-                        contactId: contact.id,
-                        error: errorMessage
-                    });
-                    return { success: false, contactId: contact.id, error: errorMessage };
+                    const errorMessage = (error as Error).message || 'Unknown error';
+                    console.warn(`Failed to send message to contact ${contact.id}: ${errorMessage}`);
+                    return { success: false as const, contactId: contact.id, error: errorMessage };
                 }
             });
 
-            // Wait for batch to complete
-            await Promise.all(batchPromises);
+            // Wait for all promises to settle (complete or fail) - this ensures we continue even if some fail
+            const batchResults = await Promise.allSettled(batchPromises);
+            
+            // Process results
+            for (const result of batchResults) {
+                if (result.status === 'fulfilled') {
+                    if (result.value.success) {
+                        results.sent += 1;
+                    } else {
+                        results.failed += 1;
+                        results.errors.push({
+                            contactId: result.value.contactId,
+                            error: result.value.error || 'Unknown error'
+                        });
+                    }
+                } else {
+                    // Promise itself was rejected (shouldn't happen with our try/catch, but handle it)
+                    results.failed += 1;
+                    const errorMsg = result.reason instanceof Error ? result.reason.message : String(result.reason || 'Unknown error');
+                    results.errors.push({
+                        contactId: 'unknown',
+                        error: errorMsg
+                    });
+                }
+            }
 
             // Add delay between batches to respect Facebook rate limits (except for last batch)
             if (i + SEND_BATCH_SIZE < allContacts.length) {

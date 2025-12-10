@@ -111,7 +111,18 @@ export async function POST(
             // Handle Supabase join which may return array or object
             const contactData = recipient.contacts;
             const contact = Array.isArray(contactData) ? contactData[0] : contactData;
-            if (!contact?.psid) continue;
+            if (!contact?.psid) {
+                // Skip contacts without PSID and mark as failed
+                await supabase
+                    .from('campaign_recipients')
+                    .update({
+                        status: 'failed',
+                        error_message: 'Contact missing PSID'
+                    })
+                    .eq('id', recipient.id);
+                failed++;
+                continue;
+            }
 
             try {
                 await sendMessage(
@@ -131,15 +142,20 @@ export async function POST(
 
                 sent++;
             } catch (error) {
+                // Log error but continue to next contact - don't stop the campaign
+                const errorMessage = (error as Error).message;
+                console.warn(`Failed to send message to contact ${contact.psid} in campaign ${campaignId}: ${errorMessage}`);
+                
                 await supabase
                     .from('campaign_recipients')
                     .update({
                         status: 'failed',
-                        error_message: (error as Error).message
+                        error_message: errorMessage
                     })
                     .eq('id', recipient.id);
 
                 failed++;
+                // Continue to next contact - don't throw or return
             }
 
             // Update sent_count periodically (every 10 messages to reduce DB calls)
