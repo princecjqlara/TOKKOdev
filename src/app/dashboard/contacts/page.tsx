@@ -164,7 +164,20 @@ export default function ContactsPage() {
 
         setSyncing(true);
         try {
-            await fetch(`/api/pages/${selectedPageId}/sync`, { method: 'POST' });
+            const res = await fetch(`/api/pages/${selectedPageId}/sync`, { 
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ forceFullSync: false }) // Incremental sync by default
+            });
+            
+            const data = await res.json();
+            if (data.success) {
+                if (data.incremental) {
+                    console.log(`✅ Incremental sync: ${data.synced} new/updated contacts synced`);
+                } else {
+                    console.log(`✅ Full sync: ${data.synced} contacts synced`);
+                }
+            }
             await fetchContacts();
         } catch (error) {
             console.error('Error syncing:', error);

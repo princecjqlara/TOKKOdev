@@ -47,15 +47,28 @@ export async function getFacebookPages(userAccessToken: string): Promise<Faceboo
     }
 }
 
-// Get ALL conversations for a page (handles pagination)
+// Get conversations for a page (handles pagination)
+// If sinceTimestamp is provided, only fetches conversations updated after that time
 export async function getPageConversations(
     pageId: string,
     pageAccessToken: string,
     limit: number = 100,
-    fetchAll: boolean = true // Set to true to fetch ALL conversations
+    fetchAll: boolean = true, // Set to true to fetch ALL conversations
+    sinceTimestamp?: string // ISO timestamp - only fetch conversations updated after this
 ): Promise<FacebookConversation[]> {
     const allConversations: FacebookConversation[] = [];
-    let nextUrl: string | null = `${FACEBOOK_GRAPH_URL}/${pageId}/conversations?fields=id,participants,updated_time&limit=${limit}&access_token=${pageAccessToken}`;
+    
+    // Build initial URL with optional since parameter
+    let baseUrl = `${FACEBOOK_GRAPH_URL}/${pageId}/conversations?fields=id,participants,updated_time&limit=${limit}&access_token=${pageAccessToken}`;
+    
+    // Add since parameter if provided (Facebook uses Unix timestamp)
+    if (sinceTimestamp) {
+        const sinceDate = new Date(sinceTimestamp);
+        const unixTimestamp = Math.floor(sinceDate.getTime() / 1000);
+        baseUrl += `&since=${unixTimestamp}`;
+    }
+    
+    let nextUrl: string | null = baseUrl;
 
     while (nextUrl) {
         const res: Response = await fetch(nextUrl);
@@ -66,7 +79,25 @@ export async function getPageConversations(
         }
 
         const responseData: { data?: FacebookConversation[]; paging?: { next?: string } } = await res.json();
-        allConversations.push(...(responseData.data || []));
+        const conversations = responseData.data || [];
+        
+        // If using since parameter, filter out conversations older than sinceTimestamp
+        if (sinceTimestamp && conversations.length > 0) {
+            const sinceDate = new Date(sinceTimestamp);
+            const filtered = conversations.filter(conv => {
+                if (!conv.updated_time) return false;
+                const convDate = new Date(conv.updated_time);
+                return convDate >= sinceDate;
+            });
+            allConversations.push(...filtered);
+            
+            // If we got filtered results, we might have hit old conversations - stop pagination
+            if (filtered.length < conversations.length) {
+                break;
+            }
+        } else {
+            allConversations.push(...conversations);
+        }
 
         // Check if we should continue pagination
         if (fetchAll && responseData.paging?.next) {

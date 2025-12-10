@@ -84,10 +84,14 @@ export default function DashboardPage() {
         setSyncing(true);
 
         try {
+            // Check if user wants full sync (hold Shift while clicking)
+            const forceFullSync = false; // Can be changed to detect Shift key if needed
+            
             const res = await fetch(`/api/pages/${selectedPageId}/sync`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                credentials: 'include'
+                credentials: 'include',
+                body: JSON.stringify({ forceFullSync })
             });
 
             const resClone = res.clone();
@@ -109,7 +113,8 @@ export default function DashboardPage() {
                 if (data.partial) {
                     alert(`Partial sync complete!\n\nSynced: ${data.synced}\nFailed: ${data.failed}\nProcessed: ${data.processed} of ${data.total}\n\n${data.message}\n\nClick "Sync Now" again to continue syncing remaining contacts.`);
                 } else {
-                    alert(`Sync complete!\n\nSynced: ${data.synced}\nFailed: ${data.failed}\nTotal: ${data.total}`);
+                    const syncType = data.incremental ? 'Incremental' : 'Full';
+                    alert(`${syncType} sync complete!\n\nSynced: ${data.synced}\nFailed: ${data.failed}\nTotal: ${data.total}\n\n${data.incremental ? 'Only new/updated contacts were synced. Use full sync to sync all contacts.' : 'All contacts have been synced.'}`);
                 }
                 await fetchStats(selectedPageId);
             } else {

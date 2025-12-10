@@ -34,6 +34,10 @@ export async function POST(
         const { pageId } = await params;
         const supabase = getSupabaseAdmin();
 
+        // Check if user wants to force a full sync
+        const body = await request.json().catch(() => ({}));
+        const forceFullSync = (body as { forceFullSync?: boolean })?.forceFullSync === true;
+
         // Verify user has access to page
         const { data: userPage } = await supabase
             .from('user_pages')
@@ -49,10 +53,10 @@ export async function POST(
             );
         }
 
-        // Get page details
+        // Get page details including last_synced_at
         const { data: page } = await supabase
             .from('pages')
-            .select('fb_page_id, access_token')
+            .select('fb_page_id, access_token, last_synced_at')
             .eq('id', pageId)
             .single();
 
@@ -63,16 +67,28 @@ export async function POST(
             );
         }
 
-        console.log(`🔵 Starting sync for page: ${page.fb_page_id} (${pageId})`);
+        // Determine if this is a full sync or incremental sync
+        const isIncremental = !forceFullSync && !!page.last_synced_at;
+        const syncStartTime = new Date().toISOString();
+        
+        console.log(`🔵 Starting ${isIncremental ? 'incremental' : 'full'} sync for page: ${page.fb_page_id} (${pageId})`);
+        if (isIncremental) {
+            console.log(`🔵 Last synced: ${page.last_synced_at}, fetching only new/updated conversations`);
+        } else if (forceFullSync) {
+            console.log(`🔵 Force full sync requested - syncing all conversations`);
+        }
 
-        // Fetch conversations from Facebook
+        // Fetch conversations from Facebook (only new ones if incremental)
         let conversations;
         try {
             conversations = await getPageConversations(
                 page.fb_page_id,
-                page.access_token
+                page.access_token,
+                100,
+                true,
+                isIncremental ? page.last_synced_at : undefined
             );
-            console.log(`🔵 Fetched ${conversations.length} conversations from Facebook`);
+            console.log(`🔵 Fetched ${conversations.length} ${isIncremental ? 'new/updated' : ''} conversations from Facebook`);
         } catch (error) {
             console.error('🔴 Error fetching conversations from Facebook:', error);
             return NextResponse.json(
@@ -214,11 +230,22 @@ export async function POST(
 
         console.log(`✅ Sync complete: ${synced} synced, ${failed} failed`);
 
+        // Update last_synced_at timestamp
+        await supabase
+            .from('pages')
+            .update({
+                last_synced_at: syncStartTime,
+                updated_at: new Date().toISOString()
+            })
+            .eq('id', pageId);
+
         return NextResponse.json({
             success: true,
             synced,
             failed,
             total: conversations.length,
+            incremental: isIncremental,
+            last_synced_at: syncStartTime,
             errors: errors.slice(0, 10) // Return first 10 errors
         });
     } catch (error) {
