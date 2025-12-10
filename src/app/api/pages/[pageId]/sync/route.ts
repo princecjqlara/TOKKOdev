@@ -166,9 +166,17 @@ export async function POST(
                         profilePic = profile.profile_pic;
                     } catch (profileError) {
                         // Profile fetch failed or timed out, use basic info - continue anyway
-                        // Don't log timeout errors to reduce noise
-                        if (!(profileError as Error).message.includes('timeout')) {
-                            console.warn(`⚠️ Failed to fetch profile for ${participant.id}:`, (profileError as Error).message);
+                        // These are common for users with privacy settings or invalid PSIDs
+                        // Only log if it's not a timeout or permission issue (reduce noise)
+                        const errorMsg = (profileError as Error).message || String(profileError);
+                        const isExpectedError = 
+                            errorMsg.includes('timeout') || 
+                            errorMsg.includes('does not exist') || 
+                            errorMsg.includes('missing permissions') ||
+                            errorMsg.includes('does not support this operation');
+                        
+                        if (!isExpectedError) {
+                            console.warn(`⚠️ Failed to fetch profile for ${participant.id}:`, errorMsg);
                         }
                     }
 
