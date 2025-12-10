@@ -102,6 +102,63 @@ export async function POST(
             );
         }
 
+        // For incremental sync, also check for deleted contacts by sampling recent conversations
+        // This ensures deleted contacts are re-added if they still exist in Facebook
+        if (isIncremental) {
+            try {
+                // Fetch a sample of the most recent conversations (first page, ~100) to check for missing contacts
+                // This is a lightweight check that doesn't require fetching all conversations
+                const sampleConversations = await getPageConversations(
+                    page.fb_page_id,
+                    page.access_token,
+                    100,
+                    false, // Just get first page (most recent)
+                    undefined // No since filter - get most recent conversations
+                );
+                
+                // Get all PSIDs from sample conversations
+                const samplePsids = new Set<string>();
+                sampleConversations.forEach(conv => {
+                    const participant = conv.participants?.data?.find(p => p.id !== page.fb_page_id);
+                    if (participant?.id) {
+                        samplePsids.add(participant.id);
+                    }
+                });
+
+                // Check which PSIDs are missing from database
+                if (samplePsids.size > 0) {
+                    const { data: existingContacts } = await supabase
+                        .from('contacts')
+                        .select('psid')
+                        .eq('page_id', pageId)
+                        .in('psid', Array.from(samplePsids));
+
+                    const existingPsids = new Set((existingContacts || []).map(c => c.psid));
+                    const missingPsids = Array.from(samplePsids).filter(psid => !existingPsids.has(psid));
+
+                    if (missingPsids.length > 0) {
+                        console.log(`🔵 Found ${missingPsids.length} deleted contacts to restore from recent conversations`);
+                        
+                        // Add missing conversations to the sync list
+                        const missingConversations = sampleConversations.filter(conv => {
+                            const participant = conv.participants?.data?.find(p => p.id !== page.fb_page_id);
+                            return participant?.id && missingPsids.includes(participant.id);
+                        });
+                        
+                        // Merge with existing conversations, avoiding duplicates by conversation ID
+                        const existingConvIds = new Set(conversations.map(c => c.id));
+                        const newConversations = missingConversations.filter(c => !existingConvIds.has(c.id));
+                        conversations.push(...newConversations);
+                        
+                        console.log(`🔵 Added ${newConversations.length} missing contacts to sync queue`);
+                    }
+                }
+            } catch (error) {
+                // Don't fail the sync if checking for deleted contacts fails
+                console.warn('⚠️ Error checking for deleted contacts (non-critical):', (error as Error).message);
+            }
+        }
+
         let synced = 0;
         let failed = 0;
         const errors: string[] = [];
