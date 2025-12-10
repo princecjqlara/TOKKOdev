@@ -96,7 +96,12 @@ export async function POST(request: NextRequest) {
         let allContacts: { id: string; psid: string }[] = [];
         const batchSize = 1000; // Supabase has limits on .in() array size
 
-        console.log(`Processing ${contactIds.length} contact IDs for page ${pageId}`);
+        console.log(`📤 Processing ${contactIds.length} contact IDs for page ${pageId}`);
+        console.log(`📤 Sample contact IDs (first 5):`, contactIds.slice(0, 5));
+
+        let totalRequested = contactIds.length;
+        let totalFound = 0;
+        let totalFiltered = 0;
 
         for (let i = 0; i < contactIds.length; i += batchSize) {
             const batchIds = contactIds.slice(i, i + batchSize);
@@ -106,14 +111,17 @@ export async function POST(request: NextRequest) {
                 .in('id', batchIds);
 
             if (batchError) {
-                console.error(`Error fetching contacts batch ${i / batchSize + 1}:`, batchError);
+                console.error(`❌ Error fetching contacts batch ${i / batchSize + 1}:`, batchError);
                 continue;
             }
 
             if (!batchContacts?.length) {
-                console.warn(`Batch ${i / batchSize + 1}: no contacts found`);
+                console.warn(`⚠️ Batch ${i / batchSize + 1}: no contacts found for ${batchIds.length} requested IDs`);
+                console.warn(`⚠️ Sample IDs from this batch:`, batchIds.slice(0, 5));
                 continue;
             }
+
+            totalFound += batchContacts.length;
 
             const validContacts = batchContacts.filter((contact): contact is ContactRecord => {
                 const correctPage = contact.page_id === pageId;
@@ -121,18 +129,28 @@ export async function POST(request: NextRequest) {
                 return correctPage && validPsid;
             });
 
-            if (validContacts.length !== batchContacts.length) {
+            const filteredCount = batchContacts.length - validContacts.length;
+            totalFiltered += filteredCount;
+
+            if (filteredCount > 0) {
                 const wrongPage = batchContacts.filter(c => c.page_id !== pageId).length;
                 const missingPsid = batchContacts.filter(c => typeof c.psid !== 'string' || c.psid.trim() === '').length;
                 console.warn(
-                    `Batch ${i / batchSize + 1}: filtered ${batchContacts.length - validContacts.length} contacts (wrong page: ${wrongPage}, missing psid: ${missingPsid})`
+                    `⚠️ Batch ${i / batchSize + 1}: filtered ${filteredCount} contacts (wrong page: ${wrongPage}, missing psid: ${missingPsid})`
                 );
+                if (wrongPage > 0) {
+                    console.warn(`⚠️ Example contacts with wrong page_id:`, 
+                        batchContacts.filter(c => c.page_id !== pageId).slice(0, 3).map(c => ({ id: c.id, page_id: c.page_id, expected: pageId }))
+                    );
+                }
             }
 
             if (validContacts.length) {
                 allContacts = allContacts.concat(validContacts.map(c => ({ id: c.id, psid: c.psid.trim() })));
             }
         }
+
+        console.log(`📊 Contact lookup summary: ${totalRequested} requested, ${totalFound} found in DB, ${totalFiltered} filtered out, ${allContacts.length} valid for sending`);
 
         if (!allContacts.length) {
             // Fallback: fetch all contacts for the page and use those with valid psid
@@ -206,21 +224,46 @@ export async function POST(request: NextRequest) {
             }
         }
 
-        console.log(`Found ${allContacts.length} valid contacts out of ${contactIds.length} requested`);
-        
         if (allContacts.length === 0) {
+            // Try to find out why - check if contacts exist at all
+            const { data: sampleContacts } = await supabase
+                .from('contacts')
+                .select('id, page_id, psid')
+                .in('id', contactIds.slice(0, 10))
+                .limit(10);
+
+            const errorDetails: any = {
+                requested: contactIds.length,
+                found: 0,
+                totalFound: totalFound,
+                totalFiltered: totalFiltered
+            };
+
+            if (sampleContacts?.length) {
+                const wrongPage = sampleContacts.filter(c => c.page_id !== pageId).length;
+                const missingPsid = sampleContacts.filter(c => !c.psid || typeof c.psid !== 'string' || c.psid.trim() === '').length;
+                errorDetails.sample = {
+                    found: sampleContacts.length,
+                    wrongPage,
+                    missingPsid,
+                    correct: sampleContacts.filter(c => c.page_id === pageId && c.psid && typeof c.psid === 'string' && c.psid.trim() !== '').length
+                };
+                errorDetails.sampleContacts = sampleContacts.slice(0, 3);
+            }
+
+            console.error(`❌ No valid contacts found. Details:`, errorDetails);
+
             return NextResponse.json(
                 {
                     error: 'Not Found',
-                    message: `No valid contacts found for the provided IDs. Please sync contacts first.`,
-                    debug: {
-                        requested: contactIds.length,
-                        found: 0
-                    }
+                    message: `No valid contacts found. ${totalFound > 0 ? `${totalFiltered} contacts were filtered out (wrong page or missing PSID).` : 'Contacts may have been deleted or do not exist.'} Please sync contacts first or check if contacts still exist.`,
+                    debug: errorDetails
                 },
                 { status: 404 }
             );
         }
+
+        console.log(`✅ Found ${allContacts.length} valid contacts out of ${contactIds.length} requested (${totalFound} found in DB, ${totalFiltered} filtered)`);
 
         const results = {
             sent: 0,

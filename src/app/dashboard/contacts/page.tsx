@@ -415,9 +415,27 @@ export default function ContactsPage() {
                 setLastSendResults({ sent: data.results.sent, failed: data.results.failed });
 
                 console.log(`Resend results: ${data.results.sent} sent, ${data.results.failed} failed out of ${failedContactIds.length} attempted`);
+                
+                if (data.debug) {
+                    console.log('Debug info:', data.debug);
+                }
 
                 if (data.results.failed > 0) {
-                    alert(`Resend complete! Success: ${data.results.sent}, Still failed: ${data.results.failed}\n\n${data.results.sent === 0 ? 'All messages failed. Please check the console for error details.' : 'You can try resending to the failed contacts again.'}`);
+                    let message = `Resend complete! Success: ${data.results.sent}, Still failed: ${data.results.failed}`;
+                    if (data.results.sent === 0 && data.debug) {
+                        if (data.debug.totalFound === 0) {
+                            message += `\n\n⚠️ None of the failed contact IDs were found in the database. They may have been deleted. Please sync contacts again.`;
+                        } else if (data.debug.totalFiltered > 0) {
+                            message += `\n\n⚠️ ${data.debug.totalFiltered} contacts were filtered out (wrong page or missing PSID). Please sync contacts again.`;
+                        } else {
+                            message += `\n\n⚠️ All messages failed. Please check the console for error details.`;
+                        }
+                    } else if (data.results.sent === 0) {
+                        message += `\n\n⚠️ All messages failed. Please check the console for error details.`;
+                    } else {
+                        message += `\n\nYou can try resending to the failed contacts again.`;
+                    }
+                    alert(message);
                 } else {
                     alert(`Resend complete! All ${data.results.sent} messages sent successfully!`);
                     setFailedContactIds([]);
@@ -427,7 +445,15 @@ export default function ContactsPage() {
                 }
                 await fetchContacts();
             } else {
-                throw new Error(data.message || 'Failed to resend messages');
+                // Handle error response with debug info
+                let errorMsg = data.message || 'Failed to resend messages';
+                if (data.debug) {
+                    console.error('Resend error debug:', data.debug);
+                    if (data.debug.totalFound === 0) {
+                        errorMsg += '\n\nNone of the contact IDs were found. They may have been deleted. Please sync contacts again.';
+                    }
+                }
+                throw new Error(errorMsg);
             }
         } catch (error) {
             console.error('Error resending messages:', error);
