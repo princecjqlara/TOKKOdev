@@ -259,9 +259,13 @@ export default function ContactsPage() {
 
     const getSelectedContactIds = async (): Promise<string[]> => {
         if (selectAllMode) {
-            return await fetchAllContactIds();
+            const allIds = await fetchAllContactIds();
+            console.log(`📤 Select All Mode: Fetched ${allIds.length} contact IDs`);
+            return allIds;
         }
-        return Array.from(selectedIds);
+        const selected = Array.from(selectedIds);
+        console.log(`📤 Individual Selection: ${selected.length} contact IDs selected`);
+        return selected;
     };
 
     const handleBulkAddTags = async () => {
