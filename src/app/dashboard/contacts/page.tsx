@@ -408,14 +408,17 @@ export default function ContactsPage() {
 
             const data = await response.json();
             if (data.success) {
+                // Only update failedContactIds with contacts that actually failed this time
                 const newFailedIds = data.results.errors?.map((e: { contactId: string }) => e.contactId) || [];
                 setFailedContactIds(newFailedIds);
                 setLastSendResults({ sent: data.results.sent, failed: data.results.failed });
 
+                console.log(`Resend results: ${data.results.sent} sent, ${data.results.failed} failed out of ${failedContactIds.length} attempted`);
+
                 if (data.results.failed > 0) {
-                    alert(`Resend complete! Success: ${data.results.sent}, Still failed: ${data.results.failed}`);
+                    alert(`Resend complete! Success: ${data.results.sent}, Still failed: ${data.results.failed}\n\n${data.results.sent === 0 ? 'All messages failed. Please check the console for error details.' : 'You can try resending to the failed contacts again.'}`);
                 } else {
-                    alert(`Resend complete! All messages sent successfully!`);
+                    alert(`Resend complete! All ${data.results.sent} messages sent successfully!`);
                     setFailedContactIds([]);
                     setLastSendResults(null);
                     setShowMessageModal(false);

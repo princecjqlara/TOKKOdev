@@ -207,6 +207,20 @@ export async function POST(request: NextRequest) {
         }
 
         console.log(`Found ${allContacts.length} valid contacts out of ${contactIds.length} requested`);
+        
+        if (allContacts.length === 0) {
+            return NextResponse.json(
+                {
+                    error: 'Not Found',
+                    message: `No valid contacts found for the provided IDs. Please sync contacts first.`,
+                    debug: {
+                        requested: contactIds.length,
+                        found: 0
+                    }
+                },
+                { status: 404 }
+            );
+        }
 
         const results = {
             sent: 0,
@@ -242,11 +256,12 @@ export async function POST(request: NextRequest) {
             // Process batch in parallel - use allSettled to continue even if some fail
             const batchPromises = batch.map(async (contact) => {
                 try {
-                    await sendMessage(page.fb_page_id, page.access_token, contact.psid, messageText);
+                    const result = await sendMessage(page.fb_page_id, page.access_token, contact.psid, messageText);
+                    console.log(`✅ Successfully sent message to contact ${contact.id} (PSID: ${contact.psid})`);
                     return { success: true as const, contactId: contact.id, error: undefined };
                 } catch (error) {
                     const errorMessage = (error as Error).message || 'Unknown error';
-                    console.warn(`Failed to send message to contact ${contact.id}: ${errorMessage}`);
+                    console.warn(`❌ Failed to send message to contact ${contact.id} (PSID: ${contact.psid}): ${errorMessage}`);
                     return { success: false as const, contactId: contact.id, error: errorMessage };
                 }
             });
