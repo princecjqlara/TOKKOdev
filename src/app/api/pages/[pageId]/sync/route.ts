@@ -86,9 +86,10 @@ export async function POST(
         const errors: string[] = [];
 
         // Process contacts in parallel batches to avoid timeout
-        const SYNC_BATCH_SIZE = 20; // Process 20 contacts in parallel
-        const DELAY_BETWEEN_BATCHES = 50; // 50ms delay between batches
+        const SYNC_BATCH_SIZE = 10; // Process 10 contacts in parallel (reduced for faster processing)
+        const DELAY_BETWEEN_BATCHES = 30; // 30ms delay between batches
         const MAX_PROCESSING_TIME = 240000; // 4 minutes (leave 1 minute buffer before 5 min timeout)
+        const PROFILE_FETCH_TIMEOUT = 3000; // 3 seconds max per profile fetch
         const startTime = Date.now();
 
         // Filter valid conversations first
@@ -132,14 +133,22 @@ export async function POST(
                     let profilePic: string | undefined;
                     let name = participant.name;
 
-                    // Try to fetch profile, but don't let it block the sync
+                    // Try to fetch profile with timeout, but don't let it block the sync
                     try {
-                        const profile = await getUserProfile(participant.id, page.access_token);
+                        const profilePromise = getUserProfile(participant.id, page.access_token);
+                        const timeoutPromise = new Promise((_, reject) => 
+                            setTimeout(() => reject(new Error('Profile fetch timeout')), PROFILE_FETCH_TIMEOUT)
+                        );
+                        
+                        const profile = await Promise.race([profilePromise, timeoutPromise]) as { name: string; profile_pic?: string };
                         name = profile.name || name;
                         profilePic = profile.profile_pic;
                     } catch (profileError) {
-                        // Profile fetch failed, use basic info - continue anyway
-                        console.warn(`⚠️ Failed to fetch profile for ${participant.id}:`, (profileError as Error).message);
+                        // Profile fetch failed or timed out, use basic info - continue anyway
+                        // Don't log timeout errors to reduce noise
+                        if (!(profileError as Error).message.includes('timeout')) {
+                            console.warn(`⚠️ Failed to fetch profile for ${participant.id}:`, (profileError as Error).message);
+                        }
                     }
 
                     const { error: upsertError } = await supabase
@@ -194,9 +203,12 @@ export async function POST(
                 await new Promise(resolve => setTimeout(resolve, DELAY_BETWEEN_BATCHES));
             }
 
-            // Log progress every 100 contacts
-            if ((i + SYNC_BATCH_SIZE) % 100 === 0 || i + SYNC_BATCH_SIZE >= validConversations.length) {
-                console.log(`Progress: ${Math.min(i + SYNC_BATCH_SIZE, validConversations.length)}/${validConversations.length} conversations processed (Synced: ${synced}, Failed: ${failed})`);
+            // Log progress every 50 contacts
+            if ((i + SYNC_BATCH_SIZE) % 50 === 0 || i + SYNC_BATCH_SIZE >= validConversations.length) {
+                const elapsed = Date.now() - startTime;
+                const remaining = validConversations.length - (i + SYNC_BATCH_SIZE);
+                const estimatedTimeRemaining = remaining > 0 ? Math.round((elapsed / (i + SYNC_BATCH_SIZE)) * remaining / 1000) : 0;
+                console.log(`Progress: ${Math.min(i + SYNC_BATCH_SIZE, validConversations.length)}/${validConversations.length} conversations processed (Synced: ${synced}, Failed: ${failed}, Elapsed: ${Math.round(elapsed/1000)}s, Est. remaining: ${estimatedTimeRemaining}s)`);
             }
         }
 

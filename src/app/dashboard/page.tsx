@@ -106,7 +106,11 @@ export default function DashboardPage() {
             }
 
             if (data?.success) {
-                alert(`Sync complete!\n\nSynced: ${data.synced}\nFailed: ${data.failed}\nTotal: ${data.total}`);
+                if (data.partial) {
+                    alert(`Partial sync complete!\n\nSynced: ${data.synced}\nFailed: ${data.failed}\nProcessed: ${data.processed} of ${data.total}\n\n${data.message}\n\nClick "Sync Now" again to continue syncing remaining contacts.`);
+                } else {
+                    alert(`Sync complete!\n\nSynced: ${data.synced}\nFailed: ${data.failed}\nTotal: ${data.total}`);
+                }
                 await fetchStats(selectedPageId);
             } else {
                 throw new Error(data?.message || rawBody || 'Sync failed');
