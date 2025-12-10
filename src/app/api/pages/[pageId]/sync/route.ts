@@ -34,9 +34,14 @@ export async function POST(
         const { pageId } = await params;
         const supabase = getSupabaseAdmin();
 
-        // Check if user wants to force a full sync
-        const body = await request.json().catch(() => ({}));
-        const forceFullSync = (body as { forceFullSync?: boolean })?.forceFullSync === true;
+        // Check if user wants to force a full sync (optional body parameter)
+        let forceFullSync = false;
+        try {
+            const body = await request.json();
+            forceFullSync = (body as { forceFullSync?: boolean })?.forceFullSync === true;
+        } catch {
+            // No body provided, use default (incremental sync)
+        }
 
         // Verify user has access to page
         const { data: userPage } = await supabase
