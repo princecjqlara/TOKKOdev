@@ -142,3 +142,4 @@ FACEBOOK_APP_SECRET=your-app-secret-here
 - **App Review**: Some permissions require Facebook App Review before they work for all users
 
 
+

@@ -55,3 +55,4 @@ Refresh your app and try the Facebook sign-in button again.
 3. Verify Facebook app is in Development Mode
 4. Make sure you waited 2-3 minutes after saving
 
+
