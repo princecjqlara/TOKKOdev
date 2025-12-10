@@ -40,6 +40,7 @@
         name TEXT NOT NULL,
         access_token TEXT NOT NULL,
         business_id UUID REFERENCES businesses(id) ON DELETE SET NULL,
+        last_synced_at TIMESTAMPTZ, -- Timestamp of last successful sync (for incremental syncing)
         created_at TIMESTAMPTZ DEFAULT NOW(),
         updated_at TIMESTAMPTZ DEFAULT NOW()
     );
