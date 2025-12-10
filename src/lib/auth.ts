@@ -37,12 +37,17 @@ export const authOptions: NextAuthOptions = {
                 try {
                     const supabase = getSupabaseAdmin();
 
+                    // Handle null email - use Facebook ID as fallback for email
+                    // Some Facebook users don't have emails, so we use a generated email format
+                    const userEmail = user.email || `fb_${account.providerAccountId}@facebook.local`;
+                    const userName = user.name || `Facebook User ${account.providerAccountId}`;
+
                     const { data: upsertedUser, error } = await supabase
                         .from('users')
                         .upsert(
                             {
-                                email: user.email,
-                                name: user.name,
+                                email: userEmail,
+                                name: userName,
                                 image: user.image,
                                 facebook_id: account.providerAccountId,
                                 updated_at: new Date().toISOString()

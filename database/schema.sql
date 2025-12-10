@@ -7,7 +7,7 @@
     -- Users table
     CREATE TABLE IF NOT EXISTS users (
         id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-        email TEXT UNIQUE NOT NULL,
+        email TEXT UNIQUE, -- Can be NULL for Facebook users without emails
         name TEXT,
         image TEXT,
         facebook_id TEXT,

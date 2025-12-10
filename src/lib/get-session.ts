@@ -36,28 +36,54 @@ export async function getSessionFromRequest(request: NextRequest) {
 
         // If user.id is not set, try to get it from database or create user
         let userId = session.user?.id;
-        if (!userId && session.user?.email) {
+        if (!userId) {
             const supabase = getSupabaseAdmin();
             
-            // Try to get user from database
-            let { data: user, error: fetchError } = await supabase
-                .from('users')
-                .select('id')
-                .eq('email', session.user.email)
-                .single();
+            // Try to get user from database by email or Facebook ID
+            let user = null;
+            let fetchError = null;
+
+            if (session.user?.email) {
+                const { data, error } = await supabase
+                    .from('users')
+                    .select('id')
+                    .eq('email', session.user.email)
+                    .single();
+                user = data;
+                fetchError = error;
+            }
+
+            // If not found by email, try Facebook ID
+            if (!user && (session as any).user?.facebookId) {
+                const { data, error } = await supabase
+                    .from('users')
+                    .select('id')
+                    .eq('facebook_id', (session as any).user.facebookId)
+                    .single();
+                if (data) {
+                    user = data;
+                    fetchError = null;
+                } else if (!fetchError) {
+                    fetchError = error;
+                }
+            }
             
             // If user doesn't exist, create them
             if (!user && fetchError?.code === 'PGRST116') {
                 if (process.env.NODE_ENV !== 'production') {
-                    console.log('🔵 User not found in database, creating user:', session.user.email);
+                    console.log('🔵 User not found in database, creating user');
                 }
+                
+                // Handle null email - use Facebook ID as fallback
+                const userEmail = session.user?.email || `fb_${(session as any).user?.facebookId || 'unknown'}@facebook.local`;
+                const userName = session.user?.name || `Facebook User ${(session as any).user?.facebookId || 'Unknown'}`;
                 
                 const { data: newUser, error: createError } = await supabase
                     .from('users')
                     .insert({
-                        email: session.user.email,
-                        name: session.user.name,
-                        image: session.user.image,
+                        email: userEmail,
+                        name: userName,
+                        image: session.user?.image,
                         facebook_id: (session as any).user?.facebookId || null,
                         created_at: new Date().toISOString(),
                         updated_at: new Date().toISOString()
