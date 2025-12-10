@@ -51,6 +51,8 @@ export default function ContactsPage() {
     const [selectedTagIds, setSelectedTagIds] = useState<Set<string>>(new Set());
     const [messageText, setMessageText] = useState('');
     const [actionLoading, setActionLoading] = useState(false);
+    const [failedContactIds, setFailedContactIds] = useState<string[]>([]);
+    const [lastSendResults, setLastSendResults] = useState<{ sent: number; failed: number } | null>(null);
 
     useEffect(() => {
         fetchPages();
@@ -333,14 +335,26 @@ export default function ContactsPage() {
 
             const data = await response.json();
             if (data.success) {
+                // Store failed contact IDs for resend option
+                const failedIds = data.results.errors?.map((e: { contactId: string }) => e.contactId) || [];
+                setFailedContactIds(failedIds);
+                setLastSendResults({ sent: data.results.sent, failed: data.results.failed });
+
                 if (data.partial) {
                     alert(`Partial completion: ${data.results.sent} sent, ${data.results.failed} failed out of ${data.results.total} total.\n\n${data.message}\n\nPlease send the remaining contacts in another batch.`);
                 } else {
-                    alert(`Messages sent! Success: ${data.results.sent}, Failed: ${data.results.failed}`);
+                    if (data.results.failed > 0) {
+                        alert(`Messages sent! Success: ${data.results.sent}, Failed: ${data.results.failed}\n\nYou can resend to failed contacts using the "Resend to Failed" button.`);
+                    } else {
+                        alert(`Messages sent! Success: ${data.results.sent}, Failed: ${data.results.failed}`);
+                        // Clear failed contacts if all succeeded
+                        setFailedContactIds([]);
+                        setLastSendResults(null);
+                        setShowMessageModal(false);
+                        setMessageText('');
+                        clearSelection();
+                    }
                 }
-                setShowMessageModal(false);
-                setMessageText('');
-                clearSelection();
                 await fetchContacts();
             } else {
                 throw new Error(data.message || 'Failed to send messages');
@@ -348,6 +362,59 @@ export default function ContactsPage() {
         } catch (error) {
             console.error('Error sending messages:', error);
             alert(`Error sending messages: ${(error as Error).message}`);
+        } finally {
+            setActionLoading(false);
+        }
+    };
+
+    const handleResendToFailed = async () => {
+        if (failedContactIds.length === 0 || !messageText.trim() || !selectedPageId) return;
+
+        setActionLoading(true);
+        try {
+            const response = await fetch('/api/facebook/messages/send', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    pageId: selectedPageId,
+                    contactIds: failedContactIds,
+                    messageText: messageText.trim()
+                })
+            });
+
+            if (!response.ok) {
+                const contentType = response.headers.get('content-type');
+                if (contentType && contentType.includes('application/json')) {
+                    const errorData = await response.json();
+                    throw new Error(errorData.message || `HTTP ${response.status}: ${response.statusText}`);
+                } else {
+                    const text = await response.text();
+                    throw new Error(`Server error (${response.status}): ${response.statusText}. Please check the console for details.`);
+                }
+            }
+
+            const data = await response.json();
+            if (data.success) {
+                const newFailedIds = data.results.errors?.map((e: { contactId: string }) => e.contactId) || [];
+                setFailedContactIds(newFailedIds);
+                setLastSendResults({ sent: data.results.sent, failed: data.results.failed });
+
+                if (data.results.failed > 0) {
+                    alert(`Resend complete! Success: ${data.results.sent}, Still failed: ${data.results.failed}`);
+                } else {
+                    alert(`Resend complete! All messages sent successfully!`);
+                    setFailedContactIds([]);
+                    setLastSendResults(null);
+                    setShowMessageModal(false);
+                    setMessageText('');
+                }
+                await fetchContacts();
+            } else {
+                throw new Error(data.message || 'Failed to resend messages');
+            }
+        } catch (error) {
+            console.error('Error resending messages:', error);
+            alert(`Error resending messages: ${(error as Error).message}`);
         } finally {
             setActionLoading(false);
         }
@@ -775,13 +842,31 @@ export default function ContactsPage() {
             {/* Message Modal */}
             <Modal
                 isOpen={showMessageModal}
-                onClose={() => setShowMessageModal(false)}
+                onClose={() => {
+                    setShowMessageModal(false);
+                    // Clear failed contacts when closing modal (unless we just sent)
+                    if (!actionLoading) {
+                        setFailedContactIds([]);
+                        setLastSendResults(null);
+                    }
+                }}
                 title="Send Message"
             >
                 <div className="space-y-4">
-                    <p className="font-mono text-sm text-gray-500">
-                        Sending to <span className="font-bold text-black">{getSelectionCount()}</span> recipients.
-                    </p>
+                    {failedContactIds.length > 0 ? (
+                        <div className="bg-yellow-50 border-2 border-yellow-400 p-3 rounded">
+                            <p className="font-mono text-sm text-yellow-800 mb-2">
+                                <span className="font-bold">Previous send results:</span> {lastSendResults?.sent} sent, {lastSendResults?.failed} failed
+                            </p>
+                            <p className="font-mono text-xs text-yellow-700">
+                                {failedContactIds.length} contact(s) failed. You can resend to them below.
+                            </p>
+                        </div>
+                    ) : (
+                        <p className="font-mono text-sm text-gray-500">
+                            Sending to <span className="font-bold text-black">{getSelectionCount()}</span> recipients.
+                        </p>
+                    )}
                     <textarea
                         value={messageText}
                         onChange={(e) => setMessageText(e.target.value)}
@@ -791,17 +876,31 @@ export default function ContactsPage() {
                     />
                     <div className="flex justify-end gap-3 pt-4 border-t border-black">
                         <button
-                            onClick={() => setShowMessageModal(false)}
+                            onClick={() => {
+                                setShowMessageModal(false);
+                                setFailedContactIds([]);
+                                setLastSendResults(null);
+                            }}
                             className="btn-wireframe bg-white"
+                            disabled={actionLoading}
                         >
-                            Cancel
+                            {failedContactIds.length > 0 ? 'Close' : 'Cancel'}
                         </button>
+                        {failedContactIds.length > 0 && (
+                            <button
+                                onClick={handleResendToFailed}
+                                disabled={!messageText.trim() || actionLoading}
+                                className="btn-wireframe bg-yellow-600 text-white hover:bg-yellow-700"
+                            >
+                                {actionLoading ? 'Resending...' : `Resend to ${failedContactIds.length} Failed`}
+                            </button>
+                        )}
                         <button
                             onClick={handleBulkMessage}
                             disabled={!messageText.trim() || actionLoading}
                             className="btn-wireframe bg-black text-white hover:bg-gray-800"
                         >
-                            {actionLoading ? 'Sending...' : 'Send Now'}
+                            {actionLoading ? 'Sending...' : failedContactIds.length > 0 ? 'Send to New Selection' : 'Send Now'}
                         </button>
                     </div>
                 </div>
