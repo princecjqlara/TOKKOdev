@@ -96,8 +96,22 @@ export async function POST(
             console.log(`🔵 Fetched ${conversations.length} ${isIncremental ? 'new/updated' : ''} conversations from Facebook`);
         } catch (error) {
             console.error('🔴 Error fetching conversations from Facebook:', error);
+            const errorMessage = (error as Error).message || String(error);
+            
+            // Check if it's a permissions error
+            if (errorMessage.includes('permission') || errorMessage.includes('must be granted')) {
+                return NextResponse.json(
+                    { 
+                        error: 'Permission Error', 
+                        message: 'The page access token is missing required permissions. Please disconnect and reconnect this page to refresh permissions.',
+                        requiresReconnect: true
+                    },
+                    { status: 403 }
+                );
+            }
+            
             return NextResponse.json(
-                { error: 'Failed to fetch conversations', message: (error as Error).message },
+                { error: 'Failed to fetch conversations', message: errorMessage },
                 { status: 500 }
             );
         }
