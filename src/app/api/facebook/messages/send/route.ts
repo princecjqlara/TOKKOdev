@@ -2,6 +2,8 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getSessionFromRequest } from '@/lib/get-session';
 import { getSupabaseAdmin } from '@/lib/supabase';
 import { sendMessage } from '@/lib/facebook';
+import fs from 'fs';
+import path from 'path';
 
 interface ContactRecord {
     id: string;
@@ -11,6 +13,29 @@ interface ContactRecord {
 
 // Increase timeout for sending messages (up to 5 minutes)
 export const maxDuration = 300;
+
+// Helper function to write debug logs
+function writeDebugLog(location: string, message: string, data: any, hypothesisId: string) {
+    const logPath = path.join(process.cwd(), '.cursor', 'debug.log');
+    const logEntry = JSON.stringify({location, message, data, timestamp: Date.now(), sessionId: 'debug-session', runId: 'run1', hypothesisId}) + '\n';
+    try { 
+        // Ensure directory exists
+        const logDir = path.dirname(logPath);
+        if (!fs.existsSync(logDir)) {
+            fs.mkdirSync(logDir, { recursive: true });
+        }
+        fs.appendFileSync(logPath, logEntry); 
+    } catch(e: any) {
+        // Log error to console for debugging
+        console.error('Failed to write debug log:', e?.message || e);
+    }
+    // Also try HTTP logging
+    fetch('http://127.0.0.1:7242/ingest/6358f30b-ef0a-4ea4-8acc-50c08c025924', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: logEntry.trim()
+    }).catch(() => {});
+}
 
 // POST /api/facebook/messages/send - Send messages to contacts
 export async function POST(request: NextRequest) {
@@ -66,6 +91,10 @@ export async function POST(request: NextRequest) {
         console.log(`📤 Sample contact IDs (first 5):`, contactIds.slice(0, 5));
         console.log(`📤 Sample contact IDs (last 5):`, contactIds.slice(-5));
         console.log(`📤 ===============================================`);
+        
+        // #region agent log
+        writeDebugLog('api/facebook/messages/send/route.ts:68', 'API request received', {contactIdsCount: contactIds.length, pageId}, 'E');
+        // #endregion
         
         // Ensure we process ALL contacts, not just first 1000
         // The batchSize is only for database queries, not for limiting sends
@@ -154,6 +183,10 @@ export async function POST(request: NextRequest) {
             }
 
             totalFound += batchContacts.length;
+            
+            // #region agent log
+            writeDebugLog('api/facebook/messages/send/route.ts:160', 'Batch contacts fetched from DB', {batchNumber, requestedCount: batchIds.length, foundCount: batchContacts.length, totalFoundSoFar: totalFound}, 'F');
+            // #endregion
 
             const validContacts = batchContacts.filter((contact): contact is ContactRecord => {
                 const correctPage = contact.page_id === pageId;
@@ -163,6 +196,10 @@ export async function POST(request: NextRequest) {
 
             const filteredCount = batchContacts.length - validContacts.length;
             totalFiltered += filteredCount;
+            
+            // #region agent log
+            writeDebugLog('api/facebook/messages/send/route.ts:168', 'Batch contacts filtered', {batchNumber, foundCount: batchContacts.length, validCount: validContacts.length, filteredCount, totalFilteredSoFar: totalFiltered}, 'G');
+            // #endregion
 
             if (filteredCount > 0) {
                 batchesWithFiltered++;
@@ -343,7 +380,7 @@ export async function POST(request: NextRequest) {
         }
         
         // #region agent log
-        fetch('http://127.0.0.1:7242/ingest/6358f30b-ef0a-4ea4-8acc-50c08c025924',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'send/route.ts:273',message:'Contact lookup complete',data:{requested:contactIds.length,found:totalFound,filtered:totalFiltered,valid:allContacts.length,pageId},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'D'})}).catch(()=>{});
+        writeDebugLog('api/facebook/messages/send/route.ts:338', 'Contact lookup complete', {requested: contactIds.length, found: totalFound, filtered: totalFiltered, notFound: totalNotFound, valid: allContacts.length, pageId}, 'H');
         // #endregion
 
         const results = {
@@ -359,24 +396,25 @@ export async function POST(request: NextRequest) {
         const startTime = Date.now();
 
         // #region agent log
-        fetch('http://127.0.0.1:7242/ingest/6358f30b-ef0a-4ea4-8acc-50c08c025924',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'send/route.ts:284',message:'Send start',data:{totalContacts:allContacts.length,requestedCount:contactIds.length,foundCount:totalFound,filteredCount:totalFiltered,startTime},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'A'})}).catch(()=>{});
+        writeDebugLog('api/facebook/messages/send/route.ts:371', 'Send operation started', {totalContacts: allContacts.length, requestedCount: contactIds.length, foundCount: totalFound, filteredCount: totalFiltered, notFoundCount: totalNotFound, startTime}, 'I');
         // #endregion
 
         for (let i = 0; i < allContacts.length; i += SEND_BATCH_SIZE) {
             // Check if we're approaching timeout
             const elapsed = Date.now() - startTime;
             // #region agent log
-            fetch('http://127.0.0.1:7242/ingest/6358f30b-ef0a-4ea4-8acc-50c08c025924',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'send/route.ts:289',message:'Timeout check',data:{batchIndex:i,processed:i,total:allContacts.length,elapsed,MAX_PROCESSING_TIME,willTimeout:elapsed>MAX_PROCESSING_TIME},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'A'})}).catch(()=>{});
+            writeDebugLog('api/facebook/messages/send/route.ts:377', 'Send batch loop iteration', {batchIndex: i, processed: i, total: allContacts.length, elapsed, MAX_PROCESSING_TIME, willTimeout: elapsed > MAX_PROCESSING_TIME}, 'J');
             // #endregion
             if (elapsed > MAX_PROCESSING_TIME) {
                 const remainingContacts = allContacts.slice(i);
                 const remainingContactIds = remainingContacts.map(c => c.id);
                 
                 // #region agent log
-                fetch('http://127.0.0.1:7242/ingest/6358f30b-ef0a-4ea4-8acc-50c08c025924',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'send/route.ts:293',message:'Timeout triggered',data:{processed:i,total:allContacts.length,remaining:remainingContacts.length,remainingContactIdsCount:remainingContactIds.length,elapsed},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'A'})}).catch(()=>{});
+                writeDebugLog('api/facebook/messages/send/route.ts:383', 'Timeout triggered - partial response', {processed: i, total: allContacts.length, remaining: remainingContacts.length, remainingContactIdsCount: remainingContactIds.length, elapsed, sent: results.sent, failed: results.failed}, 'K');
                 // #endregion
                 console.warn(`⏱️ Approaching timeout, processed ${i}/${allContacts.length} contacts. ${remainingContacts.length} contacts remaining.`);
-                const filteredCount = contactIds.length - allContacts.length;
+                const filteredCount = totalFiltered; // Contacts found but filtered (wrong page_id or missing psid)
+                const notFoundCount = totalNotFound; // Contacts not found in database
                 
                 return NextResponse.json({
                     success: true,
@@ -387,8 +425,10 @@ export async function POST(request: NextRequest) {
                         processed: i,
                         total: allContacts.length,
                         remaining: remainingContacts.length,
-                        filtered: filteredCount,
+                        filtered: filteredCount, // Contacts filtered during lookup
+                        notFound: notFoundCount, // Contacts not found in database
                         requested: contactIds.length,
+                        found: totalFound,
                         valid: allContacts.length
                     },
                     remainingContactIds: remainingContactIds // Return remaining contact IDs for automatic retry
@@ -459,6 +499,10 @@ export async function POST(request: NextRequest) {
         const filteredCount = totalFiltered; // Contacts found but filtered (wrong page_id or missing psid)
         const notFoundCount = totalNotFound; // Contacts not found in database
         const totalUnsendable = filteredCount + notFoundCount;
+        
+        // #region agent log
+        writeDebugLog('api/facebook/messages/send/route.ts:468', 'Send operation completed', {requested: contactIds.length, found: totalFound, filtered: filteredCount, notFound: notFoundCount, valid: allContacts.length, sent: results.sent, failed: results.failed, totalUnsendable, elapsed: Date.now() - startTime}, 'L');
+        // #endregion
         
         // Validation: total should add up
         const expectedTotal = allContacts.length + totalUnsendable;

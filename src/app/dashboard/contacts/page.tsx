@@ -366,6 +366,10 @@ export default function ContactsPage() {
             const originalContactCount = allContactIds.length;
             console.log(`📤 Will attempt to send ${originalContactCount} contacts`);
             
+            // #region agent log
+            fetch('http://127.0.0.1:7242/ingest/6358f30b-ef0a-4ea4-8acc-50c08c025924',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'contacts/page.tsx:367',message:'Bulk message send started',data:{originalContactCount,selectedPageId,selectAllMode,total:selectAllMode?total:undefined,excludedCount:selectAllMode?excludedIds.size:undefined,selectedCount:selectAllMode?undefined:selectedIds.size},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'A'})}).catch(()=>{});
+            // #endregion
+            
             // Warn if selecting a very large number
             if (allContactIds.length > 1000) {
                 console.warn(`⚠️ Large batch detected: ${allContactIds.length} contacts. This may take several minutes.`);
@@ -399,7 +403,15 @@ export default function ContactsPage() {
                 // Track that we're attempting to send these contacts
                 chunk.forEach(id => contactsAttempted.add(id));
                 
+                // #region agent log
+                fetch('http://127.0.0.1:7242/ingest/6358f30b-ef0a-4ea4-8acc-50c08c025924',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'contacts/page.tsx:392',message:'Chunk processing started',data:{chunkNumber,totalChunks,chunkSize:chunk.length,chunkStartIndex:i,chunkEndIndex:i+chunk.length-1,contactsAttemptedSoFar:contactsAttempted.size},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'B'})}).catch(()=>{});
+                // #endregion
+                
                 try {
+                    // #region agent log
+                    fetch('http://127.0.0.1:7242/ingest/6358f30b-ef0a-4ea4-8acc-50c08c025924',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'contacts/page.tsx:403',message:'API request about to be sent',data:{chunkNumber,chunkSize:chunk.length,pageId:selectedPageId,messageLength:messageText.trim().length},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'C'})}).catch(()=>{});
+                    // #endregion
+                    
                     const response = await fetch('/api/facebook/messages/send', {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
@@ -424,8 +436,9 @@ export default function ContactsPage() {
                     }
 
                     const data = await response.json();
+                    
                     // #region agent log
-                    fetch('http://127.0.0.1:7242/ingest/6358f30b-ef0a-4ea4-8acc-50c08c025924',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'contacts/page.tsx:377',message:'Chunk response received',data:{chunkNumber,chunkSize:chunk.length,success:data.success,partial:data.partial,remainingContactIdsCount:data.remainingContactIds?.length||0,sent:data.results?.sent||0,failed:data.results?.failed||0},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'B'})}).catch(()=>{});
+                    fetch('http://127.0.0.1:7242/ingest/6358f30b-ef0a-4ea4-8acc-50c08c025924',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'contacts/page.tsx:438',message:'Chunk response received',data:{chunkNumber,chunkSize:chunk.length,success:data.success,partial:data.partial,remainingContactIdsCount:data.remainingContactIds?.length||0,sent:data.results?.sent||0,failed:data.results?.failed||0,filtered:data.results?.filtered||0,notFound:data.results?.notFound||0,requested:data.results?.requested||chunk.length,valid:data.results?.valid||chunk.length},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'B'})}).catch(()=>{});
                     // #endregion
                     if (data.success) {
                         // Log response details immediately
@@ -449,6 +462,10 @@ export default function ContactsPage() {
                         totalFiltered += filteredCount; // Track filtered separately
                         totalNotFound += notFoundCount; // Track not found separately
                         const totalChunkFiltered = filteredCount + notFoundCount;
+                        
+                        // #region agent log
+                        fetch('http://127.0.0.1:7242/ingest/6358f30b-ef0a-4ea4-8acc-50c08c025924',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'contacts/page.tsx:455',message:'Chunk totals updated',data:{chunkNumber,totalSent,totalFailed,totalFiltered,totalNotFound,chunkFiltered:filteredCount,chunkNotFound:notFoundCount},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'D'})}).catch(()=>{});
+                        // #endregion
                         
                         if (totalChunkFiltered > 0) {
                             console.error(`❌❌❌ Chunk ${chunkNumber}: ${totalChunkFiltered} contacts CANNOT be sent!`);
