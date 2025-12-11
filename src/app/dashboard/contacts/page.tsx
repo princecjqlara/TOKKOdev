@@ -343,6 +343,22 @@ export default function ContactsPage() {
             console.log(`📤 Selected contact IDs sample (last 10):`, allContactIds.slice(-10));
             console.log(`📤 ===============================================`);
             
+            // CRITICAL VALIDATION: Ensure we actually have the expected number
+            const expectedCount = selectAllMode ? (total - excludedIds.size) : selectedIds.size;
+            if (allContactIds.length !== expectedCount) {
+                console.error(`\n❌❌❌ CRITICAL SELECTION BUG DETECTED ❌❌❌`);
+                console.error(`❌ Expected ${expectedCount} contacts but got ${allContactIds.length}!`);
+                console.error(`❌ Missing: ${expectedCount - allContactIds.length} contacts`);
+                console.error(`❌ This indicates a bug in contact selection logic`);
+                console.error(`❌ Selection mode: ${selectAllMode ? 'Select All' : 'Individual'}`);
+                if (selectAllMode) {
+                    console.error(`❌ Total on page: ${total}, Excluded: ${excludedIds.size}, Expected: ${expectedCount}`);
+                } else {
+                    console.error(`❌ Selected IDs count: ${selectedIds.size}`);
+                }
+                console.error(`❌❌❌ END CRITICAL SELECTION BUG ❌❌❌\n`);
+            }
+            
             if (allContactIds.length === 0) {
                 alert('No contacts selected. Please select contacts first.');
                 setActionLoading(false);
