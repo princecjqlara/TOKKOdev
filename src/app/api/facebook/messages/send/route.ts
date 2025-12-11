@@ -112,7 +112,8 @@ export async function POST(request: NextRequest) {
 
         let totalRequested = contactIds.length;
         let totalFound = 0;
-        let totalFiltered = 0;
+        let totalFiltered = 0; // Contacts found but filtered (wrong page_id or missing psid)
+        let totalNotFound = 0; // Contacts not found in database
 
         for (let i = 0; i < contactIds.length; i += batchSize) {
             const batchIds = contactIds.slice(i, i + batchSize);
@@ -124,8 +125,8 @@ export async function POST(request: NextRequest) {
             if (batchError) {
                 console.error(`❌ Error fetching contacts batch ${Math.floor(i / batchSize) + 1}:`, batchError);
                 console.error(`❌ This batch will be skipped - ${batchIds.length} contacts will not be sent!`);
-                // Don't continue - mark these as failed so user knows
-                totalFiltered += batchIds.length;
+                // Mark as not found (database error)
+                totalNotFound += batchIds.length;
                 continue;
             }
 
@@ -133,8 +134,8 @@ export async function POST(request: NextRequest) {
                 console.error(`❌ Batch ${Math.floor(i / batchSize) + 1}: NO contacts found in database for ${batchIds.length} requested IDs!`);
                 console.error(`❌ Sample IDs that don't exist:`, batchIds.slice(0, 5));
                 console.error(`❌ These contacts may have been deleted from the database`);
-                // Mark as filtered (not found)
-                totalFiltered += batchIds.length;
+                // Mark as not found
+                totalNotFound += batchIds.length;
                 continue;
             }
 
@@ -423,21 +424,30 @@ export async function POST(request: NextRequest) {
 
         console.log(`✅ Completed sending: ${results.sent} sent, ${results.failed} failed out of ${allContacts.length} valid contacts`);
         
-        const filteredCount = totalFiltered; // Use the tracked totalFiltered count
-        const notFoundCount = contactIds.length - totalFound; // Contacts that don't exist in DB
+        // Calculate final counts
+        const filteredCount = totalFiltered; // Contacts found but filtered (wrong page_id or missing psid)
+        const notFoundCount = totalNotFound; // Contacts not found in database
+        const totalUnsendable = filteredCount + notFoundCount;
+        
+        // Validation: total should add up
+        const expectedTotal = allContacts.length + totalUnsendable;
+        if (expectedTotal !== contactIds.length) {
+            console.warn(`⚠️ Count validation: Expected ${contactIds.length} but got ${expectedTotal} (valid: ${allContacts.length}, filtered: ${filteredCount}, not found: ${notFoundCount})`);
+        }
         
         console.log(`📊 ========== SEND OPERATION COMPLETE ==========`);
         console.log(`📊 Requested: ${contactIds.length} contacts`);
         console.log(`📊 Found in DB: ${totalFound} contacts`);
         console.log(`📊 Valid for sending: ${allContacts.length} contacts`);
-        console.log(`📊 Filtered out: ${filteredCount} contacts (wrong page_id or missing psid)`);
-        console.log(`📊 Not found in DB: ${notFoundCount} contacts (may have been deleted)`);
+        console.log(`📊 Filtered out (wrong page_id/missing psid): ${filteredCount} contacts`);
+        console.log(`📊 Not found in DB: ${notFoundCount} contacts`);
+        console.log(`📊 Total unsendable: ${totalUnsendable} contacts`);
         console.log(`📊 Successfully sent: ${results.sent} contacts`);
         console.log(`📊 Failed to send: ${results.failed} contacts`);
         console.log(`📊 =============================================`);
         
-        if (filteredCount > 0 || notFoundCount > 0) {
-            console.error(`❌ WARNING: ${filteredCount + notFoundCount} contacts were NOT sent!`);
+        if (totalUnsendable > 0) {
+            console.error(`❌❌❌ CRITICAL: ${totalUnsendable} contacts were NOT sent!`);
             if (filteredCount > 0) {
                 console.error(`❌   - ${filteredCount} contacts filtered (wrong page_id or missing psid)`);
                 console.error(`❌   SOLUTION: Sync the page again to fix page_id and psid issues`);
@@ -446,21 +456,31 @@ export async function POST(request: NextRequest) {
                 console.error(`❌   - ${notFoundCount} contacts not found in database (may have been deleted)`);
                 console.error(`❌   SOLUTION: These contacts need to be re-synced or re-added`);
             }
+            console.error(`❌   Total: ${filteredCount + notFoundCount} contacts cannot be sent out of ${contactIds.length} requested`);
         }
         
         // #region agent log
         fetch('http://127.0.0.1:7242/ingest/6358f30b-ef0a-4ea4-8acc-50c08c025924',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'send/route.ts:360',message:'Send complete',data:{sent:results.sent,failed:results.failed,total:allContacts.length,filtered:filteredCount,notFound:notFoundCount,elapsed:Date.now()-startTime},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'A'})}).catch(()=>{});
         // #endregion
         
+        // Final validation - ensure all contacts are accounted for
+        const totalAccountedFor = results.sent + results.failed + filteredCount + notFoundCount;
+        if (totalAccountedFor !== contactIds.length) {
+            console.error(`❌❌❌ COUNT MISMATCH: ${contactIds.length} requested but only ${totalAccountedFor} accounted for!`);
+            console.error(`❌   Sent: ${results.sent}, Failed: ${results.failed}, Filtered: ${filteredCount}, Not Found: ${notFoundCount}`);
+            console.error(`❌   Missing: ${contactIds.length - totalAccountedFor} contacts`);
+        }
+        
         return NextResponse.json({
             success: true,
             results: {
                 ...results,
-                filtered: filteredCount, // Number of contacts filtered out during lookup
+                filtered: filteredCount, // Number of contacts filtered out during lookup (wrong page_id or missing psid)
                 notFound: notFoundCount, // Number of contacts not found in database
                 requested: contactIds.length, // Total requested
                 found: totalFound, // Found in database
-                valid: allContacts.length // Valid contacts found
+                valid: allContacts.length, // Valid contacts found
+                accountedFor: totalAccountedFor // Total accounted for (for validation)
             }
         });
     } catch (error) {

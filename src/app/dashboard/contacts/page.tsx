@@ -358,6 +358,9 @@ export default function ContactsPage() {
             }
             
             console.log(`📤 About to send ${allContactIds.length} contacts in ${Math.ceil(allContactIds.length / 5000)} chunk(s)`);
+            console.log(`📤 Selected page ID: ${selectedPageId}`);
+            console.log(`📤 IMPORTANT: Only contacts belonging to page ${selectedPageId} can be sent.`);
+            console.log(`📤 If you selected contacts from multiple pages, only contacts from the selected page will be sent.`);
 
             // Chunk contacts into batches to avoid request body size limits and timeouts
             // Send in batches of 5000 contacts at a time
@@ -564,11 +567,15 @@ export default function ContactsPage() {
                         throw new Error(data.message || 'Failed to send messages');
                     }
                 } catch (error) {
-                    console.error(`❌ Error sending chunk ${chunkNumber}:`, error);
+                    console.error(`❌❌❌ CRITICAL ERROR sending chunk ${chunkNumber}:`, error);
+                    console.error(`❌ Error details:`, error);
+                    console.error(`❌ This chunk (${chunk.length} contacts) will be marked as failed`);
+                    console.error(`❌ Continuing with next chunk...`);
                     // Mark all contacts in this chunk as failed
                     totalFailed += chunk.length;
                     allFailedIds.push(...chunk);
                     // Continue with next chunk instead of stopping
+                    console.log(`📤 Continuing to next chunk...`);
                 }
             }
 
