@@ -384,10 +384,82 @@ export default function ContactsPage() {
                             allFailedIds.push(...data.results.errors.map((e: { contactId: string }) => e.contactId));
                         }
 
-                        // If partial (timeout), we need to handle remaining contacts
-                        if (data.partial) {
+                        // If partial (timeout), automatically retry remaining contacts
+                        if (data.partial && data.remainingContactIds?.length > 0) {
+                            console.warn(`⚠️ Chunk ${chunkNumber} timed out. Processed ${data.results.processed}/${chunk.length}. Auto-retrying ${data.remainingContactIds.length} remaining contacts...`);
+                            
+                            // Automatically retry remaining contacts from this chunk
+                            let retryAttempt = 1;
+                            const MAX_RETRIES = 3;
+                            let remainingToRetry = [...data.remainingContactIds];
+                            
+                            while (remainingToRetry.length > 0 && retryAttempt <= MAX_RETRIES) {
+                                console.log(`🔄 Auto-retry attempt ${retryAttempt}/${MAX_RETRIES} for ${remainingToRetry.length} contacts`);
+                                
+                                try {
+                                    const retryResponse = await fetch('/api/facebook/messages/send', {
+                                        method: 'POST',
+                                        headers: { 'Content-Type': 'application/json' },
+                                        body: JSON.stringify({
+                                            pageId: selectedPageId,
+                                            contactIds: remainingToRetry,
+                                            messageText: messageText.trim()
+                                        })
+                                    });
+
+                                    if (!retryResponse.ok) {
+                                        const contentType = retryResponse.headers.get('content-type');
+                                        if (contentType && contentType.includes('application/json')) {
+                                            const errorData = await retryResponse.json();
+                                            throw new Error(errorData.message || `HTTP ${retryResponse.status}`);
+                                        } else {
+                                            const text = await retryResponse.text();
+                                            throw new Error(`Server error (${retryResponse.status})`);
+                                        }
+                                    }
+
+                                    const retryData = await retryResponse.json();
+                                    if (retryData.success) {
+                                        totalSent += retryData.results.sent || 0;
+                                        totalFailed += retryData.results.failed || 0;
+                                        
+                                        // Collect failed contact IDs from retry
+                                        if (retryData.results.errors?.length) {
+                                            allFailedIds.push(...retryData.results.errors.map((e: { contactId: string }) => e.contactId));
+                                        }
+
+                                        // If retry also timed out, update remaining list for next retry
+                                        if (retryData.partial && retryData.remainingContactIds?.length > 0) {
+                                            remainingToRetry = retryData.remainingContactIds;
+                                            retryAttempt++;
+                                            console.warn(`⚠️ Retry attempt ${retryAttempt - 1} also timed out. ${remainingToRetry.length} contacts still remaining.`);
+                                        } else {
+                                            // Successfully completed retry
+                                            console.log(`✅ Auto-retry completed: ${retryData.results.sent} sent, ${retryData.results.failed} failed`);
+                                            remainingToRetry = []; // Clear to exit loop
+                                        }
+                                    } else {
+                                        throw new Error(retryData.message || 'Retry failed');
+                                    }
+                                } catch (retryError) {
+                                    console.error(`❌ Auto-retry attempt ${retryAttempt} failed:`, retryError);
+                                    retryAttempt++;
+                                    
+                                    // If max retries reached, mark remaining as failed
+                                    if (retryAttempt > MAX_RETRIES) {
+                                        console.error(`❌ Max retries (${MAX_RETRIES}) reached. Marking ${remainingToRetry.length} contacts as failed.`);
+                                        totalFailed += remainingToRetry.length;
+                                        allFailedIds.push(...remainingToRetry);
+                                        remainingToRetry = [];
+                                    }
+                                }
+                            }
+                            
+                            if (remainingToRetry.length > 0) {
+                                console.error(`❌ Could not complete all retries. ${remainingToRetry.length} contacts still remaining.`);
+                            }
+                        } else if (data.partial) {
                             console.warn(`⚠️ Chunk ${chunkNumber} was partially processed: ${data.results.processed}/${chunk.length}`);
-                            // Continue with next chunk - the partial results are already counted
                         }
 
                         console.log(`✅ Chunk ${chunkNumber}/${totalChunks} complete: ${data.results.sent} sent, ${data.results.failed} failed`);

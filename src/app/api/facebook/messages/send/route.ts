@@ -287,16 +287,21 @@ export async function POST(request: NextRequest) {
             // Check if we're approaching timeout
             const elapsed = Date.now() - startTime;
             if (elapsed > MAX_PROCESSING_TIME) {
-                console.warn(`Approaching timeout, processed ${i}/${allContacts.length} contacts. Returning partial results.`);
+                const remainingContacts = allContacts.slice(i);
+                const remainingContactIds = remainingContacts.map(c => c.id);
+                
+                console.warn(`⏱️ Approaching timeout, processed ${i}/${allContacts.length} contacts. ${remainingContacts.length} contacts remaining.`);
                 return NextResponse.json({
                     success: true,
                     partial: true,
-                    message: `Processed ${i} of ${allContacts.length} contacts before timeout. Please send remaining contacts in another batch.`,
+                    message: `Processed ${i} of ${allContacts.length} contacts before timeout. ${remainingContacts.length} contacts remaining.`,
                     results: {
                         ...results,
                         processed: i,
-                        total: allContacts.length
-                    }
+                        total: allContacts.length,
+                        remaining: remainingContacts.length
+                    },
+                    remainingContactIds: remainingContactIds // Return remaining contact IDs for automatic retry
                 });
             }
 
