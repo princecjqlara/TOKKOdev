@@ -547,16 +547,37 @@ export async function POST(request: NextRequest) {
             console.warn(`⚠️ Count validation: Expected ${contactIds.length} but got ${expectedTotal} (valid: ${allContacts.length}, filtered: ${filteredCount}, not found: ${notFoundCount})`);
         }
         
-        console.log(`📊 ========== SEND OPERATION COMPLETE ==========`);
-        console.log(`📊 Requested: ${contactIds.length} contacts`);
-        console.log(`📊 Found in DB: ${totalFound} contacts`);
-        console.log(`📊 Valid for sending: ${allContacts.length} contacts`);
-        console.log(`📊 Filtered out (wrong page_id/missing psid): ${filteredCount} contacts`);
-        console.log(`📊 Not found in DB: ${notFoundCount} contacts`);
-        console.log(`📊 Total unsendable: ${totalUnsendable} contacts`);
-        console.log(`📊 Successfully sent: ${results.sent} contacts`);
-        console.log(`📊 Failed to send: ${results.failed} contacts`);
-        console.log(`📊 =============================================`);
+        console.log(`\n`);
+        console.log(`╔════════════════════════════════════════════════════════════╗`);
+        console.log(`║        API: SEND OPERATION COMPLETE SUMMARY               ║`);
+        console.log(`╠════════════════════════════════════════════════════════════╣`);
+        console.log(`║ Requested:                    ${contactIds.length.toString().padStart(10)} ║`);
+        console.log(`║ Found in DB:                  ${totalFound.toString().padStart(10)} ║`);
+        console.log(`║ Valid for sending:            ${allContacts.length.toString().padStart(10)} ║`);
+        console.log(`║ Filtered (wrong page/missing psid): ${filteredCount.toString().padStart(10)} ║`);
+        console.log(`║ Not found in DB:              ${notFoundCount.toString().padStart(10)} ║`);
+        console.log(`║ Total unsendable:              ${totalUnsendable.toString().padStart(10)} ║`);
+        console.log(`║ Successfully sent:             ${results.sent.toString().padStart(10)} ║`);
+        console.log(`║ Failed to send:                ${results.failed.toString().padStart(10)} ║`);
+        console.log(`╠════════════════════════════════════════════════════════════╣`);
+        
+        if (totalUnsendable > 0) {
+            const percentage = Math.round((totalUnsendable / contactIds.length) * 100);
+            console.log(`║ ❌ ${totalUnsendable} contacts (${percentage}%) CANNOT be sent!        ║`);
+            if (filteredCount > 0) {
+                console.log(`║   - ${filteredCount} filtered (wrong page_id or missing psid)      ║`);
+            }
+            if (notFoundCount > 0) {
+                console.log(`║   - ${notFoundCount} not found in database                      ║`);
+            }
+            console.log(`║                                                          ║`);
+            console.log(`║ SOLUTION: Sync the page again to fix page_id/psid      ║`);
+        } else if (results.sent === contactIds.length) {
+            console.log(`║ ✅ All ${results.sent} contacts sent successfully!              ║`);
+        }
+        
+        console.log(`╚════════════════════════════════════════════════════════════╝`);
+        console.log(`\n`);
         
         if (totalUnsendable > 0) {
             console.error(`❌❌❌ CRITICAL: ${totalUnsendable} contacts were NOT sent!`);
