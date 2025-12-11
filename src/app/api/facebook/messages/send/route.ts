@@ -16,19 +16,33 @@ export const maxDuration = 300;
 
 // Helper function to write debug logs
 function writeDebugLog(location: string, message: string, data: any, hypothesisId: string) {
-    const logPath = path.join(process.cwd(), '.cursor', 'debug.log');
     const logEntry = JSON.stringify({location, message, data, timestamp: Date.now(), sessionId: 'debug-session', runId: 'run1', hypothesisId}) + '\n';
-    try { 
-        // Ensure directory exists
-        const logDir = path.dirname(logPath);
-        if (!fs.existsSync(logDir)) {
-            fs.mkdirSync(logDir, { recursive: true });
+    
+    // Try multiple log paths
+    const logPaths = [
+        path.join(process.cwd(), '.cursor', 'debug.log'),
+        path.join(process.cwd(), 'debug.log'),
+        path.join('/tmp', 'debug.log')
+    ];
+    
+    for (const logPath of logPaths) {
+        try { 
+            // Ensure directory exists
+            const logDir = path.dirname(logPath);
+            if (!fs.existsSync(logDir)) {
+                fs.mkdirSync(logDir, { recursive: true });
+            }
+            fs.appendFileSync(logPath, logEntry);
+            break; // Success, stop trying other paths
+        } catch(e: any) {
+            // Try next path
+            continue;
         }
-        fs.appendFileSync(logPath, logEntry); 
-    } catch(e: any) {
-        // Log error to console for debugging
-        console.error('Failed to write debug log:', e?.message || e);
     }
+    
+    // Also log to console with special prefix for easy grepping
+    console.log(`[DEBUG-LOG] ${JSON.stringify({location, message, data, hypothesisId})}`);
+    
     // Also try HTTP logging
     fetch('http://127.0.0.1:7242/ingest/6358f30b-ef0a-4ea4-8acc-50c08c025924', {
         method: 'POST',
@@ -360,19 +374,42 @@ export async function POST(request: NextRequest) {
             );
         }
 
-        console.log(`✅ Found ${allContacts.length} valid contacts out of ${contactIds.length} requested (${totalFound} found in DB, ${totalFiltered} filtered)`);
-        console.log(`📊 Contact lookup breakdown: ${contactIds.length} requested → ${totalFound} found in DB → ${allContacts.length} valid (${totalFiltered} filtered out)`);
+        console.log(`✅ Found ${allContacts.length} valid contacts out of ${contactIds.length} requested (${totalFound} found in DB, ${totalFiltered} filtered, ${totalNotFound} not found)`);
+        console.log(`📊 Contact lookup breakdown: ${contactIds.length} requested → ${totalFound} found in DB → ${allContacts.length} valid (${totalFiltered} filtered out, ${totalNotFound} not found)`);
+        
+        // Calculate and log the exact breakdown
+        const totalUnsendable = totalFiltered + totalNotFound;
+        const sendablePercentage = Math.round((allContacts.length / contactIds.length) * 100);
+        const unsendablePercentage = Math.round((totalUnsendable / contactIds.length) * 100);
+        
+        console.log(`\n`);
+        console.log(`╔════════════════════════════════════════════════════════════╗`);
+        console.log(`║        API: CONTACT LOOKUP BREAKDOWN                        ║`);
+        console.log(`╠════════════════════════════════════════════════════════════╣`);
+        console.log(`║ Requested:                    ${contactIds.length.toString().padStart(10)} ║`);
+        console.log(`║ Found in DB:                  ${totalFound.toString().padStart(10)} ║`);
+        console.log(`║ Valid for sending:            ${allContacts.length.toString().padStart(10)} (${sendablePercentage}%) ║`);
+        console.log(`║ Filtered (wrong page/missing psid): ${totalFiltered.toString().padStart(10)} ║`);
+        console.log(`║ Not found in DB:              ${totalNotFound.toString().padStart(10)} ║`);
+        console.log(`║ Total unsendable:             ${totalUnsendable.toString().padStart(10)} (${unsendablePercentage}%) ║`);
+        console.log(`╚════════════════════════════════════════════════════════════╝`);
+        console.log(`\n`);
         
         if (allContacts.length < contactIds.length) {
             const missing = contactIds.length - allContacts.length;
             console.error(`❌❌❌ CRITICAL: ${missing} contacts were not found or filtered out!`);
-            console.error(`❌ Requested: ${contactIds.length}, Found in DB: ${totalFound}, Filtered: ${totalFiltered}, Valid: ${allContacts.length}`);
+            console.error(`❌ Requested: ${contactIds.length}, Found in DB: ${totalFound}, Filtered: ${totalFiltered}, Not Found: ${totalNotFound}, Valid: ${allContacts.length}`);
             console.error(`❌ This means ${missing} contacts will NOT be sent!`);
             console.error(`❌ Possible reasons:`);
             console.error(`❌   1. Contacts have wrong page_id (belong to different page)`);
             console.error(`❌   2. Contacts are missing psid (need to be synced again)`);
             console.error(`❌   3. Contacts were deleted from database`);
             console.error(`❌ SOLUTION: Sync the page again to fix page_id and psid issues`);
+            
+            if (totalUnsendable > 0 && unsendablePercentage > 50) {
+                console.error(`\n❌❌❌ MAJOR ISSUE: ${unsendablePercentage}% of contacts (${totalUnsendable}/${contactIds.length}) cannot be sent!`);
+                console.error(`❌ This indicates a data quality issue - most contacts need to be synced again.`);
+            }
         }
         
         if (allContacts.length === 0) {
