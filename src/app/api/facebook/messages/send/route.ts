@@ -496,10 +496,25 @@ export async function POST(request: NextRequest) {
         
         // Final validation - ensure all contacts are accounted for
         const totalAccountedFor = results.sent + results.failed + filteredCount + notFoundCount;
+        const missing = contactIds.length - totalAccountedFor;
+        
         if (totalAccountedFor !== contactIds.length) {
             console.error(`❌❌❌ COUNT MISMATCH: ${contactIds.length} requested but only ${totalAccountedFor} accounted for!`);
             console.error(`❌   Sent: ${results.sent}, Failed: ${results.failed}, Filtered: ${filteredCount}, Not Found: ${notFoundCount}`);
-            console.error(`❌   Missing: ${contactIds.length - totalAccountedFor} contacts`);
+            console.error(`❌   Missing: ${missing} contacts - this is a bug!`);
+        } else {
+            console.log(`✅ All contacts accounted for: ${totalAccountedFor}/${contactIds.length}`);
+        }
+        
+        // Critical warning if many contacts were filtered
+        if (filteredCount > 0 || notFoundCount > 0) {
+            const totalUnsendable = filteredCount + notFoundCount;
+            const percentage = Math.round((totalUnsendable / contactIds.length) * 100);
+            if (percentage > 50) {
+                console.error(`❌❌❌ CRITICAL: ${percentage}% of contacts (${totalUnsendable}/${contactIds.length}) cannot be sent!`);
+                console.error(`❌   This is a major issue - most contacts are filtered or not found`);
+                console.error(`❌   ACTION REQUIRED: Sync the page again to fix page_id and psid issues`);
+            }
         }
         
         return NextResponse.json({
