@@ -431,22 +431,15 @@ export default function ContactsPage() {
                                             allFailedIds.push(...retryData.results.errors.map((e: { contactId: string }) => e.contactId));
                                         }
 
-                                        // If retry also timed out, add remaining to the queue for next iteration
+                                        // If retry also timed out, update remaining list with still-remaining contacts
                                         if (retryData.partial && retryData.remainingContactIds?.length > 0) {
-                                            // Remove successfully processed contacts from remaining list
-                                            const processedIds = new Set(retryChunk.filter(id => 
-                                                !retryData.remainingContactIds.includes(id)
-                                            ));
-                                            remainingToRetry = remainingToRetry.filter(id => 
-                                                !processedIds.has(id)
-                                            );
-                                            // Add back the still-remaining contacts
+                                            // Remove this chunk from remaining list and add back only the still-remaining contacts
+                                            remainingToRetry = remainingToRetry.slice(RETRY_CHUNK_SIZE);
                                             remainingToRetry = [...remainingToRetry, ...retryData.remainingContactIds];
                                             console.warn(`⚠️ Retry chunk ${retryChunkIndex} also timed out. ${retryData.remainingContactIds.length} contacts still remaining from this chunk.`);
                                         } else {
-                                            // Successfully completed this retry chunk
+                                            // Successfully completed this retry chunk - remove from remaining list
                                             console.log(`✅ Auto-retry chunk ${retryChunkIndex} completed: ${retryData.results.sent} sent, ${retryData.results.failed} failed`);
-                                            // Remove processed contacts from remaining list
                                             remainingToRetry = remainingToRetry.slice(RETRY_CHUNK_SIZE);
                                         }
                                     } else {
