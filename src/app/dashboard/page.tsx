@@ -111,7 +111,74 @@ export default function DashboardPage() {
 
             if (data?.success) {
                 if (data.partial) {
-                    alert(`Partial sync complete!\n\nSynced: ${data.synced}\nFailed: ${data.failed}\nProcessed: ${data.processed} of ${data.total}\n\n${data.message}\n\nClick "Sync Now" again to continue syncing remaining contacts.`);
+                    console.warn(`⚠️ Sync timed out. Processed ${data.processed}/${data.total}. Auto-retrying...`);
+                    console.log(`📊 Initial sync results: ${data.synced} synced, ${data.failed} failed, ${data.remaining || 0} remaining`);
+                    
+                    // Auto-retry sync for remaining conversations
+                    let retryAttempt = 1;
+                    const MAX_SYNC_RETRIES = 5;
+                    let currentSynced = data.synced;
+                    let currentFailed = data.failed;
+                    
+                    while (retryAttempt <= MAX_SYNC_RETRIES) {
+                        console.log(`🔄 Auto-retry sync attempt ${retryAttempt}/${MAX_SYNC_RETRIES}`);
+                        
+                        try {
+                            // Continue sync - use forceFullSync=true to ensure we get all conversations
+                            // The sync endpoint will skip already-processed conversations via upsert
+                            console.log(`🔄 Retry ${retryAttempt}: Continuing sync with forceFullSync=true`);
+                            const retryRes = await fetch(`/api/pages/${selectedPageId}/sync`, {
+                                method: 'POST',
+                                headers: { 'Content-Type': 'application/json' },
+                                credentials: 'include',
+                                body: JSON.stringify({ forceFullSync: true }) // Full sync to get all conversations
+                            });
+
+                            const retryResClone = retryRes.clone();
+                            let retryRawBody = '';
+                            let retryData: any = null;
+                            try {
+                                retryRawBody = await retryResClone.text();
+                                retryData = retryRawBody ? JSON.parse(retryRawBody) : null;
+                            } catch {
+                                // ignore parse errors
+                            }
+
+                            if (!retryRes.ok) {
+                                throw new Error(retryData?.message || `HTTP ${retryRes.status}`);
+                            }
+
+                            if (retryData?.success) {
+                                currentSynced += retryData.synced || 0;
+                                currentFailed += retryData.failed || 0;
+                                
+                                // If retry also timed out, continue retrying
+                                if (retryData.partial) {
+                                    retryAttempt++;
+                                    console.warn(`⚠️ Retry attempt ${retryAttempt - 1} also timed out. ${retryData.remaining || 0} conversations still remaining.`);
+                                } else {
+                                    // Successfully completed
+                                    console.log(`✅ Auto-retry sync completed: ${retryData.synced} synced, ${retryData.failed} failed`);
+                                    const syncType = retryData.incremental ? 'Incremental' : 'Full';
+                                    let message = `${syncType} sync complete (with auto-retry)!\n\nTotal synced: ${currentSynced}\nTotal failed: ${currentFailed}\nTotal: ${retryData.total || data.total}`;
+                                    if (retryData.restored > 0) {
+                                        message += `\n\n✅ Restored: ${retryData.restored} previously deleted contacts`;
+                                    }
+                                    alert(message);
+                                    break;
+                                }
+                            } else {
+                                throw new Error(retryData?.message || 'Retry failed');
+                            }
+                        } catch (retryError) {
+                            console.error(`❌ Auto-retry sync attempt ${retryAttempt} failed:`, retryError);
+                            retryAttempt++;
+                            
+                            if (retryAttempt > MAX_SYNC_RETRIES) {
+                                alert(`Partial sync complete with auto-retry!\n\nSynced: ${currentSynced}\nFailed: ${currentFailed}\nProcessed: ${data.processed} of ${data.total}\n\nMax retries reached. Some contacts may still need syncing.`);
+                            }
+                        }
+                    }
                 } else {
                     const syncType = data.incremental ? 'Incremental' : 'Full';
                     let message = `${syncType} sync complete!\n\nSynced: ${data.synced}\nFailed: ${data.failed}\nTotal: ${data.total}`;

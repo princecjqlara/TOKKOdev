@@ -70,7 +70,9 @@ export async function getPageConversations(
     
     let nextUrl: string | null = baseUrl;
 
+    let pageCount = 0;
     while (nextUrl) {
+        pageCount++;
         const res: Response = await fetch(nextUrl);
 
         if (!res.ok) {
@@ -80,6 +82,8 @@ export async function getPageConversations(
 
         const responseData: { data?: FacebookConversation[]; paging?: { next?: string } } = await res.json();
         const conversations = responseData.data || [];
+        
+        console.log(`📄 Facebook API page ${pageCount}: fetched ${conversations.length} conversations (total so far: ${allConversations.length + conversations.length})`);
         
         // If using since parameter, filter out conversations older than sinceTimestamp
         if (sinceTimestamp && conversations.length > 0) {
@@ -91,8 +95,11 @@ export async function getPageConversations(
             });
             allConversations.push(...filtered);
             
+            console.log(`📄 After filtering by sinceTimestamp: ${filtered.length} valid conversations (${conversations.length - filtered.length} filtered out)`);
+            
             // If we got filtered results, we might have hit old conversations - stop pagination
             if (filtered.length < conversations.length) {
+                console.log(`📄 Stopping pagination: hit conversations older than sinceTimestamp`);
                 break;
             }
         } else {
@@ -102,16 +109,20 @@ export async function getPageConversations(
         // Check if we should continue pagination
         if (fetchAll && responseData.paging?.next) {
             nextUrl = responseData.paging.next;
+            console.log(`📄 Continuing pagination: ${allConversations.length} conversations fetched so far`);
         } else {
             nextUrl = null;
+            console.log(`📄 Pagination complete: no more pages available`);
         }
 
         // Safety limit to prevent infinite loops (max 10000 conversations)
         if (allConversations.length >= 10000) {
-            console.warn('Hit conversation limit of 10000');
+            console.warn(`⚠️ Hit conversation limit of 10000 (stopping pagination)`);
             break;
         }
     }
+    
+    console.log(`✅ Total conversations fetched: ${allConversations.length} across ${pageCount} pages`);
 
     return allConversations;
 }

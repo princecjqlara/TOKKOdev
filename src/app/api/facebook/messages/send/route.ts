@@ -60,7 +60,12 @@ export async function POST(request: NextRequest) {
         }
 
         // Log total contacts to send
+        console.log(`📤 ========== API: MESSAGE SEND REQUEST ==========`);
         console.log(`📤 Received request to send to ${contactIds.length} contacts`);
+        console.log(`📤 Page ID: ${pageId}`);
+        console.log(`📤 Sample contact IDs (first 5):`, contactIds.slice(0, 5));
+        console.log(`📤 Sample contact IDs (last 5):`, contactIds.slice(-5));
+        console.log(`📤 ===============================================`);
         
         // Ensure we process ALL contacts, not just first 1000
         // The batchSize is only for database queries, not for limiting sends
@@ -117,13 +122,19 @@ export async function POST(request: NextRequest) {
                 .in('id', batchIds);
 
             if (batchError) {
-                console.error(`❌ Error fetching contacts batch ${i / batchSize + 1}:`, batchError);
+                console.error(`❌ Error fetching contacts batch ${Math.floor(i / batchSize) + 1}:`, batchError);
+                console.error(`❌ This batch will be skipped - ${batchIds.length} contacts will not be sent!`);
+                // Don't continue - mark these as failed so user knows
+                totalFiltered += batchIds.length;
                 continue;
             }
 
             if (!batchContacts?.length) {
-                console.warn(`⚠️ Batch ${i / batchSize + 1}: no contacts found for ${batchIds.length} requested IDs`);
-                console.warn(`⚠️ Sample IDs from this batch:`, batchIds.slice(0, 5));
+                console.error(`❌ Batch ${Math.floor(i / batchSize) + 1}: NO contacts found in database for ${batchIds.length} requested IDs!`);
+                console.error(`❌ Sample IDs that don't exist:`, batchIds.slice(0, 5));
+                console.error(`❌ These contacts may have been deleted from the database`);
+                // Mark as filtered (not found)
+                totalFiltered += batchIds.length;
                 continue;
             }
 
@@ -141,13 +152,24 @@ export async function POST(request: NextRequest) {
             if (filteredCount > 0) {
                 const wrongPage = batchContacts.filter(c => c.page_id !== pageId).length;
                 const missingPsid = batchContacts.filter(c => typeof c.psid !== 'string' || c.psid.trim() === '').length;
-                console.warn(
-                    `⚠️ Batch ${i / batchSize + 1}: filtered ${filteredCount} contacts (wrong page: ${wrongPage}, missing psid: ${missingPsid})`
-                );
+                console.error(`❌ Batch ${Math.floor(i / batchSize) + 1}: FILTERED ${filteredCount} contacts!`);
+                console.error(`❌   - Wrong page_id: ${wrongPage} contacts (belong to different page)`);
+                console.error(`❌   - Missing psid: ${missingPsid} contacts (need to be synced)`);
                 if (wrongPage > 0) {
-                    console.warn(`⚠️ Example contacts with wrong page_id:`, 
-                        batchContacts.filter(c => c.page_id !== pageId).slice(0, 3).map(c => ({ id: c.id, page_id: c.page_id, expected: pageId }))
+                    const wrongPageContacts = batchContacts.filter(c => c.page_id !== pageId).slice(0, 5);
+                    console.error(`❌ Example contacts with wrong page_id:`, 
+                        wrongPageContacts.map(c => ({ 
+                            id: c.id, 
+                            actual_page_id: c.page_id, 
+                            expected_page_id: pageId,
+                            has_psid: !!c.psid
+                        }))
                     );
+                    console.error(`❌ SOLUTION: These contacts belong to page ${wrongPageContacts[0]?.page_id} but you're trying to send from page ${pageId}`);
+                    console.error(`❌ Either select the correct page, or these contacts need to be moved/re-synced`);
+                }
+                if (missingPsid > 0) {
+                    console.error(`❌ SOLUTION: ${missingPsid} contacts are missing psid - sync the page again to fix this`);
                 }
             }
 
@@ -270,6 +292,27 @@ export async function POST(request: NextRequest) {
         }
 
         console.log(`✅ Found ${allContacts.length} valid contacts out of ${contactIds.length} requested (${totalFound} found in DB, ${totalFiltered} filtered)`);
+        console.log(`📊 Contact lookup breakdown: ${contactIds.length} requested → ${totalFound} found in DB → ${allContacts.length} valid (${totalFiltered} filtered out)`);
+        
+        if (allContacts.length < contactIds.length) {
+            const missing = contactIds.length - allContacts.length;
+            console.error(`❌❌❌ CRITICAL: ${missing} contacts were not found or filtered out!`);
+            console.error(`❌ Requested: ${contactIds.length}, Found in DB: ${totalFound}, Filtered: ${totalFiltered}, Valid: ${allContacts.length}`);
+            console.error(`❌ This means ${missing} contacts will NOT be sent!`);
+            console.error(`❌ Possible reasons:`);
+            console.error(`❌   1. Contacts have wrong page_id (belong to different page)`);
+            console.error(`❌   2. Contacts are missing psid (need to be synced again)`);
+            console.error(`❌   3. Contacts were deleted from database`);
+            console.error(`❌ SOLUTION: Sync the page again to fix page_id and psid issues`);
+        }
+        
+        if (allContacts.length === 0) {
+            console.error(`❌❌❌ FATAL: No valid contacts found! Cannot send any messages.`);
+        }
+        
+        // #region agent log
+        fetch('http://127.0.0.1:7242/ingest/6358f30b-ef0a-4ea4-8acc-50c08c025924',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'send/route.ts:273',message:'Contact lookup complete',data:{requested:contactIds.length,found:totalFound,filtered:totalFiltered,valid:allContacts.length,pageId},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'D'})}).catch(()=>{});
+        // #endregion
 
         const results = {
             sent: 0,
@@ -278,19 +321,31 @@ export async function POST(request: NextRequest) {
         };
 
         // Process messages in parallel batches to avoid timeout and respect rate limits
-        const SEND_BATCH_SIZE = 10; // Send 10 messages in parallel
-        const DELAY_BETWEEN_BATCHES = 100; // 100ms delay between batches to respect rate limits
-        const MAX_PROCESSING_TIME = 240000; // 4 minutes (leave 1 minute buffer before 5 min timeout)
+        const SEND_BATCH_SIZE = 15; // Send 15 messages in parallel (increased for faster processing)
+        const DELAY_BETWEEN_BATCHES = 80; // 80ms delay between batches (reduced for faster processing)
+        const MAX_PROCESSING_TIME = 270000; // 4.5 minutes (leave 30 seconds buffer before 5 min timeout)
         const startTime = Date.now();
+
+        // #region agent log
+        fetch('http://127.0.0.1:7242/ingest/6358f30b-ef0a-4ea4-8acc-50c08c025924',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'send/route.ts:284',message:'Send start',data:{totalContacts:allContacts.length,requestedCount:contactIds.length,foundCount:totalFound,filteredCount:totalFiltered,startTime},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'A'})}).catch(()=>{});
+        // #endregion
 
         for (let i = 0; i < allContacts.length; i += SEND_BATCH_SIZE) {
             // Check if we're approaching timeout
             const elapsed = Date.now() - startTime;
+            // #region agent log
+            fetch('http://127.0.0.1:7242/ingest/6358f30b-ef0a-4ea4-8acc-50c08c025924',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'send/route.ts:289',message:'Timeout check',data:{batchIndex:i,processed:i,total:allContacts.length,elapsed,MAX_PROCESSING_TIME,willTimeout:elapsed>MAX_PROCESSING_TIME},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'A'})}).catch(()=>{});
+            // #endregion
             if (elapsed > MAX_PROCESSING_TIME) {
                 const remainingContacts = allContacts.slice(i);
                 const remainingContactIds = remainingContacts.map(c => c.id);
                 
+                // #region agent log
+                fetch('http://127.0.0.1:7242/ingest/6358f30b-ef0a-4ea4-8acc-50c08c025924',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'send/route.ts:293',message:'Timeout triggered',data:{processed:i,total:allContacts.length,remaining:remainingContacts.length,remainingContactIdsCount:remainingContactIds.length,elapsed},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'A'})}).catch(()=>{});
+                // #endregion
                 console.warn(`⏱️ Approaching timeout, processed ${i}/${allContacts.length} contacts. ${remainingContacts.length} contacts remaining.`);
+                const filteredCount = contactIds.length - allContacts.length;
+                
                 return NextResponse.json({
                     success: true,
                     partial: true,
@@ -299,7 +354,10 @@ export async function POST(request: NextRequest) {
                         ...results,
                         processed: i,
                         total: allContacts.length,
-                        remaining: remainingContacts.length
+                        remaining: remainingContacts.length,
+                        filtered: filteredCount,
+                        requested: contactIds.length,
+                        valid: allContacts.length
                     },
                     remainingContactIds: remainingContactIds // Return remaining contact IDs for automatic retry
                 });
@@ -353,15 +411,57 @@ export async function POST(request: NextRequest) {
 
             // Log progress every 50 contacts
             if ((i + SEND_BATCH_SIZE) % 50 === 0 || i + SEND_BATCH_SIZE >= allContacts.length) {
-                console.log(`Progress: ${Math.min(i + SEND_BATCH_SIZE, allContacts.length)}/${allContacts.length} contacts processed (Sent: ${results.sent}, Failed: ${results.failed})`);
+                const progress = Math.min(i + SEND_BATCH_SIZE, allContacts.length);
+                const percentage = Math.round((progress / allContacts.length) * 100);
+                const elapsed = Date.now() - startTime;
+                const rate = progress / (elapsed / 1000); // contacts per second
+                const remaining = allContacts.length - progress;
+                const estimatedSeconds = remaining / rate;
+                console.log(`📊 Progress: ${progress}/${allContacts.length} (${percentage}%) | Sent: ${results.sent}, Failed: ${results.failed} | Elapsed: ${Math.round(elapsed/1000)}s | Est. remaining: ${Math.round(estimatedSeconds)}s`);
             }
         }
 
-        console.log(`Completed sending: ${results.sent} sent, ${results.failed} failed out of ${allContacts.length} total`);
-
+        console.log(`✅ Completed sending: ${results.sent} sent, ${results.failed} failed out of ${allContacts.length} valid contacts`);
+        
+        const filteredCount = totalFiltered; // Use the tracked totalFiltered count
+        const notFoundCount = contactIds.length - totalFound; // Contacts that don't exist in DB
+        
+        console.log(`📊 ========== SEND OPERATION COMPLETE ==========`);
+        console.log(`📊 Requested: ${contactIds.length} contacts`);
+        console.log(`📊 Found in DB: ${totalFound} contacts`);
+        console.log(`📊 Valid for sending: ${allContacts.length} contacts`);
+        console.log(`📊 Filtered out: ${filteredCount} contacts (wrong page_id or missing psid)`);
+        console.log(`📊 Not found in DB: ${notFoundCount} contacts (may have been deleted)`);
+        console.log(`📊 Successfully sent: ${results.sent} contacts`);
+        console.log(`📊 Failed to send: ${results.failed} contacts`);
+        console.log(`📊 =============================================`);
+        
+        if (filteredCount > 0 || notFoundCount > 0) {
+            console.error(`❌ WARNING: ${filteredCount + notFoundCount} contacts were NOT sent!`);
+            if (filteredCount > 0) {
+                console.error(`❌   - ${filteredCount} contacts filtered (wrong page_id or missing psid)`);
+                console.error(`❌   SOLUTION: Sync the page again to fix page_id and psid issues`);
+            }
+            if (notFoundCount > 0) {
+                console.error(`❌   - ${notFoundCount} contacts not found in database (may have been deleted)`);
+                console.error(`❌   SOLUTION: These contacts need to be re-synced or re-added`);
+            }
+        }
+        
+        // #region agent log
+        fetch('http://127.0.0.1:7242/ingest/6358f30b-ef0a-4ea4-8acc-50c08c025924',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'send/route.ts:360',message:'Send complete',data:{sent:results.sent,failed:results.failed,total:allContacts.length,filtered:filteredCount,notFound:notFoundCount,elapsed:Date.now()-startTime},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'A'})}).catch(()=>{});
+        // #endregion
+        
         return NextResponse.json({
             success: true,
-            results
+            results: {
+                ...results,
+                filtered: filteredCount, // Number of contacts filtered out during lookup
+                notFound: notFoundCount, // Number of contacts not found in database
+                requested: contactIds.length, // Total requested
+                found: totalFound, // Found in database
+                valid: allContacts.length // Valid contacts found
+            }
         });
     } catch (error) {
         console.error('Error sending messages:', error);

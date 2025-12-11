@@ -160,27 +160,46 @@ export async function POST(
         const errors: string[] = [];
 
         // Process contacts in parallel batches to avoid timeout
-        const SYNC_BATCH_SIZE = 10; // Process 10 contacts in parallel (reduced for faster processing)
-        const DELAY_BETWEEN_BATCHES = 30; // 30ms delay between batches
-        const MAX_PROCESSING_TIME = 240000; // 4 minutes (leave 1 minute buffer before 5 min timeout)
-        const PROFILE_FETCH_TIMEOUT = 3000; // 3 seconds max per profile fetch
+        const SYNC_BATCH_SIZE = 15; // Process 15 contacts in parallel (increased for faster processing)
+        const DELAY_BETWEEN_BATCHES = 20; // 20ms delay between batches (reduced for faster processing)
+        const MAX_PROCESSING_TIME = 270000; // 4.5 minutes (leave 30 seconds buffer before 5 min timeout)
+        const PROFILE_FETCH_TIMEOUT = 2000; // 2 seconds max per profile fetch (reduced for faster processing)
         const startTime = Date.now();
 
         console.log(`Processing ${validConversations.length} valid conversations in batches of ${SYNC_BATCH_SIZE}`);
+        // #region agent log
+        fetch('http://127.0.0.1:7242/ingest/6358f30b-ef0a-4ea4-8acc-50c08c025924',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'sync/route.ts:169',message:'Sync start',data:{totalConversations:validConversations.length,isIncremental,lastSyncedAt:page.last_synced_at,startTime},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'E'})}).catch(()=>{});
+        // #endregion
 
         for (let i = 0; i < validConversations.length; i += SYNC_BATCH_SIZE) {
             // Check if we're approaching timeout
             const elapsed = Date.now() - startTime;
+            // #region agent log
+            fetch('http://127.0.0.1:7242/ingest/6358f30b-ef0a-4ea4-8acc-50c08c025924',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'sync/route.ts:174',message:'Sync timeout check',data:{batchIndex:i,processed:i,total:validConversations.length,elapsed,MAX_PROCESSING_TIME,willTimeout:elapsed>MAX_PROCESSING_TIME},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'E'})}).catch(()=>{});
+            // #endregion
             if (elapsed > MAX_PROCESSING_TIME) {
-                console.warn(`⚠️ Approaching timeout, processed ${i}/${validConversations.length} conversations. Returning partial results.`);
+                // #region agent log
+                fetch('http://127.0.0.1:7242/ingest/6358f30b-ef0a-4ea4-8acc-50c08c025924',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'sync/route.ts:175',message:'Sync timeout triggered',data:{processed:i,total:validConversations.length,remaining:validConversations.length-i,elapsed,synced,failed},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'E'})}).catch(()=>{});
+                // #endregion
+                const remainingConversations = validConversations.slice(i);
+                const remainingPsids = remainingConversations
+                    .map(conv => {
+                        const participant = conv.participants?.data?.find(p => p.id !== page.fb_page_id);
+                        return participant?.id;
+                    })
+                    .filter((psid): psid is string => !!psid);
+                
+                console.warn(`⚠️ Approaching timeout, processed ${i}/${validConversations.length} conversations. ${remainingConversations.length} conversations remaining.`);
                 return NextResponse.json({
                     success: true,
                     partial: true,
-                    message: `Processed ${i} of ${validConversations.length} conversations before timeout. Please sync again to continue.`,
+                    message: `Processed ${i} of ${validConversations.length} conversations before timeout. ${remainingConversations.length} conversations remaining.`,
                     synced,
                     failed,
                     total: conversations.length,
                     processed: i,
+                    remaining: remainingConversations.length,
+                    remainingPsids: remainingPsids, // Return remaining PSIDs for automatic retry
                     errors: errors.slice(0, 10)
                 });
             }
@@ -289,8 +308,13 @@ export async function POST(
         }
 
         console.log(`✅ Sync complete: ${synced} synced, ${failed} failed${restoredCount > 0 ? `, ${restoredCount} deleted contacts restored` : ''}`);
+        // #region agent log
+        fetch('http://127.0.0.1:7242/ingest/6358f30b-ef0a-4ea4-8acc-50c08c025924',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'sync/route.ts:291',message:'Sync complete',data:{synced,failed,total:validConversations.length,restored:restoredCount,elapsed:Date.now()-startTime},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'E'})}).catch(()=>{});
+        // #endregion
 
-        // Update last_synced_at timestamp
+        // Always update last_synced_at to the start time of this sync
+        // This ensures that if we retry, we won't re-fetch conversations we've already processed
+        // The upsert with onConflict will handle duplicates correctly
         await supabase
             .from('pages')
             .update({
@@ -298,6 +322,10 @@ export async function POST(
                 updated_at: new Date().toISOString()
             })
             .eq('id', pageId);
+        
+        if (synced + failed < validConversations.length) {
+            console.log(`⚠️ Partial sync - processed ${synced + failed}/${validConversations.length} conversations. last_synced_at updated to ${syncStartTime}`);
+        }
 
         return NextResponse.json({
             success: true,

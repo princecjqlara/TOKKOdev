@@ -14,3 +14,6 @@ ALTER COLUMN email DROP NOT NULL;
 -- Add a comment explaining the change
 COMMENT ON COLUMN users.email IS 'User email. Can be NULL for Facebook users without emails. Fallback format: fb_{facebook_id}@facebook.local';
 
+
+
+

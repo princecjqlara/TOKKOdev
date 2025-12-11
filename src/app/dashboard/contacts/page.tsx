@@ -328,19 +328,43 @@ export default function ContactsPage() {
         setActionLoading(true);
         try {
             const allContactIds = await getSelectedContactIds();
-            console.log(`📤 Sending messages to ${allContactIds.length} contacts`);
+            console.log(`📤 ========== STARTING BULK MESSAGE SEND ==========`);
+            console.log(`📤 Total contacts selected: ${allContactIds.length}`);
+            console.log(`📤 Selected page ID: ${selectedPageId}`);
+            console.log(`📤 Selection mode: ${selectAllMode ? 'Select All' : 'Individual Selection'}`);
+            if (selectAllMode) {
+                console.log(`📤 Excluded contacts: ${excludedIds.size}`);
+            }
+            console.log(`📤 Selected contact IDs sample (first 10):`, allContactIds.slice(0, 10));
+            console.log(`📤 Selected contact IDs sample (last 10):`, allContactIds.slice(-10));
+            console.log(`📤 ===============================================`);
             
             if (allContactIds.length === 0) {
                 alert('No contacts selected. Please select contacts first.');
                 setActionLoading(false);
                 return;
             }
+            
+            // Validate that we actually have the expected number of contacts
+            const expectedCount = selectAllMode ? (total - excludedIds.size) : selectedIds.size;
+            if (allContactIds.length !== expectedCount) {
+                console.error(`❌ COUNT MISMATCH: Expected ${expectedCount} contacts but got ${allContactIds.length}!`);
+                console.error(`❌ This may indicate an issue with contact selection`);
+            }
+            
+            // Warn if selecting a very large number
+            if (allContactIds.length > 1000) {
+                console.warn(`⚠️ Large batch detected: ${allContactIds.length} contacts. This may take several minutes.`);
+            }
+            
+            console.log(`📤 About to send ${allContactIds.length} contacts in ${Math.ceil(allContactIds.length / 5000)} chunk(s)`);
 
             // Chunk contacts into batches to avoid request body size limits and timeouts
             // Send in batches of 5000 contacts at a time
             const CHUNK_SIZE = 5000;
             let totalSent = 0;
             let totalFailed = 0;
+            let totalFiltered = 0; // Track filtered contacts across all chunks
             const allFailedIds: string[] = [];
 
             for (let i = 0; i < allContactIds.length; i += CHUNK_SIZE) {
@@ -375,9 +399,43 @@ export default function ContactsPage() {
                     }
 
                     const data = await response.json();
+                    // #region agent log
+                    fetch('http://127.0.0.1:7242/ingest/6358f30b-ef0a-4ea4-8acc-50c08c025924',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'contacts/page.tsx:377',message:'Chunk response received',data:{chunkNumber,chunkSize:chunk.length,success:data.success,partial:data.partial,remainingContactIdsCount:data.remainingContactIds?.length||0,sent:data.results?.sent||0,failed:data.results?.failed||0},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'B'})}).catch(()=>{});
+                    // #endregion
                     if (data.success) {
+                        // Log response details immediately
+                        console.log(`📥 Chunk ${chunkNumber} response:`, {
+                            requested: data.results.requested || chunk.length,
+                            found: data.results.found || 'N/A',
+                            valid: data.results.valid || chunk.length,
+                            sent: data.results.sent || 0,
+                            failed: data.results.failed || 0,
+                            filtered: data.results.filtered || 0,
+                            notFound: data.results.notFound || 0,
+                            partial: data.partial || false
+                        });
+                        
                         totalSent += data.results.sent || 0;
                         totalFailed += data.results.failed || 0;
+                        
+                        // Track filtered contacts (contacts that were filtered out during lookup)
+                        const filteredCount = data.results.filtered || 0;
+                        const notFoundCount = data.results.notFound || 0;
+                        const totalChunkFiltered = filteredCount + notFoundCount;
+                        totalFiltered += totalChunkFiltered;
+                        
+                        if (totalChunkFiltered > 0) {
+                            console.error(`❌❌❌ Chunk ${chunkNumber}: ${totalChunkFiltered} contacts CANNOT be sent!`);
+                            if (filteredCount > 0) {
+                                console.error(`❌   - ${filteredCount} filtered out (wrong page_id or missing psid)`);
+                            }
+                            if (notFoundCount > 0) {
+                                console.error(`❌   - ${notFoundCount} not found in database (may have been deleted)`);
+                            }
+                            console.error(`❌ Chunk ${chunkNumber} breakdown: ${data.results.requested || chunk.length} requested → ${data.results.valid || chunk.length} valid`);
+                            console.error(`❌ SOLUTION: Sync the page again to fix page_id/psid issues, or re-add deleted contacts`);
+                            console.error(`❌ Running total filtered so far: ${totalFiltered} contacts`);
+                        }
                         
                         // Collect failed contact IDs
                         if (data.results.errors?.length) {
@@ -386,7 +444,14 @@ export default function ContactsPage() {
 
                         // If partial (timeout), automatically retry remaining contacts in smaller chunks
                         if (data.partial && data.remainingContactIds?.length > 0) {
-                            console.warn(`⚠️ Chunk ${chunkNumber} timed out. Processed ${data.results.processed}/${chunk.length}. Auto-retrying ${data.remainingContactIds.length} remaining contacts...`);
+                            // #region agent log
+                            fetch('http://127.0.0.1:7242/ingest/6358f30b-ef0a-4ea4-8acc-50c08c025924',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'contacts/page.tsx:388',message:'Auto-retry triggered',data:{chunkNumber,remainingCount:data.remainingContactIds.length,processed:data.results?.processed||0},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'B'})}).catch(()=>{});
+                            // #endregion
+                            console.warn(`⚠️⚠️⚠️ TIMEOUT DETECTED: Chunk ${chunkNumber} timed out!`);
+                            console.warn(`⚠️ Processed: ${data.results.processed}/${chunk.length} contacts`);
+                            console.warn(`⚠️ Remaining: ${data.remainingContactIds.length} contacts need to be retried`);
+                            console.warn(`⚠️ Starting auto-retry for ${data.remainingContactIds.length} remaining contacts...`);
+                            console.log(`📊 Chunk ${chunkNumber} results before retry: ${data.results.sent} sent, ${data.results.failed} failed`);
                             
                             // Retry remaining contacts in smaller chunks to avoid repeated timeouts
                             const RETRY_CHUNK_SIZE = 2000; // Smaller chunks for retries
@@ -397,6 +462,9 @@ export default function ContactsPage() {
                                 const retryChunk = remainingToRetry.slice(0, RETRY_CHUNK_SIZE);
                                 retryChunkIndex++;
                                 
+                                // #region agent log
+                                fetch('http://127.0.0.1:7242/ingest/6358f30b-ef0a-4ea4-8acc-50c08c025924',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'contacts/page.tsx:396',message:'Retry loop iteration',data:{retryChunkIndex,retryChunkSize:retryChunk.length,remainingTotal:remainingToRetry.length},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'C'})}).catch(()=>{});
+                                // #endregion
                                 console.log(`🔄 Auto-retry chunk ${retryChunkIndex} for ${retryChunk.length} contacts (${remainingToRetry.length} total remaining)`);
                                 
                                 try {
@@ -426,6 +494,20 @@ export default function ContactsPage() {
                                         totalSent += retryData.results.sent || 0;
                                         totalFailed += retryData.results.failed || 0;
                                         
+                                        // Track filtered and not found contacts from retry
+                                        const retryFilteredCount = retryData.results.filtered || 0;
+                                        const retryNotFoundCount = retryData.results.notFound || 0;
+                                        totalFiltered += retryFilteredCount + retryNotFoundCount;
+                                        if (retryFilteredCount > 0 || retryNotFoundCount > 0) {
+                                            console.error(`❌ Retry chunk ${retryChunkIndex}: ${retryFilteredCount + retryNotFoundCount} contacts cannot be sent!`);
+                                            if (retryFilteredCount > 0) {
+                                                console.error(`❌   - ${retryFilteredCount} filtered out (wrong page_id or missing psid)`);
+                                            }
+                                            if (retryNotFoundCount > 0) {
+                                                console.error(`❌   - ${retryNotFoundCount} not found in database`);
+                                            }
+                                        }
+                                        
                                         // Collect failed contact IDs from retry
                                         if (retryData.results.errors?.length) {
                                             allFailedIds.push(...retryData.results.errors.map((e: { contactId: string }) => e.contactId));
@@ -433,14 +515,22 @@ export default function ContactsPage() {
 
                                         // If retry also timed out, update remaining list with still-remaining contacts
                                         if (retryData.partial && retryData.remainingContactIds?.length > 0) {
-                                            // Remove this chunk from remaining list and add back only the still-remaining contacts
-                                            remainingToRetry = remainingToRetry.slice(RETRY_CHUNK_SIZE);
+                                            // Calculate which contacts from this retry chunk were successfully processed
+                                            const processedFromRetry = retryChunk.filter(id => 
+                                                !retryData.remainingContactIds.includes(id)
+                                            );
+                                            // Remove processed contacts from remaining list
+                                            const processedSet = new Set(processedFromRetry);
+                                            remainingToRetry = remainingToRetry.filter(id => !processedSet.has(id));
+                                            // Add back only the still-remaining contacts from this retry
                                             remainingToRetry = [...remainingToRetry, ...retryData.remainingContactIds];
                                             console.warn(`⚠️ Retry chunk ${retryChunkIndex} also timed out. ${retryData.remainingContactIds.length} contacts still remaining from this chunk.`);
                                         } else {
                                             // Successfully completed this retry chunk - remove from remaining list
                                             console.log(`✅ Auto-retry chunk ${retryChunkIndex} completed: ${retryData.results.sent} sent, ${retryData.results.failed} failed`);
-                                            remainingToRetry = remainingToRetry.slice(RETRY_CHUNK_SIZE);
+                                            // Remove all contacts from this retry chunk
+                                            const retryChunkSet = new Set(retryChunk);
+                                            remainingToRetry = remainingToRetry.filter(id => !retryChunkSet.has(id));
                                         }
                                     } else {
                                         throw new Error(retryData.message || 'Retry failed');
@@ -486,17 +576,91 @@ export default function ContactsPage() {
             setFailedContactIds(allFailedIds);
             setLastSendResults({ sent: totalSent, failed: totalFailed });
 
-            if (totalFailed > 0) {
-                alert(`Messages sent! Success: ${totalSent}, Failed: ${totalFailed} out of ${allContactIds.length} total.\n\nYou can resend to failed contacts using the "Resend to Failed" button.`);
+            // Calculate final totals
+            const totalProcessed = totalSent + totalFailed;
+            const totalAccountedFor = totalProcessed + totalFiltered;
+            const unaccounted = allContactIds.length - totalAccountedFor;
+            
+            // Print a very visible final summary
+            console.log(`\n\n`);
+            console.log(`╔════════════════════════════════════════════════════════════╗`);
+            console.log(`║           FINAL BULK MESSAGE SEND SUMMARY                  ║`);
+            console.log(`╠════════════════════════════════════════════════════════════╣`);
+            console.log(`║ Total contacts selected:        ${allContactIds.length.toString().padStart(10)} ║`);
+            console.log(`║ Successfully sent:               ${totalSent.toString().padStart(10)} ║`);
+            console.log(`║ Failed to send:                  ${totalFailed.toString().padStart(10)} ║`);
+            console.log(`║ Filtered out (NOT SENT):         ${totalFiltered.toString().padStart(10)} ║`);
+            if (unaccounted > 0) {
+                console.log(`║ Unaccounted for (BUG):            ${unaccounted.toString().padStart(10)} ║`);
+            }
+            console.log(`║ Total accounted for:              ${totalAccountedFor.toString().padStart(10)} ║`);
+            console.log(`╠════════════════════════════════════════════════════════════╣`);
+            
+            if (totalFiltered > 0) {
+                const percentage = Math.round((totalFiltered / allContactIds.length) * 100);
+                console.log(`║ ❌❌❌ CRITICAL ISSUE DETECTED ❌❌❌                        ║`);
+                console.log(`║ ${totalFiltered} contacts (${percentage}%) were NOT sent!                    ║`);
+                console.log(`║                                                          ║`);
+                console.log(`║ Reasons contacts were filtered out:                      ║`);
+                console.log(`║   • Wrong page_id (belong to different page)             ║`);
+                console.log(`║   • Missing psid (need to be synced)                    ║`);
+                console.log(`║   • Not found in database (may have been deleted)        ║`);
+                console.log(`║                                                          ║`);
+                console.log(`║ SOLUTION: Sync the page again to fix page_id and psid   ║`);
+                console.log(`║           issues. This will ensure all contacts can be   ║`);
+                console.log(`║           sent in future operations.                     ║`);
+            } else if (totalSent === allContactIds.length) {
+                console.log(`║ ✅ SUCCESS: All ${totalSent} contacts were sent successfully!      ║`);
             } else {
-                alert(`Messages sent! Success: ${totalSent}, Failed: ${totalFailed}`);
-                // Clear failed contacts if all succeeded
+                console.log(`║ ⚠️  PARTIAL: ${totalSent}/${allContactIds.length} contacts sent        ║`);
+            }
+            
+            if (unaccounted > 0) {
+                console.log(`║                                                          ║`);
+                console.log(`║ ❌ COUNT MISMATCH BUG: ${unaccounted} contacts unaccounted for! ║`);
+                console.log(`║    This indicates a bug - please report this issue.       ║`);
+            }
+            
+            console.log(`╚════════════════════════════════════════════════════════════╝`);
+            console.log(`\n\n`);
+
+            const totalAccountedFor = totalSent + totalFailed + totalFiltered;
+            const unaccounted = allContactIds.length - totalAccountedFor;
+            
+            // Build comprehensive alert message
+            let message = '';
+            if (totalSent === allContactIds.length && totalFailed === 0 && totalFiltered === 0) {
+                // Perfect success
+                message = `✅ All messages sent successfully!\n\nSuccess: ${totalSent}\nFailed: ${totalFailed}`;
                 setFailedContactIds([]);
                 setLastSendResults(null);
                 setShowMessageModal(false);
                 setMessageText('');
                 clearSelection();
+            } else {
+                // Partial success or issues
+                message = `Messages sent!\n\n`;
+                message += `✅ Successfully sent: ${totalSent}\n`;
+                message += `❌ Failed to send: ${totalFailed}\n`;
+                message += `⚠️ Filtered out (not sent): ${totalFiltered}\n`;
+                message += `📊 Total selected: ${allContactIds.length}\n`;
+                
+                if (totalFiltered > 0) {
+                    message += `\n\n⚠️ IMPORTANT: ${totalFiltered} contacts were NOT sent because they were filtered out.\n`;
+                    message += `Reasons: wrong page_id, missing psid, or not found in database.\n\n`;
+                    message += `SOLUTION: Sync the page again to fix page_id and psid issues.`;
+                }
+                
+                if (unaccounted > 0) {
+                    message += `\n\n❌ ERROR: ${unaccounted} contacts are unaccounted for (this is a bug).`;
+                }
+                
+                if (totalFailed > 0) {
+                    message += `\n\nYou can resend to failed contacts using the "Resend to Failed" button.`;
+                }
             }
+            
+            alert(message);
             
             await fetchContacts();
         } catch (error) {

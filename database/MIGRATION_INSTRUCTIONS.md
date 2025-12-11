@@ -31,3 +31,5 @@ Click "Run" or press Ctrl+Enter
 - Make sure you're only copying the SQL code above (between the ```sql markers)
 - The SQL should start with `ALTER TABLE` and end with `WHERE last_synced_at IS NULL;`
 
+
+
