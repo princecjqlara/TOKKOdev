@@ -193,8 +193,13 @@ export async function POST(request: NextRequest) {
 
             if (validContacts.length) {
                 allContacts = allContacts.concat(validContacts.map(c => ({ id: c.id, psid: c.psid.trim() })));
+                console.log(`✅ Batch ${batchNumber}: Added ${validContacts.length} valid contacts (total valid so far: ${allContacts.length})`);
+            } else {
+                console.warn(`⚠️ Batch ${batchNumber}: No valid contacts in this batch (all were filtered or not found)`);
             }
         }
+        
+        console.log(`📊 Finished processing all ${batchesProcessed} batches`);
 
         console.log(`📊 ========== CONTACT LOOKUP SUMMARY ==========`);
         console.log(`📊 Batches processed: ${batchesProcessed}`);

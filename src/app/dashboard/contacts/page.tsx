@@ -385,12 +385,19 @@ export default function ContactsPage() {
             let totalNotFound = 0; // Track contacts not found in database
             const allFailedIds: string[] = [];
 
+            // Track which contacts we've attempted to send
+            const contactsAttempted = new Set<string>();
+            
             for (let i = 0; i < allContactIds.length; i += CHUNK_SIZE) {
                 const chunk = allContactIds.slice(i, i + CHUNK_SIZE);
                 const chunkNumber = Math.floor(i / CHUNK_SIZE) + 1;
                 const totalChunks = Math.ceil(allContactIds.length / CHUNK_SIZE);
                 
                 console.log(`📤 Processing chunk ${chunkNumber}/${totalChunks} (${chunk.length} contacts)`);
+                console.log(`📤 Chunk ${chunkNumber} contact IDs (first 5):`, chunk.slice(0, 5));
+                
+                // Track that we're attempting to send these contacts
+                chunk.forEach(id => contactsAttempted.add(id));
                 
                 try {
                     const response = await fetch('/api/facebook/messages/send', {
@@ -607,9 +614,16 @@ export default function ContactsPage() {
             const totalAccountedFor = totalProcessed + totalUnsendable;
             const unaccounted = originalContactCount - totalAccountedFor;
             
+            // Validate that we attempted to send all contacts
+            const contactsNotAttempted = originalContactCount - contactsAttempted.size;
+            if (contactsNotAttempted > 0) {
+                console.error(`❌❌❌ CRITICAL: ${contactsNotAttempted} contacts were NEVER sent to the API!`);
+                console.error(`❌ This indicates a bug in the chunking or loop logic`);
+            }
+            
             // Log intermediate totals for debugging
             console.log(`📊 Intermediate totals: sent=${totalSent}, failed=${totalFailed}, filtered=${totalFiltered}, notFound=${totalNotFound}`);
-            console.log(`📊 Original selected: ${originalContactCount}, Accounted for: ${totalAccountedFor}, Unaccounted: ${unaccounted}`);
+            console.log(`📊 Original selected: ${originalContactCount}, Attempted: ${contactsAttempted.size}, Accounted for: ${totalAccountedFor}, Unaccounted: ${unaccounted}`);
             
             // Print a very visible final summary
             console.log(`\n\n`);
