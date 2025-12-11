@@ -327,56 +327,99 @@ export default function ContactsPage() {
 
         setActionLoading(true);
         try {
-            const contactIds = await getSelectedContactIds();
-            const response = await fetch('/api/facebook/messages/send', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    pageId: selectedPageId,
-                    contactIds,
-                    messageText: messageText.trim()
-                })
-            });
-
-            // Check if response is OK before parsing JSON
-            if (!response.ok) {
-                const contentType = response.headers.get('content-type');
-                if (contentType && contentType.includes('application/json')) {
-                    const errorData = await response.json();
-                    throw new Error(errorData.message || `HTTP ${response.status}: ${response.statusText}`);
-                } else {
-                    // Response is HTML (error page), get text instead
-                    const text = await response.text();
-                    throw new Error(`Server error (${response.status}): ${response.statusText}. Please check the console for details.`);
-                }
+            const allContactIds = await getSelectedContactIds();
+            console.log(`📤 Sending messages to ${allContactIds.length} contacts`);
+            
+            if (allContactIds.length === 0) {
+                alert('No contacts selected. Please select contacts first.');
+                setActionLoading(false);
+                return;
             }
 
-            const data = await response.json();
-            if (data.success) {
-                // Store failed contact IDs for resend option
-                const failedIds = data.results.errors?.map((e: { contactId: string }) => e.contactId) || [];
-                setFailedContactIds(failedIds);
-                setLastSendResults({ sent: data.results.sent, failed: data.results.failed });
+            // Chunk contacts into batches to avoid request body size limits and timeouts
+            // Send in batches of 5000 contacts at a time
+            const CHUNK_SIZE = 5000;
+            let totalSent = 0;
+            let totalFailed = 0;
+            const allFailedIds: string[] = [];
 
-                if (data.partial) {
-                    alert(`Partial completion: ${data.results.sent} sent, ${data.results.failed} failed out of ${data.results.total} total.\n\n${data.message}\n\nPlease send the remaining contacts in another batch.`);
-                } else {
-                    if (data.results.failed > 0) {
-                        alert(`Messages sent! Success: ${data.results.sent}, Failed: ${data.results.failed}\n\nYou can resend to failed contacts using the "Resend to Failed" button.`);
-                    } else {
-                        alert(`Messages sent! Success: ${data.results.sent}, Failed: ${data.results.failed}`);
-                        // Clear failed contacts if all succeeded
-                        setFailedContactIds([]);
-                        setLastSendResults(null);
-                        setShowMessageModal(false);
-                        setMessageText('');
-                        clearSelection();
+            for (let i = 0; i < allContactIds.length; i += CHUNK_SIZE) {
+                const chunk = allContactIds.slice(i, i + CHUNK_SIZE);
+                const chunkNumber = Math.floor(i / CHUNK_SIZE) + 1;
+                const totalChunks = Math.ceil(allContactIds.length / CHUNK_SIZE);
+                
+                console.log(`📤 Processing chunk ${chunkNumber}/${totalChunks} (${chunk.length} contacts)`);
+                
+                try {
+                    const response = await fetch('/api/facebook/messages/send', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                            pageId: selectedPageId,
+                            contactIds: chunk,
+                            messageText: messageText.trim()
+                        })
+                    });
+
+                    // Check if response is OK before parsing JSON
+                    if (!response.ok) {
+                        const contentType = response.headers.get('content-type');
+                        if (contentType && contentType.includes('application/json')) {
+                            const errorData = await response.json();
+                            throw new Error(errorData.message || `HTTP ${response.status}: ${response.statusText}`);
+                        } else {
+                            // Response is HTML (error page), get text instead
+                            const text = await response.text();
+                            throw new Error(`Server error (${response.status}): ${response.statusText}. Please check the console for details.`);
+                        }
                     }
+
+                    const data = await response.json();
+                    if (data.success) {
+                        totalSent += data.results.sent || 0;
+                        totalFailed += data.results.failed || 0;
+                        
+                        // Collect failed contact IDs
+                        if (data.results.errors?.length) {
+                            allFailedIds.push(...data.results.errors.map((e: { contactId: string }) => e.contactId));
+                        }
+
+                        // If partial (timeout), we need to handle remaining contacts
+                        if (data.partial) {
+                            console.warn(`⚠️ Chunk ${chunkNumber} was partially processed: ${data.results.processed}/${chunk.length}`);
+                            // Continue with next chunk - the partial results are already counted
+                        }
+
+                        console.log(`✅ Chunk ${chunkNumber}/${totalChunks} complete: ${data.results.sent} sent, ${data.results.failed} failed`);
+                    } else {
+                        throw new Error(data.message || 'Failed to send messages');
+                    }
+                } catch (error) {
+                    console.error(`❌ Error sending chunk ${chunkNumber}:`, error);
+                    // Mark all contacts in this chunk as failed
+                    totalFailed += chunk.length;
+                    allFailedIds.push(...chunk);
+                    // Continue with next chunk instead of stopping
                 }
-                await fetchContacts();
-            } else {
-                throw new Error(data.message || 'Failed to send messages');
             }
+
+            // Store failed contact IDs for resend option
+            setFailedContactIds(allFailedIds);
+            setLastSendResults({ sent: totalSent, failed: totalFailed });
+
+            if (totalFailed > 0) {
+                alert(`Messages sent! Success: ${totalSent}, Failed: ${totalFailed} out of ${allContactIds.length} total.\n\nYou can resend to failed contacts using the "Resend to Failed" button.`);
+            } else {
+                alert(`Messages sent! Success: ${totalSent}, Failed: ${totalFailed}`);
+                // Clear failed contacts if all succeeded
+                setFailedContactIds([]);
+                setLastSendResults(null);
+                setShowMessageModal(false);
+                setMessageText('');
+                clearSelection();
+            }
+            
+            await fetchContacts();
         } catch (error) {
             console.error('Error sending messages:', error);
             alert(`Error sending messages: ${(error as Error).message}`);
