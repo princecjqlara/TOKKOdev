@@ -334,6 +334,10 @@ export default function ContactsPage() {
             console.log(`📤 Selection mode: ${selectAllMode ? 'Select All' : 'Individual Selection'}`);
             if (selectAllMode) {
                 console.log(`📤 Excluded contacts: ${excludedIds.size}`);
+                console.log(`📤 Total contacts on page: ${total}`);
+                console.log(`📤 Expected selected: ${total - excludedIds.size}`);
+            } else {
+                console.log(`📤 Individually selected: ${selectedIds.size}`);
             }
             console.log(`📤 Selected contact IDs sample (first 10):`, allContactIds.slice(0, 10));
             console.log(`📤 Selected contact IDs sample (last 10):`, allContactIds.slice(-10));
@@ -350,7 +354,17 @@ export default function ContactsPage() {
             if (allContactIds.length !== expectedCount) {
                 console.error(`❌ COUNT MISMATCH: Expected ${expectedCount} contacts but got ${allContactIds.length}!`);
                 console.error(`❌ This may indicate an issue with contact selection`);
+                console.error(`❌ Selection mode: ${selectAllMode ? 'Select All' : 'Individual'}`);
+                if (selectAllMode) {
+                    console.error(`❌ Total on page: ${total}, Excluded: ${excludedIds.size}, Expected: ${expectedCount}`);
+                } else {
+                    console.error(`❌ Selected IDs count: ${selectedIds.size}`);
+                }
             }
+            
+            // Store the original count for validation at the end
+            const originalContactCount = allContactIds.length;
+            console.log(`📤 Will attempt to send ${originalContactCount} contacts`);
             
             // Warn if selecting a very large number
             if (allContactIds.length > 1000) {
@@ -367,7 +381,8 @@ export default function ContactsPage() {
             const CHUNK_SIZE = 5000;
             let totalSent = 0;
             let totalFailed = 0;
-            let totalFiltered = 0; // Track filtered contacts across all chunks
+            let totalFiltered = 0; // Track filtered contacts (wrong page_id or missing psid)
+            let totalNotFound = 0; // Track contacts not found in database
             const allFailedIds: string[] = [];
 
             for (let i = 0; i < allContactIds.length; i += CHUNK_SIZE) {
@@ -424,8 +439,9 @@ export default function ContactsPage() {
                         // Track filtered contacts (contacts that were filtered out during lookup)
                         const filteredCount = data.results.filtered || 0;
                         const notFoundCount = data.results.notFound || 0;
+                        totalFiltered += filteredCount; // Track filtered separately
+                        totalNotFound += notFoundCount; // Track not found separately
                         const totalChunkFiltered = filteredCount + notFoundCount;
-                        totalFiltered += totalChunkFiltered;
                         
                         if (totalChunkFiltered > 0) {
                             console.error(`❌❌❌ Chunk ${chunkNumber}: ${totalChunkFiltered} contacts CANNOT be sent!`);
@@ -500,7 +516,8 @@ export default function ContactsPage() {
                                         // Track filtered and not found contacts from retry
                                         const retryFilteredCount = retryData.results.filtered || 0;
                                         const retryNotFoundCount = retryData.results.notFound || 0;
-                                        totalFiltered += retryFilteredCount + retryNotFoundCount;
+                                        totalFiltered += retryFilteredCount; // Track filtered separately
+                                        totalNotFound += retryNotFoundCount; // Track not found separately
                                         if (retryFilteredCount > 0 || retryNotFoundCount > 0) {
                                             console.error(`❌ Retry chunk ${retryChunkIndex}: ${retryFilteredCount + retryNotFoundCount} contacts cannot be sent!`);
                                             if (retryFilteredCount > 0) {
@@ -584,34 +601,47 @@ export default function ContactsPage() {
             setLastSendResults({ sent: totalSent, failed: totalFailed });
 
             // Calculate final totals
+            // Calculate final totals - ensure we're tracking everything correctly
             const totalProcessed = totalSent + totalFailed;
-            const totalAccountedFor = totalProcessed + totalFiltered;
-            const unaccounted = allContactIds.length - totalAccountedFor;
+            const totalUnsendable = totalFiltered + totalNotFound;
+            const totalAccountedFor = totalProcessed + totalUnsendable;
+            const unaccounted = originalContactCount - totalAccountedFor;
+            
+            // Log intermediate totals for debugging
+            console.log(`📊 Intermediate totals: sent=${totalSent}, failed=${totalFailed}, filtered=${totalFiltered}, notFound=${totalNotFound}`);
+            console.log(`📊 Original selected: ${originalContactCount}, Accounted for: ${totalAccountedFor}, Unaccounted: ${unaccounted}`);
             
             // Print a very visible final summary
             console.log(`\n\n`);
             console.log(`╔════════════════════════════════════════════════════════════╗`);
             console.log(`║           FINAL BULK MESSAGE SEND SUMMARY                  ║`);
             console.log(`╠════════════════════════════════════════════════════════════╣`);
-            console.log(`║ Total contacts selected:        ${allContactIds.length.toString().padStart(10)} ║`);
+            console.log(`║ Total contacts selected:        ${originalContactCount.toString().padStart(10)} ║`);
             console.log(`║ Successfully sent:               ${totalSent.toString().padStart(10)} ║`);
             console.log(`║ Failed to send:                  ${totalFailed.toString().padStart(10)} ║`);
-            console.log(`║ Filtered out (NOT SENT):         ${totalFiltered.toString().padStart(10)} ║`);
+            console.log(`║ Filtered (wrong page/missing psid): ${totalFiltered.toString().padStart(10)} ║`);
+            console.log(`║ Not found in database:          ${totalNotFound.toString().padStart(10)} ║`);
+            console.log(`║ Total unsendable:                ${totalUnsendable.toString().padStart(10)} ║`);
             if (unaccounted > 0) {
                 console.log(`║ Unaccounted for (BUG):            ${unaccounted.toString().padStart(10)} ║`);
             }
             console.log(`║ Total accounted for:              ${totalAccountedFor.toString().padStart(10)} ║`);
             console.log(`╠════════════════════════════════════════════════════════════╣`);
             
-            if (totalFiltered > 0) {
-                const percentage = Math.round((totalFiltered / allContactIds.length) * 100);
+            if (totalUnsendable > 0) {
+                const percentage = Math.round((totalUnsendable / allContactIds.length) * 100);
                 console.log(`║ ❌❌❌ CRITICAL ISSUE DETECTED ❌❌❌                        ║`);
-                console.log(`║ ${totalFiltered} contacts (${percentage}%) were NOT sent!                    ║`);
+                console.log(`║ ${totalUnsendable} contacts (${percentage}%) were NOT sent!                    ║`);
                 console.log(`║                                                          ║`);
-                console.log(`║ Reasons contacts were filtered out:                      ║`);
-                console.log(`║   • Wrong page_id (belong to different page)             ║`);
-                console.log(`║   • Missing psid (need to be synced)                    ║`);
-                console.log(`║   • Not found in database (may have been deleted)        ║`);
+                if (totalFiltered > 0) {
+                    console.log(`║ ${totalFiltered} contacts filtered (wrong page_id or missing psid)      ║`);
+                    console.log(`║   • Wrong page_id: contacts belong to different page                  ║`);
+                    console.log(`║   • Missing psid: contacts need to be synced                          ║`);
+                }
+                if (totalNotFound > 0) {
+                    console.log(`║ ${totalNotFound} contacts not found in database                        ║`);
+                    console.log(`║   • May have been deleted or never synced                             ║`);
+                }
                 console.log(`║                                                          ║`);
                 console.log(`║ SOLUTION: Sync the page again to fix page_id and psid   ║`);
                 console.log(`║           issues. This will ensure all contacts can be   ║`);
@@ -636,7 +666,7 @@ export default function ContactsPage() {
             
             // Build comprehensive alert message
             let message = '';
-            if (totalSent === allContactIds.length && totalFailed === 0 && totalFiltered === 0) {
+            if (totalSent === allContactIds.length && totalFailed === 0 && totalUnsendable === 0) {
                 // Perfect success
                 message = `✅ All messages sent successfully!\n\nSuccess: ${totalSent}\nFailed: ${totalFailed}`;
                 setFailedContactIds([]);
@@ -649,13 +679,23 @@ export default function ContactsPage() {
                 message = `Messages sent!\n\n`;
                 message += `✅ Successfully sent: ${totalSent}\n`;
                 message += `❌ Failed to send: ${totalFailed}\n`;
-                message += `⚠️ Filtered out (not sent): ${totalFiltered}\n`;
+                if (totalFiltered > 0) {
+                    message += `⚠️ Filtered (wrong page/missing psid): ${totalFiltered}\n`;
+                }
+                if (totalNotFound > 0) {
+                    message += `⚠️ Not found in database: ${totalNotFound}\n`;
+                }
                 message += `📊 Total selected: ${allContactIds.length}\n`;
                 
-                if (totalFiltered > 0) {
-                    message += `\n\n⚠️ IMPORTANT: ${totalFiltered} contacts were NOT sent because they were filtered out.\n`;
-                    message += `Reasons: wrong page_id, missing psid, or not found in database.\n\n`;
-                    message += `SOLUTION: Sync the page again to fix page_id and psid issues.`;
+                if (totalUnsendable > 0) {
+                    message += `\n\n⚠️ IMPORTANT: ${totalUnsendable} contacts were NOT sent!\n`;
+                    if (totalFiltered > 0) {
+                        message += `\n${totalFiltered} contacts filtered (wrong page_id or missing psid)\n`;
+                    }
+                    if (totalNotFound > 0) {
+                        message += `${totalNotFound} contacts not found in database\n`;
+                    }
+                    message += `\nSOLUTION: Sync the page again to fix page_id and psid issues.`;
                 }
                 
                 if (unaccounted > 0) {
