@@ -384,17 +384,20 @@ export default function ContactsPage() {
                             allFailedIds.push(...data.results.errors.map((e: { contactId: string }) => e.contactId));
                         }
 
-                        // If partial (timeout), automatically retry remaining contacts
+                        // If partial (timeout), automatically retry remaining contacts in smaller chunks
                         if (data.partial && data.remainingContactIds?.length > 0) {
                             console.warn(`⚠️ Chunk ${chunkNumber} timed out. Processed ${data.results.processed}/${chunk.length}. Auto-retrying ${data.remainingContactIds.length} remaining contacts...`);
                             
-                            // Automatically retry remaining contacts from this chunk
-                            let retryAttempt = 1;
-                            const MAX_RETRIES = 3;
+                            // Retry remaining contacts in smaller chunks to avoid repeated timeouts
+                            const RETRY_CHUNK_SIZE = 2000; // Smaller chunks for retries
                             let remainingToRetry = [...data.remainingContactIds];
+                            let retryChunkIndex = 0;
                             
-                            while (remainingToRetry.length > 0 && retryAttempt <= MAX_RETRIES) {
-                                console.log(`🔄 Auto-retry attempt ${retryAttempt}/${MAX_RETRIES} for ${remainingToRetry.length} contacts`);
+                            while (remainingToRetry.length > 0) {
+                                const retryChunk = remainingToRetry.slice(0, RETRY_CHUNK_SIZE);
+                                retryChunkIndex++;
+                                
+                                console.log(`🔄 Auto-retry chunk ${retryChunkIndex} for ${retryChunk.length} contacts (${remainingToRetry.length} total remaining)`);
                                 
                                 try {
                                     const retryResponse = await fetch('/api/facebook/messages/send', {
@@ -402,7 +405,7 @@ export default function ContactsPage() {
                                         headers: { 'Content-Type': 'application/json' },
                                         body: JSON.stringify({
                                             pageId: selectedPageId,
-                                            contactIds: remainingToRetry,
+                                            contactIds: retryChunk,
                                             messageText: messageText.trim()
                                         })
                                     });
@@ -428,35 +431,46 @@ export default function ContactsPage() {
                                             allFailedIds.push(...retryData.results.errors.map((e: { contactId: string }) => e.contactId));
                                         }
 
-                                        // If retry also timed out, update remaining list for next retry
+                                        // If retry also timed out, add remaining to the queue for next iteration
                                         if (retryData.partial && retryData.remainingContactIds?.length > 0) {
-                                            remainingToRetry = retryData.remainingContactIds;
-                                            retryAttempt++;
-                                            console.warn(`⚠️ Retry attempt ${retryAttempt - 1} also timed out. ${remainingToRetry.length} contacts still remaining.`);
+                                            // Remove successfully processed contacts from remaining list
+                                            const processedIds = new Set(retryChunk.filter(id => 
+                                                !retryData.remainingContactIds.includes(id)
+                                            ));
+                                            remainingToRetry = remainingToRetry.filter(id => 
+                                                !processedIds.has(id)
+                                            );
+                                            // Add back the still-remaining contacts
+                                            remainingToRetry = [...remainingToRetry, ...retryData.remainingContactIds];
+                                            console.warn(`⚠️ Retry chunk ${retryChunkIndex} also timed out. ${retryData.remainingContactIds.length} contacts still remaining from this chunk.`);
                                         } else {
-                                            // Successfully completed retry
-                                            console.log(`✅ Auto-retry completed: ${retryData.results.sent} sent, ${retryData.results.failed} failed`);
-                                            remainingToRetry = []; // Clear to exit loop
+                                            // Successfully completed this retry chunk
+                                            console.log(`✅ Auto-retry chunk ${retryChunkIndex} completed: ${retryData.results.sent} sent, ${retryData.results.failed} failed`);
+                                            // Remove processed contacts from remaining list
+                                            remainingToRetry = remainingToRetry.slice(RETRY_CHUNK_SIZE);
                                         }
                                     } else {
                                         throw new Error(retryData.message || 'Retry failed');
                                     }
                                 } catch (retryError) {
-                                    console.error(`❌ Auto-retry attempt ${retryAttempt} failed:`, retryError);
-                                    retryAttempt++;
-                                    
-                                    // If max retries reached, mark remaining as failed
-                                    if (retryAttempt > MAX_RETRIES) {
-                                        console.error(`❌ Max retries (${MAX_RETRIES}) reached. Marking ${remainingToRetry.length} contacts as failed.`);
-                                        totalFailed += remainingToRetry.length;
-                                        allFailedIds.push(...remainingToRetry);
-                                        remainingToRetry = [];
-                                    }
+                                    console.error(`❌ Auto-retry chunk ${retryChunkIndex} failed:`, retryError);
+                                    // Mark this chunk as failed and continue with next chunk
+                                    totalFailed += retryChunk.length;
+                                    allFailedIds.push(...retryChunk);
+                                    remainingToRetry = remainingToRetry.slice(RETRY_CHUNK_SIZE);
+                                }
+                                
+                                // Safety check: if we've been retrying for too long, stop
+                                if (retryChunkIndex > 50) {
+                                    console.error(`❌ Too many retry chunks (${retryChunkIndex}). Stopping auto-retry. ${remainingToRetry.length} contacts will be marked as failed.`);
+                                    totalFailed += remainingToRetry.length;
+                                    allFailedIds.push(...remainingToRetry);
+                                    break;
                                 }
                             }
                             
-                            if (remainingToRetry.length > 0) {
-                                console.error(`❌ Could not complete all retries. ${remainingToRetry.length} contacts still remaining.`);
+                            if (remainingToRetry.length === 0) {
+                                console.log(`✅ All remaining contacts from chunk ${chunkNumber} have been processed.`);
                             }
                         } else if (data.partial) {
                             console.warn(`⚠️ Chunk ${chunkNumber} was partially processed: ${data.results.processed}/${chunk.length}`);
