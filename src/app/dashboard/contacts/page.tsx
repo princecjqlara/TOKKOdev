@@ -617,8 +617,12 @@ export default function ContactsPage() {
             // Validate that we attempted to send all contacts
             const contactsNotAttempted = originalContactCount - contactsAttempted.size;
             if (contactsNotAttempted > 0) {
-                console.error(`❌❌❌ CRITICAL: ${contactsNotAttempted} contacts were NEVER sent to the API!`);
-                console.error(`❌ This indicates a bug in the chunking or loop logic`);
+                console.error(`❌❌❌ CRITICAL BUG: ${contactsNotAttempted} contacts were NEVER sent to the API!`);
+                console.error(`❌ Original selected: ${originalContactCount}, Attempted: ${contactsAttempted.size}`);
+                console.error(`❌ This indicates a bug in the chunking or loop logic - contacts were skipped`);
+                // Add these to the unaccounted count
+                // They should be marked as failed since they were never attempted
+                totalFailed += contactsNotAttempted;
             }
             
             // Log intermediate totals for debugging
