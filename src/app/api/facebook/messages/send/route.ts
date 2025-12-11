@@ -108,14 +108,23 @@ export async function POST(request: NextRequest) {
         const batchSize = 1000; // Supabase has limits on .in() array size
 
         console.log(`📤 Processing ${contactIds.length} contact IDs for page ${pageId}`);
+        console.log(`📤 Will process in ${Math.ceil(contactIds.length / batchSize)} batches of up to ${batchSize} contacts each`);
         console.log(`📤 Sample contact IDs (first 5):`, contactIds.slice(0, 5));
+        console.log(`📤 Sample contact IDs (last 5):`, contactIds.slice(-5));
 
         let totalRequested = contactIds.length;
         let totalFound = 0;
         let totalFiltered = 0; // Contacts found but filtered (wrong page_id or missing psid)
         let totalNotFound = 0; // Contacts not found in database
+        let batchesProcessed = 0;
+        let batchesWithErrors = 0;
+        let batchesWithFiltered = 0;
 
         for (let i = 0; i < contactIds.length; i += batchSize) {
+            batchesProcessed++;
+            const batchNumber = Math.floor(i / batchSize) + 1;
+            const totalBatches = Math.ceil(contactIds.length / batchSize);
+            console.log(`📤 Processing batch ${batchNumber}/${totalBatches} (contacts ${i + 1} to ${Math.min(i + batchSize, contactIds.length)})`);
             const batchIds = contactIds.slice(i, i + batchSize);
             const { data: batchContacts, error: batchError } = await supabase
                 .from('contacts')
@@ -123,15 +132,20 @@ export async function POST(request: NextRequest) {
                 .in('id', batchIds);
 
             if (batchError) {
-                console.error(`❌ Error fetching contacts batch ${Math.floor(i / batchSize) + 1}:`, batchError);
+                batchesWithErrors++;
+                const batchNum = Math.floor(i / batchSize) + 1;
+                console.error(`❌❌❌ ERROR fetching contacts batch ${batchNum}:`, batchError);
                 console.error(`❌ This batch will be skipped - ${batchIds.length} contacts will not be sent!`);
+                console.error(`❌ Batch error details:`, JSON.stringify(batchError, null, 2));
                 // Mark as not found (database error)
                 totalNotFound += batchIds.length;
                 continue;
             }
 
             if (!batchContacts?.length) {
-                console.error(`❌ Batch ${Math.floor(i / batchSize) + 1}: NO contacts found in database for ${batchIds.length} requested IDs!`);
+                batchesWithErrors++;
+                const batchNum = Math.floor(i / batchSize) + 1;
+                console.error(`❌❌❌ Batch ${batchNum}: NO contacts found in database for ${batchIds.length} requested IDs!`);
                 console.error(`❌ Sample IDs that don't exist:`, batchIds.slice(0, 5));
                 console.error(`❌ These contacts may have been deleted from the database`);
                 // Mark as not found
@@ -151,11 +165,14 @@ export async function POST(request: NextRequest) {
             totalFiltered += filteredCount;
 
             if (filteredCount > 0) {
+                batchesWithFiltered++;
+                const batchNum = Math.floor(i / batchSize) + 1;
                 const wrongPage = batchContacts.filter(c => c.page_id !== pageId).length;
                 const missingPsid = batchContacts.filter(c => typeof c.psid !== 'string' || c.psid.trim() === '').length;
-                console.error(`❌ Batch ${Math.floor(i / batchSize) + 1}: FILTERED ${filteredCount} contacts!`);
+                console.error(`❌❌❌ Batch ${batchNum}: FILTERED ${filteredCount} contacts!`);
                 console.error(`❌   - Wrong page_id: ${wrongPage} contacts (belong to different page)`);
                 console.error(`❌   - Missing psid: ${missingPsid} contacts (need to be synced)`);
+                console.error(`❌   - Valid contacts in this batch: ${validContacts.length}/${batchContacts.length}`);
                 if (wrongPage > 0) {
                     const wrongPageContacts = batchContacts.filter(c => c.page_id !== pageId).slice(0, 5);
                     console.error(`❌ Example contacts with wrong page_id:`, 
@@ -179,7 +196,16 @@ export async function POST(request: NextRequest) {
             }
         }
 
-        console.log(`📊 Contact lookup summary: ${totalRequested} requested, ${totalFound} found in DB, ${totalFiltered} filtered out, ${allContacts.length} valid for sending`);
+        console.log(`📊 ========== CONTACT LOOKUP SUMMARY ==========`);
+        console.log(`📊 Batches processed: ${batchesProcessed}`);
+        console.log(`📊 Batches with errors: ${batchesWithErrors}`);
+        console.log(`📊 Batches with filtered contacts: ${batchesWithFiltered}`);
+        console.log(`📊 Requested: ${totalRequested} contacts`);
+        console.log(`📊 Found in DB: ${totalFound} contacts`);
+        console.log(`📊 Filtered out: ${totalFiltered} contacts (wrong page_id or missing psid)`);
+        console.log(`📊 Not found in DB: ${totalNotFound} contacts`);
+        console.log(`📊 Valid for sending: ${allContacts.length} contacts`);
+        console.log(`📊 ===========================================`);
 
         if (!allContacts.length) {
             // Fallback: fetch all contacts for the page and use those with valid psid
