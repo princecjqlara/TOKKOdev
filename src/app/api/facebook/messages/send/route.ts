@@ -169,6 +169,11 @@ export async function POST(request: NextRequest) {
             const totalBatches = Math.ceil(contactIds.length / batchSize);
             console.log(`📤 Processing batch ${batchNumber}/${totalBatches} (contacts ${i + 1} to ${Math.min(i + batchSize, contactIds.length)})`);
             const batchIds = contactIds.slice(i, i + batchSize);
+            
+            // #region agent log
+            writeDebugLog('api/facebook/messages/send/route.ts:166', 'Batch loop iteration', {batchNumber, totalBatches, batchStartIndex: i, batchEndIndex: Math.min(i + batchSize, contactIds.length) - 1, batchSize: batchIds.length, totalRequested: contactIds.length, processedSoFar: i, remaining: contactIds.length - i}, 'B');
+            // #endregion
+            
             const { data: batchContacts, error: batchError } = await supabase
                 .from('contacts')
                 .select('id, psid, page_id')
@@ -205,7 +210,15 @@ export async function POST(request: NextRequest) {
             const validContacts = batchContacts.filter((contact): contact is ContactRecord => {
                 const correctPage = contact.page_id === pageId;
                 const validPsid = typeof contact.psid === 'string' && contact.psid.trim() !== '';
-                return correctPage && validPsid;
+                const isValid = correctPage && validPsid;
+                
+                // #region agent log
+                if (!isValid) {
+                    writeDebugLog('api/facebook/messages/send/route.ts:205', 'Contact filtered out', {contactId: contact.id, correctPage, validPsid, actualPageId: contact.page_id, expectedPageId: pageId, psidValue: contact.psid, psidType: typeof contact.psid}, 'D');
+                }
+                // #endregion
+                
+                return isValid;
             });
 
             const filteredCount = batchContacts.length - validContacts.length;
@@ -243,9 +256,16 @@ export async function POST(request: NextRequest) {
             }
 
             if (validContacts.length) {
+                const beforeConcat = allContacts.length;
                 allContacts = allContacts.concat(validContacts.map(c => ({ id: c.id, psid: c.psid.trim() })));
+                // #region agent log
+                writeDebugLog('api/facebook/messages/send/route.ts:245', 'Valid contacts added to allContacts', {batchNumber, validCount: validContacts.length, beforeConcat, afterConcat: allContacts.length, totalValidSoFar: allContacts.length}, 'B');
+                // #endregion
                 console.log(`✅ Batch ${batchNumber}: Added ${validContacts.length} valid contacts (total valid so far: ${allContacts.length})`);
             } else {
+                // #region agent log
+                writeDebugLog('api/facebook/messages/send/route.ts:250', 'Batch with no valid contacts', {batchNumber, foundCount: batchContacts.length, filteredCount, requestedCount: batchIds.length}, 'D');
+                // #endregion
                 console.warn(`⚠️ Batch ${batchNumber}: No valid contacts in this batch (all were filtered or not found)`);
             }
         }
@@ -439,8 +459,10 @@ export async function POST(request: NextRequest) {
         for (let i = 0; i < allContacts.length; i += SEND_BATCH_SIZE) {
             // Check if we're approaching timeout
             const elapsed = Date.now() - startTime;
+            const sendBatchNumber = Math.floor(i / SEND_BATCH_SIZE) + 1;
+            const totalSendBatches = Math.ceil(allContacts.length / SEND_BATCH_SIZE);
             // #region agent log
-            writeDebugLog('api/facebook/messages/send/route.ts:377', 'Send batch loop iteration', {batchIndex: i, processed: i, total: allContacts.length, elapsed, MAX_PROCESSING_TIME, willTimeout: elapsed > MAX_PROCESSING_TIME}, 'J');
+            writeDebugLog('api/facebook/messages/send/route.ts:377', 'Send batch loop iteration', {sendBatchNumber, totalSendBatches, batchIndex: i, processed: i, total: allContacts.length, batchSize: SEND_BATCH_SIZE, elapsed, MAX_PROCESSING_TIME, willTimeout: elapsed > MAX_PROCESSING_TIME}, 'B');
             // #endregion
             if (elapsed > MAX_PROCESSING_TIME) {
                 const remainingContacts = allContacts.slice(i);
@@ -473,6 +495,10 @@ export async function POST(request: NextRequest) {
             }
 
             const batch = allContacts.slice(i, i + SEND_BATCH_SIZE);
+            
+            // #region agent log
+            writeDebugLog('api/facebook/messages/send/route.ts:475', 'Send batch extracted', {sendBatchNumber, batchSize: batch.length, batchStartIndex: i, batchEndIndex: i + batch.length - 1, totalContacts: allContacts.length}, 'B');
+            // #endregion
             
             // Process batch in parallel - use allSettled to continue even if some fail
             const batchPromises = batch.map(async (contact) => {

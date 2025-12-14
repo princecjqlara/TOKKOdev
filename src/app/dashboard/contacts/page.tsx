@@ -123,6 +123,10 @@ export default function ContactsPage() {
             const pageSize = 1000;
             let hasMore = true;
 
+            // #region agent log
+            fetch('http://127.0.0.1:7242/ingest/6358f30b-ef0a-4ea4-8acc-50c08c025924',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'contacts/page.tsx:117',message:'fetchAllContactIds started',data:{selectedPageId,search,selectedTagFilter,excludedCount:excludedIds.size},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'C'})}).catch(()=>{});
+            // #endregion
+
             while (hasMore) {
                 const params = new URLSearchParams({
                     page: currentPage.toString(),
@@ -133,6 +137,10 @@ export default function ContactsPage() {
 
                 const res = await fetch(`/api/pages/${selectedPageId}/contacts?${params}`);
                 const data: PaginatedResponse<Contact> = await res.json();
+
+                // #region agent log
+                fetch('http://127.0.0.1:7242/ingest/6358f30b-ef0a-4ea4-8acc-50c08c025924',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'contacts/page.tsx:134',message:'Page fetched in fetchAllContactIds',data:{currentPage,pageSize,itemsCount:data.items?.length||0,total:data.total||0,allIdsCountSoFar:allIds.length},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'C'})}).catch(()=>{});
+                // #endregion
 
                 if (data.items && data.items.length > 0) {
                     const pageIds = data.items.map(c => c.id);
@@ -148,13 +156,21 @@ export default function ContactsPage() {
                 }
             }
 
+            const beforeExcludeCount = allIds.length;
             if (excludedIds.size > 0) {
                 allIds = allIds.filter(id => !excludedIds.has(id));
             }
 
+            // #region agent log
+            fetch('http://127.0.0.1:7242/ingest/6358f30b-ef0a-4ea4-8acc-50c08c025924',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'contacts/page.tsx:151',message:'fetchAllContactIds completed',data:{totalPages:currentPage,beforeExcludeCount,afterExcludeCount:allIds.length,excludedCount:excludedIds.size,finalCount:allIds.length},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'C'})}).catch(()=>{});
+            // #endregion
+
             return allIds;
         } catch (error) {
             console.error('Error fetching all contact IDs:', error);
+            // #region agent log
+            fetch('http://127.0.0.1:7242/ingest/6358f30b-ef0a-4ea4-8acc-50c08c025924',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'contacts/page.tsx:157',message:'fetchAllContactIds error',data:{error:(error as Error).message},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'C'})}).catch(()=>{});
+            // #endregion
             return [];
         }
     };
