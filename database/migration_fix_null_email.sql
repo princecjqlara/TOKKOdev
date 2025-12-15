@@ -17,3 +17,4 @@ COMMENT ON COLUMN users.email IS 'User email. Can be NULL for Facebook users wit
 
 
 
+

@@ -130,17 +130,31 @@ export async function POST(request: NextRequest) {
 
         if (campaignError) throw campaignError;
 
-        // Add recipients if provided
+        // Add recipients if provided - batch inserts to avoid Supabase payload limits
         if (contactIds?.length) {
-            const recipients = contactIds.map((contactId: string) => ({
-                campaign_id: campaign.id,
-                contact_id: contactId,
-                status: 'pending'
-            }));
+            const BATCH_SIZE = 500; // Supabase recommends batching large inserts
+            console.log(`📤 Adding ${contactIds.length} recipients to campaign ${campaign.id}`);
 
-            await supabase
-                .from('campaign_recipients')
-                .insert(recipients);
+            for (let i = 0; i < contactIds.length; i += BATCH_SIZE) {
+                const batchIds = contactIds.slice(i, i + BATCH_SIZE);
+                const recipients = batchIds.map((contactId: string) => ({
+                    campaign_id: campaign.id,
+                    contact_id: contactId,
+                    status: 'pending'
+                }));
+
+                const { error: insertError } = await supabase
+                    .from('campaign_recipients')
+                    .insert(recipients);
+
+                if (insertError) {
+                    console.error(`❌ Error inserting recipients batch ${Math.floor(i / BATCH_SIZE) + 1}:`, insertError);
+                } else {
+                    console.log(`✅ Inserted batch ${Math.floor(i / BATCH_SIZE) + 1} (${batchIds.length} recipients)`);
+                }
+            }
+
+            console.log(`📤 Finished adding recipients to campaign`);
         }
 
         return NextResponse.json({ campaign });

@@ -64,12 +64,44 @@ export async function POST(
             .update({ status: 'sending', updated_at: new Date().toISOString() })
             .eq('id', campaignId);
 
-        // Get recipients with contact info
-        const { data: recipients } = await supabase
-            .from('campaign_recipients')
-            .select('id, contact_id, contacts(psid)')
-            .eq('campaign_id', campaignId)
-            .eq('status', 'pending');
+        // Get ALL recipients with contact info - use pagination to handle large lists
+        // Supabase default limit is 1000, so we need to paginate for larger campaigns
+        let allRecipients: { id: string; contact_id: string; contacts: { psid: string } | { psid: string }[] | null }[] = [];
+        const BATCH_SIZE = 1000;
+        let offset = 0;
+        let hasMore = true;
+
+        console.log(`📤 Fetching all recipients for campaign ${campaignId}...`);
+
+        while (hasMore) {
+            const { data: recipientBatch, error: recipientError } = await supabase
+                .from('campaign_recipients')
+                .select('id, contact_id, contacts(psid)')
+                .eq('campaign_id', campaignId)
+                .eq('status', 'pending')
+                .range(offset, offset + BATCH_SIZE - 1);
+
+            if (recipientError) {
+                console.error(`❌ Error fetching recipients batch at offset ${offset}:`, recipientError);
+                break;
+            }
+
+            if (recipientBatch && recipientBatch.length > 0) {
+                allRecipients = allRecipients.concat(recipientBatch);
+                console.log(`📤 Fetched ${recipientBatch.length} recipients (total so far: ${allRecipients.length})`);
+                offset += BATCH_SIZE;
+
+                // If we got less than BATCH_SIZE, we've reached the end
+                if (recipientBatch.length < BATCH_SIZE) {
+                    hasMore = false;
+                }
+            } else {
+                hasMore = false;
+            }
+        }
+
+        console.log(`📤 Total recipients fetched: ${allRecipients.length}`);
+        const recipients = allRecipients;
 
         if (!recipients?.length) {
             await supabase
@@ -145,7 +177,7 @@ export async function POST(
                 // Log error but continue to next contact - don't stop the campaign
                 const errorMessage = (error as Error).message;
                 console.warn(`Failed to send message to contact ${contact.psid} in campaign ${campaignId}: ${errorMessage}`);
-                
+
                 await supabase
                     .from('campaign_recipients')
                     .update({
