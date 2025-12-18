@@ -4,6 +4,9 @@ import { authOptions } from '@/lib/auth';
 import { getSupabaseAdmin } from '@/lib/supabase';
 import { sendMessage } from '@/lib/facebook';
 
+// Increase timeout for sending campaigns (up to 5 minutes)
+export const maxDuration = 300;
+
 // POST /api/campaigns/[campaignId]/send - Send a campaign
 export async function POST(
     request: NextRequest,
@@ -121,8 +124,44 @@ export async function POST(
         let sent = 0;
         let failed = 0;
 
-        for (const recipient of recipients) {
-            // Check if campaign was cancelled before each send
+        // Process messages in parallel batches to avoid timeout and respect rate limits
+        const SEND_BATCH_SIZE = 15; // Send 15 messages in parallel
+        const DELAY_BETWEEN_BATCHES = 80; // 80ms delay between batches
+        const MAX_PROCESSING_TIME = 270000; // 4.5 minutes (leave 30 seconds buffer before 5 min timeout)
+        const startTime = Date.now();
+
+        console.log(`📤 Starting campaign send: ${recipients.length} recipients in batches of ${SEND_BATCH_SIZE}`);
+
+        for (let i = 0; i < recipients.length; i += SEND_BATCH_SIZE) {
+            // Check if we're approaching timeout
+            const elapsed = Date.now() - startTime;
+            if (elapsed > MAX_PROCESSING_TIME) {
+                const remainingCount = recipients.length - i;
+                console.warn(`⏱️ Campaign timeout: processed ${i}/${recipients.length}, ${remainingCount} remaining`);
+
+                // Update campaign to partial status
+                await supabase
+                    .from('campaigns')
+                    .update({
+                        status: 'sending', // Keep as sending since there's more to do
+                        sent_count: sent,
+                        updated_at: new Date().toISOString()
+                    })
+                    .eq('id', campaignId);
+
+                return NextResponse.json({
+                    success: true,
+                    partial: true,
+                    sent,
+                    failed,
+                    processed: i,
+                    total: recipients.length,
+                    remaining: remainingCount,
+                    message: `Processed ${i} of ${recipients.length} recipients before timeout. ${remainingCount} remaining.`
+                });
+            }
+
+            // Check if campaign was cancelled (every batch instead of every message)
             const { data: currentCampaign } = await supabase
                 .from('campaigns')
                 .select('status')
@@ -130,7 +169,6 @@ export async function POST(
                 .single();
 
             if (currentCampaign?.status === 'cancelled') {
-                // Campaign was cancelled, stop sending
                 return NextResponse.json({
                     success: true,
                     sent,
@@ -140,65 +178,92 @@ export async function POST(
                 });
             }
 
-            // Handle Supabase join which may return array or object
-            const contactData = recipient.contacts;
-            const contact = Array.isArray(contactData) ? contactData[0] : contactData;
-            if (!contact?.psid) {
-                // Skip contacts without PSID and mark as failed
-                await supabase
-                    .from('campaign_recipients')
-                    .update({
-                        status: 'failed',
-                        error_message: 'Contact missing PSID'
-                    })
-                    .eq('id', recipient.id);
-                failed++;
-                continue;
+            const batch = recipients.slice(i, i + SEND_BATCH_SIZE);
+
+            // Process batch in parallel
+            const batchPromises = batch.map(async (recipient) => {
+                const contactData = recipient.contacts;
+                const contact = Array.isArray(contactData) ? contactData[0] : contactData;
+
+                if (!contact?.psid) {
+                    await supabase
+                        .from('campaign_recipients')
+                        .update({
+                            status: 'failed',
+                            error_message: 'Contact missing PSID'
+                        })
+                        .eq('id', recipient.id);
+                    return { success: false, recipientId: recipient.id, error: 'Contact missing PSID' };
+                }
+
+                try {
+                    await sendMessage(
+                        page.fb_page_id,
+                        page.access_token,
+                        contact.psid,
+                        campaign.message_text
+                    );
+
+                    await supabase
+                        .from('campaign_recipients')
+                        .update({
+                            status: 'sent',
+                            sent_at: new Date().toISOString()
+                        })
+                        .eq('id', recipient.id);
+
+                    return { success: true, recipientId: recipient.id };
+                } catch (error) {
+                    const errorMessage = (error as Error).message;
+                    console.warn(`Failed to send to ${contact.psid}: ${errorMessage}`);
+
+                    await supabase
+                        .from('campaign_recipients')
+                        .update({
+                            status: 'failed',
+                            error_message: errorMessage
+                        })
+                        .eq('id', recipient.id);
+
+                    return { success: false, recipientId: recipient.id, error: errorMessage };
+                }
+            });
+
+            // Wait for all promises to settle
+            const batchResults = await Promise.allSettled(batchPromises);
+
+            // Count results
+            for (const result of batchResults) {
+                if (result.status === 'fulfilled') {
+                    if (result.value.success) {
+                        sent++;
+                    } else {
+                        failed++;
+                    }
+                } else {
+                    failed++;
+                }
             }
 
-            try {
-                await sendMessage(
-                    page.fb_page_id,
-                    page.access_token,
-                    contact.psid,
-                    campaign.message_text
-                );
+            // Update sent_count after each batch
+            await supabase
+                .from('campaigns')
+                .update({
+                    sent_count: sent,
+                    updated_at: new Date().toISOString()
+                })
+                .eq('id', campaignId);
 
-                await supabase
-                    .from('campaign_recipients')
-                    .update({
-                        status: 'sent',
-                        sent_at: new Date().toISOString()
-                    })
-                    .eq('id', recipient.id);
-
-                sent++;
-            } catch (error) {
-                // Log error but continue to next contact - don't stop the campaign
-                const errorMessage = (error as Error).message;
-                console.warn(`Failed to send message to contact ${contact.psid} in campaign ${campaignId}: ${errorMessage}`);
-
-                await supabase
-                    .from('campaign_recipients')
-                    .update({
-                        status: 'failed',
-                        error_message: errorMessage
-                    })
-                    .eq('id', recipient.id);
-
-                failed++;
-                // Continue to next contact - don't throw or return
+            // Delay between batches (except for last batch)
+            if (i + SEND_BATCH_SIZE < recipients.length) {
+                await new Promise(resolve => setTimeout(resolve, DELAY_BETWEEN_BATCHES));
             }
 
-            // Update sent_count periodically (every 10 messages to reduce DB calls)
-            if ((sent + failed) % 10 === 0) {
-                await supabase
-                    .from('campaigns')
-                    .update({
-                        sent_count: sent,
-                        updated_at: new Date().toISOString()
-                    })
-                    .eq('id', campaignId);
+            // Log progress every 50 contacts
+            if ((i + SEND_BATCH_SIZE) % 50 === 0 || i + SEND_BATCH_SIZE >= recipients.length) {
+                const progress = Math.min(i + SEND_BATCH_SIZE, recipients.length);
+                const percentage = Math.round((progress / recipients.length) * 100);
+                console.log(`📊 Campaign progress: ${progress}/${recipients.length} (${percentage}%) | Sent: ${sent}, Failed: ${failed}`);
             }
         }
 
@@ -219,6 +284,8 @@ export async function POST(
                 })
                 .eq('id', campaignId);
         }
+
+        console.log(`✅ Campaign complete: ${sent} sent, ${failed} failed out of ${recipients.length} recipients`);
 
         return NextResponse.json({
             success: true,

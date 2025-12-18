@@ -25,6 +25,7 @@ export async function GET(
         const pageSize = parseInt(searchParams.get('pageSize') || '25');
         const search = searchParams.get('search') || '';
         const tagId = searchParams.get('tagId') || '';
+        const sendableOnly = searchParams.get('sendable') === 'true'; // Only return contacts with valid PSIDs
 
         const supabase = getSupabaseAdmin();
 
@@ -49,6 +50,11 @@ export async function GET(
             .select('*, contact_tags(tag_id, tags(*))', { count: 'exact' })
             .eq('page_id', pageId)
             .order('last_interaction_at', { ascending: false, nullsFirst: false });
+
+        // Filter for sendable contacts only (those with valid PSIDs)
+        if (sendableOnly) {
+            query = query.not('psid', 'is', null).neq('psid', '');
+        }
 
         // Apply search filter
         if (search) {

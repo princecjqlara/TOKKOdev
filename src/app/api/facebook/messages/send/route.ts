@@ -16,17 +16,17 @@ export const maxDuration = 300;
 
 // Helper function to write debug logs
 function writeDebugLog(location: string, message: string, data: any, hypothesisId: string) {
-    const logEntry = JSON.stringify({location, message, data, timestamp: Date.now(), sessionId: 'debug-session', runId: 'run1', hypothesisId}) + '\n';
-    
+    const logEntry = JSON.stringify({ location, message, data, timestamp: Date.now(), sessionId: 'debug-session', runId: 'run1', hypothesisId }) + '\n';
+
     // Try multiple log paths
     const logPaths = [
         path.join(process.cwd(), '.cursor', 'debug.log'),
         path.join(process.cwd(), 'debug.log'),
         path.join('/tmp', 'debug.log')
     ];
-    
+
     for (const logPath of logPaths) {
-        try { 
+        try {
             // Ensure directory exists
             const logDir = path.dirname(logPath);
             if (!fs.existsSync(logDir)) {
@@ -34,21 +34,21 @@ function writeDebugLog(location: string, message: string, data: any, hypothesisI
             }
             fs.appendFileSync(logPath, logEntry);
             break; // Success, stop trying other paths
-        } catch(e: any) {
+        } catch (e: any) {
             // Try next path
             continue;
         }
     }
-    
+
     // Also log to console with special prefix for easy grepping
-    console.log(`[DEBUG-LOG] ${JSON.stringify({location, message, data, hypothesisId})}`);
-    
+    console.log(`[DEBUG-LOG] ${JSON.stringify({ location, message, data, hypothesisId })}`);
+
     // Also try HTTP logging
     fetch('http://127.0.0.1:7242/ingest/6358f30b-ef0a-4ea4-8acc-50c08c025924', {
         method: 'POST',
-        headers: {'Content-Type': 'application/json'},
+        headers: { 'Content-Type': 'application/json' },
         body: logEntry.trim()
-    }).catch(() => {});
+    }).catch(() => { });
 }
 
 // POST /api/facebook/messages/send - Send messages to contacts
@@ -105,11 +105,11 @@ export async function POST(request: NextRequest) {
         console.log(`📤 Sample contact IDs (first 5):`, contactIds.slice(0, 5));
         console.log(`📤 Sample contact IDs (last 5):`, contactIds.slice(-5));
         console.log(`📤 ===============================================`);
-        
+
         // #region agent log
-        writeDebugLog('api/facebook/messages/send/route.ts:68', 'API request received', {contactIdsCount: contactIds.length, pageId}, 'E');
+        writeDebugLog('api/facebook/messages/send/route.ts:68', 'API request received', { contactIdsCount: contactIds.length, pageId }, 'E');
         // #endregion
-        
+
         // Ensure we process ALL contacts, not just first 1000
         // The batchSize is only for database queries, not for limiting sends
 
@@ -169,11 +169,11 @@ export async function POST(request: NextRequest) {
             const totalBatches = Math.ceil(contactIds.length / batchSize);
             console.log(`📤 Processing batch ${batchNumber}/${totalBatches} (contacts ${i + 1} to ${Math.min(i + batchSize, contactIds.length)})`);
             const batchIds = contactIds.slice(i, i + batchSize);
-            
+
             // #region agent log
-            writeDebugLog('api/facebook/messages/send/route.ts:166', 'Batch loop iteration', {batchNumber, totalBatches, batchStartIndex: i, batchEndIndex: Math.min(i + batchSize, contactIds.length) - 1, batchSize: batchIds.length, totalRequested: contactIds.length, processedSoFar: i, remaining: contactIds.length - i}, 'B');
+            writeDebugLog('api/facebook/messages/send/route.ts:166', 'Batch loop iteration', { batchNumber, totalBatches, batchStartIndex: i, batchEndIndex: Math.min(i + batchSize, contactIds.length) - 1, batchSize: batchIds.length, totalRequested: contactIds.length, processedSoFar: i, remaining: contactIds.length - i }, 'B');
             // #endregion
-            
+
             const { data: batchContacts, error: batchError } = await supabase
                 .from('contacts')
                 .select('id, psid, page_id')
@@ -202,30 +202,30 @@ export async function POST(request: NextRequest) {
             }
 
             totalFound += batchContacts.length;
-            
+
             // #region agent log
-            writeDebugLog('api/facebook/messages/send/route.ts:160', 'Batch contacts fetched from DB', {batchNumber, requestedCount: batchIds.length, foundCount: batchContacts.length, totalFoundSoFar: totalFound}, 'F');
+            writeDebugLog('api/facebook/messages/send/route.ts:160', 'Batch contacts fetched from DB', { batchNumber, requestedCount: batchIds.length, foundCount: batchContacts.length, totalFoundSoFar: totalFound }, 'F');
             // #endregion
 
             const validContacts = batchContacts.filter((contact): contact is ContactRecord => {
                 const correctPage = contact.page_id === pageId;
                 const validPsid = typeof contact.psid === 'string' && contact.psid.trim() !== '';
                 const isValid = correctPage && validPsid;
-                
+
                 // #region agent log
                 if (!isValid) {
-                    writeDebugLog('api/facebook/messages/send/route.ts:205', 'Contact filtered out', {contactId: contact.id, correctPage, validPsid, actualPageId: contact.page_id, expectedPageId: pageId, psidValue: contact.psid, psidType: typeof contact.psid}, 'D');
+                    writeDebugLog('api/facebook/messages/send/route.ts:205', 'Contact filtered out', { contactId: contact.id, correctPage, validPsid, actualPageId: contact.page_id, expectedPageId: pageId, psidValue: contact.psid, psidType: typeof contact.psid }, 'D');
                 }
                 // #endregion
-                
+
                 return isValid;
             });
 
             const filteredCount = batchContacts.length - validContacts.length;
             totalFiltered += filteredCount;
-            
+
             // #region agent log
-            writeDebugLog('api/facebook/messages/send/route.ts:168', 'Batch contacts filtered', {batchNumber, foundCount: batchContacts.length, validCount: validContacts.length, filteredCount, totalFilteredSoFar: totalFiltered}, 'G');
+            writeDebugLog('api/facebook/messages/send/route.ts:168', 'Batch contacts filtered', { batchNumber, foundCount: batchContacts.length, validCount: validContacts.length, filteredCount, totalFilteredSoFar: totalFiltered }, 'G');
             // #endregion
 
             if (filteredCount > 0) {
@@ -239,10 +239,10 @@ export async function POST(request: NextRequest) {
                 console.error(`❌   - Valid contacts in this batch: ${validContacts.length}/${batchContacts.length}`);
                 if (wrongPage > 0) {
                     const wrongPageContacts = batchContacts.filter(c => c.page_id !== pageId).slice(0, 5);
-                    console.error(`❌ Example contacts with wrong page_id:`, 
-                        wrongPageContacts.map(c => ({ 
-                            id: c.id, 
-                            actual_page_id: c.page_id, 
+                    console.error(`❌ Example contacts with wrong page_id:`,
+                        wrongPageContacts.map(c => ({
+                            id: c.id,
+                            actual_page_id: c.page_id,
                             expected_page_id: pageId,
                             has_psid: !!c.psid
                         }))
@@ -259,17 +259,17 @@ export async function POST(request: NextRequest) {
                 const beforeConcat = allContacts.length;
                 allContacts = allContacts.concat(validContacts.map(c => ({ id: c.id, psid: c.psid.trim() })));
                 // #region agent log
-                writeDebugLog('api/facebook/messages/send/route.ts:245', 'Valid contacts added to allContacts', {batchNumber, validCount: validContacts.length, beforeConcat, afterConcat: allContacts.length, totalValidSoFar: allContacts.length}, 'B');
+                writeDebugLog('api/facebook/messages/send/route.ts:245', 'Valid contacts added to allContacts', { batchNumber, validCount: validContacts.length, beforeConcat, afterConcat: allContacts.length, totalValidSoFar: allContacts.length }, 'B');
                 // #endregion
                 console.log(`✅ Batch ${batchNumber}: Added ${validContacts.length} valid contacts (total valid so far: ${allContacts.length})`);
             } else {
                 // #region agent log
-                writeDebugLog('api/facebook/messages/send/route.ts:250', 'Batch with no valid contacts', {batchNumber, foundCount: batchContacts.length, filteredCount, requestedCount: batchIds.length}, 'D');
+                writeDebugLog('api/facebook/messages/send/route.ts:250', 'Batch with no valid contacts', { batchNumber, foundCount: batchContacts.length, filteredCount, requestedCount: batchIds.length }, 'D');
                 // #endregion
                 console.warn(`⚠️ Batch ${batchNumber}: No valid contacts in this batch (all were filtered or not found)`);
             }
         }
-        
+
         console.log(`📊 Finished processing all ${batchesProcessed} batches`);
 
         console.log(`📊 ========== CONTACT LOOKUP SUMMARY ==========`);
@@ -396,12 +396,12 @@ export async function POST(request: NextRequest) {
 
         console.log(`✅ Found ${allContacts.length} valid contacts out of ${contactIds.length} requested (${totalFound} found in DB, ${totalFiltered} filtered, ${totalNotFound} not found)`);
         console.log(`📊 Contact lookup breakdown: ${contactIds.length} requested → ${totalFound} found in DB → ${allContacts.length} valid (${totalFiltered} filtered out, ${totalNotFound} not found)`);
-        
+
         // Calculate and log the exact breakdown
         const totalUnsendable = totalFiltered + totalNotFound;
         const sendablePercentage = Math.round((allContacts.length / contactIds.length) * 100);
         const unsendablePercentage = Math.round((totalUnsendable / contactIds.length) * 100);
-        
+
         console.log(`\n`);
         console.log(`╔════════════════════════════════════════════════════════════╗`);
         console.log(`║        API: CONTACT LOOKUP BREAKDOWN                        ║`);
@@ -414,7 +414,7 @@ export async function POST(request: NextRequest) {
         console.log(`║ Total unsendable:             ${totalUnsendable.toString().padStart(10)} (${unsendablePercentage}%) ║`);
         console.log(`╚════════════════════════════════════════════════════════════╝`);
         console.log(`\n`);
-        
+
         if (allContacts.length < contactIds.length) {
             const missing = contactIds.length - allContacts.length;
             console.error(`❌❌❌ CRITICAL: ${missing} contacts were not found or filtered out!`);
@@ -425,19 +425,19 @@ export async function POST(request: NextRequest) {
             console.error(`❌   2. Contacts are missing psid (need to be synced again)`);
             console.error(`❌   3. Contacts were deleted from database`);
             console.error(`❌ SOLUTION: Sync the page again to fix page_id and psid issues`);
-            
+
             if (totalUnsendable > 0 && unsendablePercentage > 50) {
                 console.error(`\n❌❌❌ MAJOR ISSUE: ${unsendablePercentage}% of contacts (${totalUnsendable}/${contactIds.length}) cannot be sent!`);
                 console.error(`❌ This indicates a data quality issue - most contacts need to be synced again.`);
             }
         }
-        
+
         if (allContacts.length === 0) {
             console.error(`❌❌❌ FATAL: No valid contacts found! Cannot send any messages.`);
         }
-        
+
         // #region agent log
-        writeDebugLog('api/facebook/messages/send/route.ts:338', 'Contact lookup complete', {requested: contactIds.length, found: totalFound, filtered: totalFiltered, notFound: totalNotFound, valid: allContacts.length, pageId}, 'H');
+        writeDebugLog('api/facebook/messages/send/route.ts:338', 'Contact lookup complete', { requested: contactIds.length, found: totalFound, filtered: totalFiltered, notFound: totalNotFound, valid: allContacts.length, pageId }, 'H');
         // #endregion
 
         const results = {
@@ -453,7 +453,7 @@ export async function POST(request: NextRequest) {
         const startTime = Date.now();
 
         // #region agent log
-        writeDebugLog('api/facebook/messages/send/route.ts:371', 'Send operation started', {totalContacts: allContacts.length, requestedCount: contactIds.length, foundCount: totalFound, filteredCount: totalFiltered, notFoundCount: totalNotFound, startTime}, 'I');
+        writeDebugLog('api/facebook/messages/send/route.ts:371', 'Send operation started', { totalContacts: allContacts.length, requestedCount: contactIds.length, foundCount: totalFound, filteredCount: totalFiltered, notFoundCount: totalNotFound, startTime }, 'I');
         // #endregion
 
         for (let i = 0; i < allContacts.length; i += SEND_BATCH_SIZE) {
@@ -462,19 +462,19 @@ export async function POST(request: NextRequest) {
             const sendBatchNumber = Math.floor(i / SEND_BATCH_SIZE) + 1;
             const totalSendBatches = Math.ceil(allContacts.length / SEND_BATCH_SIZE);
             // #region agent log
-            writeDebugLog('api/facebook/messages/send/route.ts:377', 'Send batch loop iteration', {sendBatchNumber, totalSendBatches, batchIndex: i, processed: i, total: allContacts.length, batchSize: SEND_BATCH_SIZE, elapsed, MAX_PROCESSING_TIME, willTimeout: elapsed > MAX_PROCESSING_TIME}, 'B');
+            writeDebugLog('api/facebook/messages/send/route.ts:377', 'Send batch loop iteration', { sendBatchNumber, totalSendBatches, batchIndex: i, processed: i, total: allContacts.length, batchSize: SEND_BATCH_SIZE, elapsed, MAX_PROCESSING_TIME, willTimeout: elapsed > MAX_PROCESSING_TIME }, 'B');
             // #endregion
             if (elapsed > MAX_PROCESSING_TIME) {
                 const remainingContacts = allContacts.slice(i);
                 const remainingContactIds = remainingContacts.map(c => c.id);
-                
+
                 // #region agent log
-                writeDebugLog('api/facebook/messages/send/route.ts:383', 'Timeout triggered - partial response', {processed: i, total: allContacts.length, remaining: remainingContacts.length, remainingContactIdsCount: remainingContactIds.length, elapsed, sent: results.sent, failed: results.failed}, 'K');
+                writeDebugLog('api/facebook/messages/send/route.ts:383', 'Timeout triggered - partial response', { processed: i, total: allContacts.length, remaining: remainingContacts.length, remainingContactIdsCount: remainingContactIds.length, elapsed, sent: results.sent, failed: results.failed }, 'K');
                 // #endregion
                 console.warn(`⏱️ Approaching timeout, processed ${i}/${allContacts.length} contacts. ${remainingContacts.length} contacts remaining.`);
                 const filteredCount = totalFiltered; // Contacts found but filtered (wrong page_id or missing psid)
                 const notFoundCount = totalNotFound; // Contacts not found in database
-                
+
                 return NextResponse.json({
                     success: true,
                     partial: true,
@@ -495,11 +495,11 @@ export async function POST(request: NextRequest) {
             }
 
             const batch = allContacts.slice(i, i + SEND_BATCH_SIZE);
-            
+
             // #region agent log
-            writeDebugLog('api/facebook/messages/send/route.ts:475', 'Send batch extracted', {sendBatchNumber, batchSize: batch.length, batchStartIndex: i, batchEndIndex: i + batch.length - 1, totalContacts: allContacts.length}, 'B');
+            writeDebugLog('api/facebook/messages/send/route.ts:475', 'Send batch extracted', { sendBatchNumber, batchSize: batch.length, batchStartIndex: i, batchEndIndex: i + batch.length - 1, totalContacts: allContacts.length }, 'B');
             // #endregion
-            
+
             // Process batch in parallel - use allSettled to continue even if some fail
             const batchPromises = batch.map(async (contact) => {
                 try {
@@ -515,7 +515,7 @@ export async function POST(request: NextRequest) {
 
             // Wait for all promises to settle (complete or fail) - this ensures we continue even if some fail
             const batchResults = await Promise.allSettled(batchPromises);
-            
+
             // Process results
             for (const result of batchResults) {
                 if (result.status === 'fulfilled') {
@@ -552,27 +552,27 @@ export async function POST(request: NextRequest) {
                 const rate = progress / (elapsed / 1000); // contacts per second
                 const remaining = allContacts.length - progress;
                 const estimatedSeconds = remaining / rate;
-                console.log(`📊 Progress: ${progress}/${allContacts.length} (${percentage}%) | Sent: ${results.sent}, Failed: ${results.failed} | Elapsed: ${Math.round(elapsed/1000)}s | Est. remaining: ${Math.round(estimatedSeconds)}s`);
+                console.log(`📊 Progress: ${progress}/${allContacts.length} (${percentage}%) | Sent: ${results.sent}, Failed: ${results.failed} | Elapsed: ${Math.round(elapsed / 1000)}s | Est. remaining: ${Math.round(estimatedSeconds)}s`);
             }
         }
 
         console.log(`✅ Completed sending: ${results.sent} sent, ${results.failed} failed out of ${allContacts.length} valid contacts`);
-        
-        // Calculate final counts
+
+        // Calculate final counts - use already calculated totalUnsendable from line 401
         const filteredCount = totalFiltered; // Contacts found but filtered (wrong page_id or missing psid)
         const notFoundCount = totalNotFound; // Contacts not found in database
-        const totalUnsendable = filteredCount + notFoundCount;
-        
+        // totalUnsendable already declared at line 401 as (totalFiltered + totalNotFound)
+
         // #region agent log
-        writeDebugLog('api/facebook/messages/send/route.ts:468', 'Send operation completed', {requested: contactIds.length, found: totalFound, filtered: filteredCount, notFound: notFoundCount, valid: allContacts.length, sent: results.sent, failed: results.failed, totalUnsendable, elapsed: Date.now() - startTime}, 'L');
+        writeDebugLog('api/facebook/messages/send/route.ts:468', 'Send operation completed', { requested: contactIds.length, found: totalFound, filtered: filteredCount, notFound: notFoundCount, valid: allContacts.length, sent: results.sent, failed: results.failed, totalUnsendable, elapsed: Date.now() - startTime }, 'L');
         // #endregion
-        
+
         // Validation: total should add up
         const expectedTotal = allContacts.length + totalUnsendable;
         if (expectedTotal !== contactIds.length) {
             console.warn(`⚠️ Count validation: Expected ${contactIds.length} but got ${expectedTotal} (valid: ${allContacts.length}, filtered: ${filteredCount}, not found: ${notFoundCount})`);
         }
-        
+
         console.log(`\n`);
         console.log(`╔════════════════════════════════════════════════════════════╗`);
         console.log(`║        API: SEND OPERATION COMPLETE SUMMARY               ║`);
@@ -586,7 +586,7 @@ export async function POST(request: NextRequest) {
         console.log(`║ Successfully sent:             ${results.sent.toString().padStart(10)} ║`);
         console.log(`║ Failed to send:                ${results.failed.toString().padStart(10)} ║`);
         console.log(`╠════════════════════════════════════════════════════════════╣`);
-        
+
         if (totalUnsendable > 0) {
             const percentage = Math.round((totalUnsendable / contactIds.length) * 100);
             console.log(`║ ❌ ${totalUnsendable} contacts (${percentage}%) CANNOT be sent!        ║`);
@@ -601,10 +601,10 @@ export async function POST(request: NextRequest) {
         } else if (results.sent === contactIds.length) {
             console.log(`║ ✅ All ${results.sent} contacts sent successfully!              ║`);
         }
-        
+
         console.log(`╚════════════════════════════════════════════════════════════╝`);
         console.log(`\n`);
-        
+
         if (totalUnsendable > 0) {
             console.error(`❌❌❌ CRITICAL: ${totalUnsendable} contacts were NOT sent!`);
             if (filteredCount > 0) {
@@ -617,15 +617,15 @@ export async function POST(request: NextRequest) {
             }
             console.error(`❌   Total: ${filteredCount + notFoundCount} contacts cannot be sent out of ${contactIds.length} requested`);
         }
-        
+
         // #region agent log
-        fetch('http://127.0.0.1:7242/ingest/6358f30b-ef0a-4ea4-8acc-50c08c025924',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'send/route.ts:360',message:'Send complete',data:{sent:results.sent,failed:results.failed,total:allContacts.length,filtered:filteredCount,notFound:notFoundCount,elapsed:Date.now()-startTime},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'A'})}).catch(()=>{});
+        fetch('http://127.0.0.1:7242/ingest/6358f30b-ef0a-4ea4-8acc-50c08c025924', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ location: 'send/route.ts:360', message: 'Send complete', data: { sent: results.sent, failed: results.failed, total: allContacts.length, filtered: filteredCount, notFound: notFoundCount, elapsed: Date.now() - startTime }, timestamp: Date.now(), sessionId: 'debug-session', runId: 'run1', hypothesisId: 'A' }) }).catch(() => { });
         // #endregion
-        
+
         // Final validation - ensure all contacts are accounted for
         const totalAccountedFor = results.sent + results.failed + filteredCount + notFoundCount;
         const missing = contactIds.length - totalAccountedFor;
-        
+
         if (totalAccountedFor !== contactIds.length) {
             console.error(`❌❌❌ COUNT MISMATCH: ${contactIds.length} requested but only ${totalAccountedFor} accounted for!`);
             console.error(`❌   Sent: ${results.sent}, Failed: ${results.failed}, Filtered: ${filteredCount}, Not Found: ${notFoundCount}`);
@@ -633,7 +633,7 @@ export async function POST(request: NextRequest) {
         } else {
             console.log(`✅ All contacts accounted for: ${totalAccountedFor}/${contactIds.length}`);
         }
-        
+
         // Critical warning if many contacts were filtered
         if (filteredCount > 0 || notFoundCount > 0) {
             const totalUnsendable = filteredCount + notFoundCount;
@@ -644,7 +644,7 @@ export async function POST(request: NextRequest) {
                 console.error(`❌   ACTION REQUIRED: Sync the page again to fix page_id and psid issues`);
             }
         }
-        
+
         return NextResponse.json({
             success: true,
             results: {

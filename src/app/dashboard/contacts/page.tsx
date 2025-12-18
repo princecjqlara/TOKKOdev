@@ -124,13 +124,14 @@ export default function ContactsPage() {
             let hasMore = true;
 
             // #region agent log
-            fetch('http://127.0.0.1:7242/ingest/6358f30b-ef0a-4ea4-8acc-50c08c025924',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'contacts/page.tsx:117',message:'fetchAllContactIds started',data:{selectedPageId,search,selectedTagFilter,excludedCount:excludedIds.size},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'C'})}).catch(()=>{});
+            fetch('http://127.0.0.1:7242/ingest/6358f30b-ef0a-4ea4-8acc-50c08c025924', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ location: 'contacts/page.tsx:117', message: 'fetchAllContactIds started', data: { selectedPageId, search, selectedTagFilter, excludedCount: excludedIds.size }, timestamp: Date.now(), sessionId: 'debug-session', runId: 'run1', hypothesisId: 'C' }) }).catch(() => { });
             // #endregion
 
             while (hasMore) {
                 const params = new URLSearchParams({
                     page: currentPage.toString(),
                     pageSize: pageSize.toString(),
+                    sendable: 'true', // Only fetch contacts with valid PSIDs for messaging
                     ...(search && { search }),
                     ...(selectedTagFilter && { tagId: selectedTagFilter })
                 });
@@ -139,7 +140,7 @@ export default function ContactsPage() {
                 const data: PaginatedResponse<Contact> = await res.json();
 
                 // #region agent log
-                fetch('http://127.0.0.1:7242/ingest/6358f30b-ef0a-4ea4-8acc-50c08c025924',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'contacts/page.tsx:134',message:'Page fetched in fetchAllContactIds',data:{currentPage,pageSize,itemsCount:data.items?.length||0,total:data.total||0,allIdsCountSoFar:allIds.length},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'C'})}).catch(()=>{});
+                fetch('http://127.0.0.1:7242/ingest/6358f30b-ef0a-4ea4-8acc-50c08c025924', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ location: 'contacts/page.tsx:134', message: 'Page fetched in fetchAllContactIds', data: { currentPage, pageSize, itemsCount: data.items?.length || 0, total: data.total || 0, allIdsCountSoFar: allIds.length }, timestamp: Date.now(), sessionId: 'debug-session', runId: 'run1', hypothesisId: 'C' }) }).catch(() => { });
                 // #endregion
 
                 if (data.items && data.items.length > 0) {
@@ -162,14 +163,14 @@ export default function ContactsPage() {
             }
 
             // #region agent log
-            fetch('http://127.0.0.1:7242/ingest/6358f30b-ef0a-4ea4-8acc-50c08c025924',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'contacts/page.tsx:151',message:'fetchAllContactIds completed',data:{totalPages:currentPage,beforeExcludeCount,afterExcludeCount:allIds.length,excludedCount:excludedIds.size,finalCount:allIds.length},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'C'})}).catch(()=>{});
+            fetch('http://127.0.0.1:7242/ingest/6358f30b-ef0a-4ea4-8acc-50c08c025924', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ location: 'contacts/page.tsx:151', message: 'fetchAllContactIds completed', data: { totalPages: currentPage, beforeExcludeCount, afterExcludeCount: allIds.length, excludedCount: excludedIds.size, finalCount: allIds.length }, timestamp: Date.now(), sessionId: 'debug-session', runId: 'run1', hypothesisId: 'C' }) }).catch(() => { });
             // #endregion
 
             return allIds;
         } catch (error) {
             console.error('Error fetching all contact IDs:', error);
             // #region agent log
-            fetch('http://127.0.0.1:7242/ingest/6358f30b-ef0a-4ea4-8acc-50c08c025924',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'contacts/page.tsx:157',message:'fetchAllContactIds error',data:{error:(error as Error).message},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'C'})}).catch(()=>{});
+            fetch('http://127.0.0.1:7242/ingest/6358f30b-ef0a-4ea4-8acc-50c08c025924', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ location: 'contacts/page.tsx:157', message: 'fetchAllContactIds error', data: { error: (error as Error).message }, timestamp: Date.now(), sessionId: 'debug-session', runId: 'run1', hypothesisId: 'C' }) }).catch(() => { });
             // #endregion
             return [];
         }
@@ -181,12 +182,12 @@ export default function ContactsPage() {
         setSyncing(true);
         try {
             // Manual sync button always does full sync to get all contacts
-            const res = await fetch(`/api/pages/${selectedPageId}/sync`, { 
+            const res = await fetch(`/api/pages/${selectedPageId}/sync`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ forceFullSync: true }) // Full sync for manual button clicks
             });
-            
+
             const data = await res.json();
             if (data.success) {
                 if (data.incremental) {
@@ -358,7 +359,7 @@ export default function ContactsPage() {
             console.log(`📤 Selected contact IDs sample (first 10):`, allContactIds.slice(0, 10));
             console.log(`📤 Selected contact IDs sample (last 10):`, allContactIds.slice(-10));
             console.log(`📤 ===============================================`);
-            
+
             // CRITICAL VALIDATION: Ensure we actually have the expected number
             const expectedCount = selectAllMode ? (total - excludedIds.size) : selectedIds.size;
             if (allContactIds.length !== expectedCount) {
@@ -374,39 +375,27 @@ export default function ContactsPage() {
                 }
                 console.error(`❌❌❌ END CRITICAL SELECTION BUG ❌❌❌\n`);
             }
-            
+
             if (allContactIds.length === 0) {
                 alert('No contacts selected. Please select contacts first.');
                 setActionLoading(false);
                 return;
             }
-            
-            // Validate that we actually have the expected number of contacts
-            const expectedCount = selectAllMode ? (total - excludedIds.size) : selectedIds.size;
-            if (allContactIds.length !== expectedCount) {
-                console.error(`❌ COUNT MISMATCH: Expected ${expectedCount} contacts but got ${allContactIds.length}!`);
-                console.error(`❌ This may indicate an issue with contact selection`);
-                console.error(`❌ Selection mode: ${selectAllMode ? 'Select All' : 'Individual'}`);
-                if (selectAllMode) {
-                    console.error(`❌ Total on page: ${total}, Excluded: ${excludedIds.size}, Expected: ${expectedCount}`);
-                } else {
-                    console.error(`❌ Selected IDs count: ${selectedIds.size}`);
-                }
-            }
-            
+
+
             // Store the original count for validation at the end
             const originalContactCount = allContactIds.length;
             console.log(`📤 Will attempt to send ${originalContactCount} contacts`);
-            
+
             // #region agent log
-            fetch('http://127.0.0.1:7242/ingest/6358f30b-ef0a-4ea4-8acc-50c08c025924',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'contacts/page.tsx:367',message:'Bulk message send started',data:{originalContactCount,selectedPageId,selectAllMode,total:selectAllMode?total:undefined,excludedCount:selectAllMode?excludedIds.size:undefined,selectedCount:selectAllMode?undefined:selectedIds.size},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'A'})}).catch(()=>{});
+            fetch('http://127.0.0.1:7242/ingest/6358f30b-ef0a-4ea4-8acc-50c08c025924', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ location: 'contacts/page.tsx:367', message: 'Bulk message send started', data: { originalContactCount, selectedPageId, selectAllMode, total: selectAllMode ? total : undefined, excludedCount: selectAllMode ? excludedIds.size : undefined, selectedCount: selectAllMode ? undefined : selectedIds.size }, timestamp: Date.now(), sessionId: 'debug-session', runId: 'run1', hypothesisId: 'A' }) }).catch(() => { });
             // #endregion
-            
+
             // Warn if selecting a very large number
             if (allContactIds.length > 1000) {
                 console.warn(`⚠️ Large batch detected: ${allContactIds.length} contacts. This may take several minutes.`);
             }
-            
+
             console.log(`📤 About to send ${allContactIds.length} contacts in ${Math.ceil(allContactIds.length / 5000)} chunk(s)`);
             console.log(`📤 Selected page ID: ${selectedPageId}`);
             console.log(`📤 IMPORTANT: Only contacts belonging to page ${selectedPageId} can be sent.`);
@@ -423,27 +412,27 @@ export default function ContactsPage() {
 
             // Track which contacts we've attempted to send
             const contactsAttempted = new Set<string>();
-            
+
             for (let i = 0; i < allContactIds.length; i += CHUNK_SIZE) {
                 const chunk = allContactIds.slice(i, i + CHUNK_SIZE);
                 const chunkNumber = Math.floor(i / CHUNK_SIZE) + 1;
                 const totalChunks = Math.ceil(allContactIds.length / CHUNK_SIZE);
-                
+
                 console.log(`📤 Processing chunk ${chunkNumber}/${totalChunks} (${chunk.length} contacts)`);
                 console.log(`📤 Chunk ${chunkNumber} contact IDs (first 5):`, chunk.slice(0, 5));
-                
+
                 // Track that we're attempting to send these contacts
                 chunk.forEach(id => contactsAttempted.add(id));
-                
+
                 // #region agent log
-                fetch('http://127.0.0.1:7242/ingest/6358f30b-ef0a-4ea4-8acc-50c08c025924',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'contacts/page.tsx:392',message:'Chunk processing started',data:{chunkNumber,totalChunks,chunkSize:chunk.length,chunkStartIndex:i,chunkEndIndex:i+chunk.length-1,contactsAttemptedSoFar:contactsAttempted.size},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'B'})}).catch(()=>{});
+                fetch('http://127.0.0.1:7242/ingest/6358f30b-ef0a-4ea4-8acc-50c08c025924', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ location: 'contacts/page.tsx:392', message: 'Chunk processing started', data: { chunkNumber, totalChunks, chunkSize: chunk.length, chunkStartIndex: i, chunkEndIndex: i + chunk.length - 1, contactsAttemptedSoFar: contactsAttempted.size }, timestamp: Date.now(), sessionId: 'debug-session', runId: 'run1', hypothesisId: 'B' }) }).catch(() => { });
                 // #endregion
-                
+
                 try {
                     // #region agent log
-                    fetch('http://127.0.0.1:7242/ingest/6358f30b-ef0a-4ea4-8acc-50c08c025924',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'contacts/page.tsx:403',message:'API request about to be sent',data:{chunkNumber,chunkSize:chunk.length,pageId:selectedPageId,messageLength:messageText.trim().length},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'C'})}).catch(()=>{});
+                    fetch('http://127.0.0.1:7242/ingest/6358f30b-ef0a-4ea4-8acc-50c08c025924', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ location: 'contacts/page.tsx:403', message: 'API request about to be sent', data: { chunkNumber, chunkSize: chunk.length, pageId: selectedPageId, messageLength: messageText.trim().length }, timestamp: Date.now(), sessionId: 'debug-session', runId: 'run1', hypothesisId: 'C' }) }).catch(() => { });
                     // #endregion
-                    
+
                     const response = await fetch('/api/facebook/messages/send', {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
@@ -468,9 +457,9 @@ export default function ContactsPage() {
                     }
 
                     const data = await response.json();
-                    
+
                     // #region agent log
-                    fetch('http://127.0.0.1:7242/ingest/6358f30b-ef0a-4ea4-8acc-50c08c025924',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'contacts/page.tsx:438',message:'Chunk response received',data:{chunkNumber,chunkSize:chunk.length,success:data.success,partial:data.partial,remainingContactIdsCount:data.remainingContactIds?.length||0,sent:data.results?.sent||0,failed:data.results?.failed||0,filtered:data.results?.filtered||0,notFound:data.results?.notFound||0,requested:data.results?.requested||chunk.length,valid:data.results?.valid||chunk.length},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'B'})}).catch(()=>{});
+                    fetch('http://127.0.0.1:7242/ingest/6358f30b-ef0a-4ea4-8acc-50c08c025924', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ location: 'contacts/page.tsx:438', message: 'Chunk response received', data: { chunkNumber, chunkSize: chunk.length, success: data.success, partial: data.partial, remainingContactIdsCount: data.remainingContactIds?.length || 0, sent: data.results?.sent || 0, failed: data.results?.failed || 0, filtered: data.results?.filtered || 0, notFound: data.results?.notFound || 0, requested: data.results?.requested || chunk.length, valid: data.results?.valid || chunk.length }, timestamp: Date.now(), sessionId: 'debug-session', runId: 'run1', hypothesisId: 'B' }) }).catch(() => { });
                     // #endregion
                     if (data.success) {
                         // Log response details immediately
@@ -484,21 +473,21 @@ export default function ContactsPage() {
                             notFound: data.results.notFound || 0,
                             partial: data.partial || false
                         });
-                        
+
                         totalSent += data.results.sent || 0;
                         totalFailed += data.results.failed || 0;
-                        
+
                         // Track filtered contacts (contacts that were filtered out during lookup)
                         const filteredCount = data.results.filtered || 0;
                         const notFoundCount = data.results.notFound || 0;
                         totalFiltered += filteredCount; // Track filtered separately
                         totalNotFound += notFoundCount; // Track not found separately
                         const totalChunkFiltered = filteredCount + notFoundCount;
-                        
+
                         // #region agent log
-                        fetch('http://127.0.0.1:7242/ingest/6358f30b-ef0a-4ea4-8acc-50c08c025924',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'contacts/page.tsx:455',message:'Chunk totals updated',data:{chunkNumber,totalSent,totalFailed,totalFiltered,totalNotFound,chunkFiltered:filteredCount,chunkNotFound:notFoundCount},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'D'})}).catch(()=>{});
+                        fetch('http://127.0.0.1:7242/ingest/6358f30b-ef0a-4ea4-8acc-50c08c025924', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ location: 'contacts/page.tsx:455', message: 'Chunk totals updated', data: { chunkNumber, totalSent, totalFailed, totalFiltered, totalNotFound, chunkFiltered: filteredCount, chunkNotFound: notFoundCount }, timestamp: Date.now(), sessionId: 'debug-session', runId: 'run1', hypothesisId: 'D' }) }).catch(() => { });
                         // #endregion
-                        
+
                         if (totalChunkFiltered > 0) {
                             console.error(`❌❌❌ Chunk ${chunkNumber}: ${totalChunkFiltered} contacts CANNOT be sent!`);
                             if (filteredCount > 0) {
@@ -511,7 +500,7 @@ export default function ContactsPage() {
                             console.error(`❌ SOLUTION: Sync the page again to fix page_id/psid issues, or re-add deleted contacts`);
                             console.error(`❌ Running total filtered so far: ${totalFiltered} contacts`);
                         }
-                        
+
                         // Collect failed contact IDs
                         if (data.results.errors?.length) {
                             allFailedIds.push(...data.results.errors.map((e: { contactId: string }) => e.contactId));
@@ -520,28 +509,28 @@ export default function ContactsPage() {
                         // If partial (timeout), automatically retry remaining contacts in smaller chunks
                         if (data.partial && data.remainingContactIds?.length > 0) {
                             // #region agent log
-                            fetch('http://127.0.0.1:7242/ingest/6358f30b-ef0a-4ea4-8acc-50c08c025924',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'contacts/page.tsx:388',message:'Auto-retry triggered',data:{chunkNumber,remainingCount:data.remainingContactIds.length,processed:data.results?.processed||0},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'B'})}).catch(()=>{});
+                            fetch('http://127.0.0.1:7242/ingest/6358f30b-ef0a-4ea4-8acc-50c08c025924', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ location: 'contacts/page.tsx:388', message: 'Auto-retry triggered', data: { chunkNumber, remainingCount: data.remainingContactIds.length, processed: data.results?.processed || 0 }, timestamp: Date.now(), sessionId: 'debug-session', runId: 'run1', hypothesisId: 'B' }) }).catch(() => { });
                             // #endregion
                             console.warn(`⚠️⚠️⚠️ TIMEOUT DETECTED: Chunk ${chunkNumber} timed out!`);
                             console.warn(`⚠️ Processed: ${data.results.processed}/${chunk.length} contacts`);
                             console.warn(`⚠️ Remaining: ${data.remainingContactIds.length} contacts need to be retried`);
                             console.warn(`⚠️ Starting auto-retry for ${data.remainingContactIds.length} remaining contacts...`);
                             console.log(`📊 Chunk ${chunkNumber} results before retry: ${data.results.sent} sent, ${data.results.failed} failed`);
-                            
+
                             // Retry remaining contacts in smaller chunks to avoid repeated timeouts
                             const RETRY_CHUNK_SIZE = 2000; // Smaller chunks for retries
                             let remainingToRetry = [...data.remainingContactIds];
                             let retryChunkIndex = 0;
-                            
+
                             while (remainingToRetry.length > 0) {
                                 const retryChunk = remainingToRetry.slice(0, RETRY_CHUNK_SIZE);
                                 retryChunkIndex++;
-                                
+
                                 // #region agent log
-                                fetch('http://127.0.0.1:7242/ingest/6358f30b-ef0a-4ea4-8acc-50c08c025924',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'contacts/page.tsx:396',message:'Retry loop iteration',data:{retryChunkIndex,retryChunkSize:retryChunk.length,remainingTotal:remainingToRetry.length},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'C'})}).catch(()=>{});
+                                fetch('http://127.0.0.1:7242/ingest/6358f30b-ef0a-4ea4-8acc-50c08c025924', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ location: 'contacts/page.tsx:396', message: 'Retry loop iteration', data: { retryChunkIndex, retryChunkSize: retryChunk.length, remainingTotal: remainingToRetry.length }, timestamp: Date.now(), sessionId: 'debug-session', runId: 'run1', hypothesisId: 'C' }) }).catch(() => { });
                                 // #endregion
                                 console.log(`🔄 Auto-retry chunk ${retryChunkIndex} for ${retryChunk.length} contacts (${remainingToRetry.length} total remaining)`);
-                                
+
                                 try {
                                     const retryResponse = await fetch('/api/facebook/messages/send', {
                                         method: 'POST',
@@ -568,7 +557,7 @@ export default function ContactsPage() {
                                     if (retryData.success) {
                                         totalSent += retryData.results.sent || 0;
                                         totalFailed += retryData.results.failed || 0;
-                                        
+
                                         // Track filtered and not found contacts from retry
                                         const retryFilteredCount = retryData.results.filtered || 0;
                                         const retryNotFoundCount = retryData.results.notFound || 0;
@@ -583,7 +572,7 @@ export default function ContactsPage() {
                                                 console.error(`❌   - ${retryNotFoundCount} not found in database`);
                                             }
                                         }
-                                        
+
                                         // Collect failed contact IDs from retry
                                         if (retryData.results.errors?.length) {
                                             allFailedIds.push(...retryData.results.errors.map((e: { contactId: string }) => e.contactId));
@@ -592,7 +581,7 @@ export default function ContactsPage() {
                                         // If retry also timed out, update remaining list with still-remaining contacts
                                         if (retryData.partial && retryData.remainingContactIds?.length > 0) {
                                             // Calculate which contacts from this retry chunk were successfully processed
-                                            const processedFromRetry = retryChunk.filter(id => 
+                                            const processedFromRetry = retryChunk.filter(id =>
                                                 !retryData.remainingContactIds.includes(id)
                                             );
                                             // Remove processed contacts from remaining list
@@ -618,7 +607,7 @@ export default function ContactsPage() {
                                     allFailedIds.push(...retryChunk);
                                     remainingToRetry = remainingToRetry.slice(RETRY_CHUNK_SIZE);
                                 }
-                                
+
                                 // Safety check: if we've been retrying for too long, stop
                                 if (retryChunkIndex > 50) {
                                     console.error(`❌ Too many retry chunks (${retryChunkIndex}). Stopping auto-retry. ${remainingToRetry.length} contacts will be marked as failed.`);
@@ -627,7 +616,7 @@ export default function ContactsPage() {
                                     break;
                                 }
                             }
-                            
+
                             if (remainingToRetry.length === 0) {
                                 console.log(`✅ All remaining contacts from chunk ${chunkNumber} have been processed.`);
                             }
@@ -662,7 +651,7 @@ export default function ContactsPage() {
             const totalUnsendable = totalFiltered + totalNotFound;
             const totalAccountedFor = totalProcessed + totalUnsendable;
             const unaccounted = originalContactCount - totalAccountedFor;
-            
+
             // Validate that we attempted to send all contacts
             const contactsNotAttempted = originalContactCount - contactsAttempted.size;
             if (contactsNotAttempted > 0) {
@@ -673,11 +662,11 @@ export default function ContactsPage() {
                 // They should be marked as failed since they were never attempted
                 totalFailed += contactsNotAttempted;
             }
-            
+
             // Log intermediate totals for debugging
             console.log(`📊 Intermediate totals: sent=${totalSent}, failed=${totalFailed}, filtered=${totalFiltered}, notFound=${totalNotFound}`);
             console.log(`📊 Original selected: ${originalContactCount}, Attempted: ${contactsAttempted.size}, Accounted for: ${totalAccountedFor}, Unaccounted: ${unaccounted}`);
-            
+
             // Print a very visible final summary
             console.log(`\n\n`);
             console.log(`╔════════════════════════════════════════════════════════════╗`);
@@ -694,7 +683,7 @@ export default function ContactsPage() {
             }
             console.log(`║ Total accounted for:              ${totalAccountedFor.toString().padStart(10)} ║`);
             console.log(`╠════════════════════════════════════════════════════════════╣`);
-            
+
             if (totalUnsendable > 0) {
                 const percentage = Math.round((totalUnsendable / allContactIds.length) * 100);
                 console.log(`║ ❌❌❌ CRITICAL ISSUE DETECTED ❌❌❌                        ║`);
@@ -718,19 +707,18 @@ export default function ContactsPage() {
             } else {
                 console.log(`║ ⚠️  PARTIAL: ${totalSent}/${allContactIds.length} contacts sent        ║`);
             }
-            
+
             if (unaccounted > 0) {
                 console.log(`║                                                          ║`);
                 console.log(`║ ❌ COUNT MISMATCH BUG: ${unaccounted} contacts unaccounted for! ║`);
                 console.log(`║    This indicates a bug - please report this issue.       ║`);
             }
-            
+
             console.log(`╚════════════════════════════════════════════════════════════╝`);
             console.log(`\n\n`);
 
-            const totalAccountedFor = totalSent + totalFailed + totalFiltered;
-            const unaccounted = allContactIds.length - totalAccountedFor;
-            
+            // Use the already-calculated totalAccountedFor and unaccounted from above (lines 661-664)
+
             // Build comprehensive alert message
             let message = '';
             if (totalSent === allContactIds.length && totalFailed === 0 && totalUnsendable === 0) {
@@ -753,7 +741,7 @@ export default function ContactsPage() {
                     message += `⚠️ Not found in database: ${totalNotFound}\n`;
                 }
                 message += `📊 Total selected: ${allContactIds.length}\n`;
-                
+
                 if (totalUnsendable > 0) {
                     message += `\n\n⚠️ IMPORTANT: ${totalUnsendable} contacts were NOT sent!\n`;
                     if (totalFiltered > 0) {
@@ -764,18 +752,18 @@ export default function ContactsPage() {
                     }
                     message += `\nSOLUTION: Sync the page again to fix page_id and psid issues.`;
                 }
-                
+
                 if (unaccounted > 0) {
                     message += `\n\n❌ ERROR: ${unaccounted} contacts are unaccounted for (this is a bug).`;
                 }
-                
+
                 if (totalFailed > 0) {
                     message += `\n\nYou can resend to failed contacts using the "Resend to Failed" button.`;
                 }
             }
-            
+
             alert(message);
-            
+
             await fetchContacts();
         } catch (error) {
             console.error('Error sending messages:', error);
@@ -819,7 +807,7 @@ export default function ContactsPage() {
                 setLastSendResults({ sent: data.results.sent, failed: data.results.failed });
 
                 console.log(`Resend results: ${data.results.sent} sent, ${data.results.failed} failed out of ${failedContactIds.length} attempted`);
-                
+
                 if (data.debug) {
                     console.log('Debug info:', data.debug);
                 }
