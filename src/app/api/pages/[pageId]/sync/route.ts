@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getSessionFromRequest } from '@/lib/get-session';
 import { getSupabaseAdmin } from '@/lib/supabase';
-import { getPageConversations, getUserProfile } from '@/lib/facebook';
+import { getPageConversations, getUserProfile, getConversationMessages } from '@/lib/facebook';
 
 // Increase timeout for sync operations (up to 5 minutes)
 export const maxDuration = 300;
@@ -246,13 +246,71 @@ export async function POST(
                         }
                     }
 
-                    // Calculate initial best_contact_hour from last interaction time
+                    // Fetch conversation messages to analyze hour distribution
                     let bestContactHour: number | null = null;
                     let bestContactConfidence: string = 'none';
-                    if (conversation.updated_time) {
+                    let bestContactHours: { hour: number; count: number }[] = [];
+                    let interactionCount = 0;
+
+                    try {
+                        // Fetch messages from this conversation
+                        const messages = await getConversationMessages(
+                            conversation.id,
+                            page.access_token,
+                            50 // Get up to 50 messages for analysis
+                        );
+
+                        // Filter messages FROM the contact (not from the page)
+                        const contactMessages = messages.filter(msg =>
+                            msg.from?.id === participant.id && msg.created_time
+                        );
+
+                        if (contactMessages.length > 0) {
+                            // Build hour distribution from all contact messages
+                            const hourCounts: Record<number, number> = {};
+
+                            for (const msg of contactMessages) {
+                                const msgDate = new Date(msg.created_time);
+                                const hour = msgDate.getUTCHours();
+                                hourCounts[hour] = (hourCounts[hour] || 0) + 1;
+                            }
+
+                            // Convert to sorted array of {hour, count}
+                            bestContactHours = Object.entries(hourCounts)
+                                .map(([hour, count]) => ({ hour: parseInt(hour), count }))
+                                .sort((a, b) => b.count - a.count) // Sort by count descending
+                                .slice(0, 5); // Keep top 5 hours
+
+                            interactionCount = contactMessages.length;
+
+                            // Set primary best hour (most common)
+                            if (bestContactHours.length > 0) {
+                                bestContactHour = bestContactHours[0].hour;
+
+                                // Determine confidence based on interaction count
+                                if (interactionCount >= 10) {
+                                    bestContactConfidence = 'high';
+                                } else if (interactionCount >= 5) {
+                                    bestContactConfidence = 'medium';
+                                } else if (interactionCount >= 2) {
+                                    bestContactConfidence = 'low';
+                                } else {
+                                    bestContactConfidence = 'inferred';
+                                }
+                            }
+                        }
+                    } catch (msgError) {
+                        // Message fetch failed, fallback to last interaction time
+                        console.warn(`⚠️ Could not fetch messages for ${participant.id}:`, (msgError as Error).message);
+                    }
+
+                    // Fallback: if no messages analyzed, use last interaction time
+                    if (bestContactHour === null && conversation.updated_time) {
                         const interactionDate = new Date(conversation.updated_time);
                         bestContactHour = interactionDate.getUTCHours();
-                        bestContactConfidence = 'low'; // Low confidence since it's just one data point
+                        bestContactConfidence = 'inferred';
+                        bestContactHours = [{ hour: bestContactHour, count: 1 }];
+                        interactionCount = 1;
                     }
 
                     const { error: upsertError } = await supabase
@@ -265,10 +323,11 @@ export async function POST(
                             last_interaction_at: conversation.updated_time,
                             best_contact_hour: bestContactHour,
                             best_contact_confidence: bestContactConfidence,
+                            best_contact_hours: bestContactHours,
+                            interaction_count: interactionCount,
                             updated_at: new Date().toISOString()
                         }, {
                             onConflict: 'page_id,psid',
-                            // Only update best_contact_hour if it's currently null
                             ignoreDuplicates: false
                         });
 

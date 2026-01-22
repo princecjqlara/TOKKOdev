@@ -1141,23 +1141,54 @@ export default function ContactsPage() {
                                     </td>
                                     <td>
                                         {contact.best_contact_hour !== null && contact.best_contact_hour !== undefined ? (
-                                            <div className="flex items-center gap-2">
-                                                <span className="font-mono text-xs">
+                                            <div className="flex flex-col gap-1">
+                                                <div className="flex items-center gap-2 flex-wrap">
+                                                    {/* Show top 3 best hours */}
                                                     {(() => {
-                                                        const hour = contact.best_contact_hour;
-                                                        const displayHour = hour === 0 ? 12 : hour > 12 ? hour - 12 : hour;
-                                                        const ampm = hour < 12 ? 'AM' : 'PM';
-                                                        return `${displayHour}:00 ${ampm}`;
+                                                        // @ts-expect-error - best_contact_hours added by migration
+                                                        const hours = contact.best_contact_hours as { hour: number; count: number }[] || [];
+                                                        const displayHours = hours.slice(0, 3);
+
+                                                        if (displayHours.length === 0) {
+                                                            // Fallback to single hour display
+                                                            const hour = contact.best_contact_hour;
+                                                            const displayHour = hour === 0 ? 12 : hour > 12 ? hour - 12 : hour;
+                                                            const ampm = hour < 12 ? 'AM' : 'PM';
+                                                            return <span className="font-mono text-xs">{displayHour}:00 {ampm}</span>;
+                                                        }
+
+                                                        return displayHours.map((h, idx) => {
+                                                            const displayHour = h.hour === 0 ? 12 : h.hour > 12 ? h.hour - 12 : h.hour;
+                                                            const ampm = h.hour < 12 ? 'AM' : 'PM';
+                                                            return (
+                                                                <span
+                                                                    key={h.hour}
+                                                                    className={`font-mono text-xs px-1.5 py-0.5 border ${idx === 0 ? 'bg-black text-white border-black font-bold' : 'bg-gray-100 border-gray-300'}`}
+                                                                    title={`${h.count} messages at this time`}
+                                                                >
+                                                                    {displayHour}{ampm.toLowerCase()} ({h.count})
+                                                                </span>
+                                                            );
+                                                        });
                                                     })()}
-                                                </span>
-                                                <span className={`text-[10px] px-1.5 py-0.5 border font-bold uppercase ${contact.best_contact_confidence === 'high' ? 'bg-green-100 border-green-500 text-green-700' :
-                                                    contact.best_contact_confidence === 'medium' ? 'bg-yellow-100 border-yellow-500 text-yellow-700' :
-                                                        contact.best_contact_confidence === 'inferred' ? 'bg-blue-100 border-blue-500 text-blue-700' :
-                                                            contact.best_contact_confidence === 'low' ? 'bg-gray-100 border-gray-400 text-gray-600' :
-                                                                'bg-gray-50 border-gray-300 text-gray-400'
-                                                    }`}>
-                                                    {contact.best_contact_confidence || 'none'}
-                                                </span>
+                                                </div>
+                                                <div className="flex items-center gap-2">
+                                                    <span className={`text-[10px] px-1.5 py-0.5 border font-bold uppercase ${contact.best_contact_confidence === 'high' ? 'bg-green-100 border-green-500 text-green-700' :
+                                                        contact.best_contact_confidence === 'medium' ? 'bg-yellow-100 border-yellow-500 text-yellow-700' :
+                                                            contact.best_contact_confidence === 'inferred' ? 'bg-blue-100 border-blue-500 text-blue-700' :
+                                                                contact.best_contact_confidence === 'low' ? 'bg-gray-100 border-gray-400 text-gray-600' :
+                                                                    'bg-gray-50 border-gray-300 text-gray-400'
+                                                        }`}>
+                                                        {contact.best_contact_confidence || 'none'}
+                                                    </span>
+                                                    {/* @ts-expect-error - interaction_count added by migration */}
+                                                    {contact.interaction_count > 0 && (
+                                                        <span className="text-[10px] text-gray-400 font-mono">
+                                                            {/* @ts-expect-error - interaction_count added by migration */}
+                                                            {contact.interaction_count} msgs
+                                                        </span>
+                                                    )}
+                                                </div>
                                             </div>
                                         ) : (
                                             <span className="font-mono text-xs text-gray-400">—</span>
