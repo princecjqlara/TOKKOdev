@@ -67,27 +67,49 @@ export async function GET(request: NextRequest) {
             const pageIds = userPages?.map(up => up.page_id) || [];
             const businessIds = businessUsers?.map(bu => bu.business_id) || [];
 
-            // Complex OR condition - get user tags, page tags, and business tags
-            // Build OR conditions array, avoiding trailing commas
-            const orConditions: string[] = [];
-            
-            // Always add user condition
-            orConditions.push(`owner_type.eq.user.and.owner_id.eq.${session.user.id}`);
-            
-            // Add page conditions if any
+            // Use multiple queries and combine results instead of complex OR
+            const allTags: Tag[] = [];
+
+            // Get user's own tags
+            const { data: userTags } = await supabase
+                .from('tags')
+                .select('*')
+                .eq('owner_type', 'user')
+                .eq('owner_id', session.user.id);
+            if (userTags) allTags.push(...userTags);
+
+            // Get page tags
             if (pageIds.length > 0) {
-                orConditions.push(`owner_type.eq.page.and.owner_id.in.(${pageIds.join(',')})`);
+                const { data: pageTags } = await supabase
+                    .from('tags')
+                    .select('*')
+                    .eq('owner_type', 'page')
+                    .in('owner_id', pageIds);
+                if (pageTags) allTags.push(...pageTags);
             }
-            
-            // Add business conditions if any
+
+            // Get business tags
             if (businessIds.length > 0) {
-                orConditions.push(`owner_type.eq.business.and.owner_id.in.(${businessIds.join(',')})`);
+                const { data: bizTags } = await supabase
+                    .from('tags')
+                    .select('*')
+                    .eq('owner_type', 'business')
+                    .in('owner_id', businessIds);
+                if (bizTags) allTags.push(...bizTags);
             }
-            
-            // Join with comma and apply OR filter
-            if (orConditions.length > 0) {
-                query = query.or(orConditions.join(','));
-            }
+
+            // Sort by name and apply pagination
+            allTags.sort((a, b) => a.name.localeCompare(b.name));
+            const from = (page - 1) * pageSize;
+            const paginatedTags = allTags.slice(from, from + pageSize);
+
+            return NextResponse.json({
+                items: paginatedTags,
+                page,
+                pageSize,
+                total: allTags.length,
+                tags: paginatedTags // For backwards compatibility
+            } as PaginatedResponse<Tag>);
         }
 
         // Apply pagination
@@ -103,7 +125,8 @@ export async function GET(request: NextRequest) {
             items: tags || [],
             page,
             pageSize,
-            total: count || 0
+            total: count || 0,
+            tags: tags || [] // For backwards compatibility
         } as PaginatedResponse<Tag>);
     } catch (error) {
         console.error('Error fetching tags:', error);
