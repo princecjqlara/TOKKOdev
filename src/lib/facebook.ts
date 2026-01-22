@@ -57,17 +57,17 @@ export async function getPageConversations(
     sinceTimestamp?: string // ISO timestamp - only fetch conversations updated after this
 ): Promise<FacebookConversation[]> {
     const allConversations: FacebookConversation[] = [];
-    
+
     // Build initial URL with optional since parameter
     let baseUrl = `${FACEBOOK_GRAPH_URL}/${pageId}/conversations?fields=id,participants,updated_time&limit=${limit}&access_token=${pageAccessToken}`;
-    
+
     // Add since parameter if provided (Facebook uses Unix timestamp)
     if (sinceTimestamp) {
         const sinceDate = new Date(sinceTimestamp);
         const unixTimestamp = Math.floor(sinceDate.getTime() / 1000);
         baseUrl += `&since=${unixTimestamp}`;
     }
-    
+
     let nextUrl: string | null = baseUrl;
 
     let pageCount = 0;
@@ -82,9 +82,9 @@ export async function getPageConversations(
 
         const responseData: { data?: FacebookConversation[]; paging?: { next?: string } } = await res.json();
         const conversations = responseData.data || [];
-        
+
         console.log(`📄 Facebook API page ${pageCount}: fetched ${conversations.length} conversations (total so far: ${allConversations.length + conversations.length})`);
-        
+
         // If using since parameter, filter out conversations older than sinceTimestamp
         if (sinceTimestamp && conversations.length > 0) {
             const sinceDate = new Date(sinceTimestamp);
@@ -94,9 +94,9 @@ export async function getPageConversations(
                 return convDate >= sinceDate;
             });
             allConversations.push(...filtered);
-            
+
             console.log(`📄 After filtering by sinceTimestamp: ${filtered.length} valid conversations (${conversations.length - filtered.length} filtered out)`);
-            
+
             // If we got filtered results, we might have hit old conversations - stop pagination
             if (filtered.length < conversations.length) {
                 console.log(`📄 Stopping pagination: hit conversations older than sinceTimestamp`);
@@ -121,7 +121,7 @@ export async function getPageConversations(
             break;
         }
     }
-    
+
     console.log(`✅ Total conversations fetched: ${allConversations.length} across ${pageCount} pages`);
 
     return allConversations;
@@ -188,6 +188,71 @@ export async function sendMessage(
         messageId: result.message_id
     });
     return result;
+}
+
+// Message type for conversation history
+export interface ConversationMessage {
+    id: string;
+    message: string;
+    from: {
+        id: string;
+        name?: string;
+    };
+    created_time: string;
+}
+
+// Get conversation messages for AI context
+export async function getConversationMessages(
+    conversationId: string,
+    pageAccessToken: string,
+    limit: number = 20
+): Promise<ConversationMessage[]> {
+    try {
+        const response = await fetch(
+            `${FACEBOOK_GRAPH_URL}/${conversationId}/messages?fields=id,message,from,created_time&limit=${limit}&access_token=${pageAccessToken}`
+        );
+
+        if (!response.ok) {
+            const error = await response.json().catch(() => ({}));
+            console.warn('⚠️ Failed to fetch conversation messages:', error);
+            return [];
+        }
+
+        const data = await response.json();
+        return (data.data || []) as ConversationMessage[];
+    } catch (error) {
+        console.warn('⚠️ Error fetching conversation messages:', error);
+        return [];
+    }
+}
+
+// Get conversation ID for a contact (PSID)
+export async function getConversationIdForPsid(
+    pageId: string,
+    psid: string,
+    pageAccessToken: string
+): Promise<string | null> {
+    try {
+        // Construct the conversation ID format used by Facebook
+        // Format: t_<psid> for messenger conversations
+        const response = await fetch(
+            `${FACEBOOK_GRAPH_URL}/${pageId}/conversations?user_id=${psid}&fields=id&access_token=${pageAccessToken}`
+        );
+
+        if (!response.ok) {
+            console.warn('⚠️ Failed to find conversation for PSID:', psid);
+            return null;
+        }
+
+        const data = await response.json();
+        if (data.data && data.data.length > 0) {
+            return data.data[0].id;
+        }
+        return null;
+    } catch (error) {
+        console.warn('⚠️ Error finding conversation ID:', error);
+        return null;
+    }
 }
 
 // Generate verify token from app secret and app id

@@ -108,11 +108,36 @@ export async function GET() {
                 }
 
                 try {
-                    // Generate AI message using contact's name
+                    // Fetch conversation history for AI context
+                    const { getConversationIdForPsid, getConversationMessages } = await import('@/lib/facebook');
+                    let conversationHistory: Awaited<ReturnType<typeof getConversationMessages>> = [];
+
+                    try {
+                        const conversationId = await getConversationIdForPsid(
+                            page.fb_page_id,
+                            contact.psid,
+                            page.access_token
+                        );
+
+                        if (conversationId) {
+                            conversationHistory = await getConversationMessages(
+                                conversationId,
+                                page.access_token,
+                                15 // Get last 15 messages for context
+                            );
+                            console.log(`📝 Fetched ${conversationHistory.length} messages for context`);
+                        }
+                    } catch (convError) {
+                        console.warn('⚠️ Could not fetch conversation history:', convError);
+                    }
+
+                    // Generate AI message using conversation context
                     const contactName = contact.name || 'there';
                     const messageText = await generatePersonalizedMessage(
                         campaign.ai_prompt || 'Just checking in with you!',
-                        contactName
+                        contactName,
+                        conversationHistory,
+                        page.fb_page_id
                     );
 
                     // Send the message
