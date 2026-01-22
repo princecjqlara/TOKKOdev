@@ -33,6 +33,10 @@ export default function CampaignsPage() {
     const [sendingCampaignId, setSendingCampaignId] = useState<string | null>(null);
     const [cancellingCampaignId, setCancellingCampaignId] = useState<string | null>(null);
 
+    // Loop campaign state
+    const [isLoop, setIsLoop] = useState(false);
+    const [aiPrompt, setAiPrompt] = useState('');
+
     // Contacts pagination for modal
     const [contactsPage, setContactsPage] = useState(1);
     const [contactsTotal, setContactsTotal] = useState(0);
@@ -107,12 +111,17 @@ export default function CampaignsPage() {
         setMessageText('');
         setSelectedContactIds(new Set());
         setContactsPage(1);
+        setIsLoop(false);
+        setAiPrompt('');
         await fetchContacts();
         setShowCreateModal(true);
     };
 
     const handleCreate = async () => {
-        if (!campaignName.trim() || !messageText.trim() || selectedContactIds.size === 0) return;
+        // For loop campaigns, need aiPrompt; for regular campaigns, need messageText
+        if (!campaignName.trim() || selectedContactIds.size === 0) return;
+        if (isLoop && !aiPrompt.trim()) return;
+        if (!isLoop && !messageText.trim()) return;
 
         setActionLoading(true);
         try {
@@ -122,8 +131,10 @@ export default function CampaignsPage() {
                 body: JSON.stringify({
                     pageId: selectedPageId,
                     name: campaignName.trim(),
-                    messageText: messageText.trim(),
-                    contactIds: Array.from(selectedContactIds)
+                    messageText: isLoop ? null : messageText.trim(),
+                    contactIds: Array.from(selectedContactIds),
+                    isLoop,
+                    aiPrompt: isLoop ? aiPrompt.trim() : null
                 })
             });
 
@@ -216,8 +227,27 @@ export default function CampaignsPage() {
                 return <span className={classes + "bg-black text-white border-black"}>COMPLETED</span>;
             case 'cancelled':
                 return <span className={classes + "bg-red-50 text-red-600 border-red-600"}>CANCELLED</span>;
+            case 'scheduled':
+                return <span className={classes + "bg-blue-100 text-blue-800 border-blue-800"}>SCHEDULED</span>;
             default:
                 return <span className={classes}>{status}</span>;
+        }
+    };
+
+    // Get loop status badge
+    const getLoopBadge = (campaign: Campaign) => {
+        // @ts-expect-error - is_loop field added by migration
+        if (!campaign.is_loop) return null;
+        // @ts-expect-error - loop_status field added by migration
+        const loopStatus = campaign.loop_status;
+        const classes = "badge-wireframe text-xs ";
+        switch (loopStatus) {
+            case 'active':
+                return <span className={classes + "bg-green-100 text-green-800 border-green-800"}>🔄 LOOP ACTIVE</span>;
+            case 'paused':
+                return <span className={classes + "bg-orange-100 text-orange-800 border-orange-800"}>⏸️ LOOP PAUSED</span>;
+            default:
+                return <span className={classes + "bg-gray-100 text-gray-600 border-gray-600"}>LOOP STOPPED</span>;
         }
     };
 
@@ -286,12 +316,14 @@ export default function CampaignsPage() {
                         {campaigns.map((campaign) => (
                             <div key={campaign.id} className="wireframe-card flex flex-col md:flex-row items-start justify-between gap-6 hover:shadow-[4px_4px_0px_0px_rgba(0,0,0,1)] transition-shadow">
                                 <div className="flex-1 space-y-3">
-                                    <div className="flex items-center gap-3">
+                                    <div className="flex items-center gap-3 flex-wrap">
                                         <h3 className="text-xl font-black uppercase tracking-tight">{campaign.name}</h3>
                                         {getStatusBadge(campaign.status)}
+                                        {getLoopBadge(campaign)}
                                     </div>
                                     <p className="text-sm font-mono text-gray-600 line-clamp-2 border-l-2 border-gray-200 pl-3">
-                                        &quot;{campaign.message_text}&quot;
+                                        {/* @ts-expect-error - is_loop/ai_prompt fields added by migration */}
+                                        {campaign.is_loop ? `🤖 AI Prompt: "${campaign.ai_prompt}"` : `"${campaign.message_text}"`}
                                     </p>
                                     <div className="flex flex-wrap items-center gap-6 text-sm font-bold uppercase tracking-wider text-gray-500">
                                         <span className="flex items-center gap-1">
@@ -393,16 +425,50 @@ export default function CampaignsPage() {
                         />
                     </div>
 
-                    <div>
-                        <label className="label-wireframe">Message Content</label>
-                        <textarea
-                            value={messageText}
-                            onChange={(e) => setMessageText(e.target.value)}
-                            placeholder="TYPE YOUR MESSAGE HERE..."
-                            rows={4}
-                            className="input-wireframe resize-none h-auto p-3"
-                        />
+                    {/* Loop Campaign Toggle */}
+                    <div className="border border-gray-200 p-4 bg-gray-50">
+                        <label className="flex items-center gap-3 cursor-pointer">
+                            <input
+                                type="checkbox"
+                                checked={isLoop}
+                                onChange={(e) => setIsLoop(e.target.checked)}
+                                className="w-5 h-5 accent-black"
+                            />
+                            <div>
+                                <span className="font-bold uppercase text-sm">Enable 24/7 Loop Campaign</span>
+                                <p className="text-xs text-gray-500 font-mono mt-1">
+                                    AI generates personalized messages and sends at each contact&apos;s best time daily
+                                </p>
+                            </div>
+                        </label>
                     </div>
+
+                    {isLoop ? (
+                        <div>
+                            <label className="label-wireframe">AI Prompt</label>
+                            <textarea
+                                value={aiPrompt}
+                                onChange={(e) => setAiPrompt(e.target.value)}
+                                placeholder="E.G. Remind them about our summer sale and ask if they&apos;d like to schedule a viewing..."
+                                rows={4}
+                                className="input-wireframe resize-none h-auto p-3"
+                            />
+                            <p className="text-xs text-gray-400 font-mono mt-2">
+                                AI will use this prompt to generate unique messages for each contact using their name
+                            </p>
+                        </div>
+                    ) : (
+                        <div>
+                            <label className="label-wireframe">Message Content</label>
+                            <textarea
+                                value={messageText}
+                                onChange={(e) => setMessageText(e.target.value)}
+                                placeholder="TYPE YOUR MESSAGE HERE..."
+                                rows={4}
+                                className="input-wireframe resize-none h-auto p-3"
+                            />
+                        </div>
+                    )}
 
                     <div>
                         <div className="flex items-center justify-between mb-2">
@@ -476,10 +542,15 @@ export default function CampaignsPage() {
                     </button>
                     <button
                         onClick={handleCreate}
-                        disabled={!campaignName.trim() || !messageText.trim() || selectedContactIds.size === 0 || actionLoading}
+                        disabled={
+                            !campaignName.trim() ||
+                            selectedContactIds.size === 0 ||
+                            actionLoading ||
+                            (isLoop ? !aiPrompt.trim() : !messageText.trim())
+                        }
                         className="btn-wireframe bg-black text-white hover:bg-gray-800"
                     >
-                        {actionLoading ? 'Creating...' : 'Create Campaign'}
+                        {actionLoading ? 'Creating...' : (isLoop ? 'Create Loop Campaign' : 'Create Campaign')}
                     </button>
                 </div>
             </Modal>

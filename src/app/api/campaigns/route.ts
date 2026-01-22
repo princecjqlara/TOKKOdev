@@ -87,11 +87,36 @@ export async function POST(request: NextRequest) {
         }
 
         const body = await request.json();
-        const { pageId, name, messageText, contactIds } = body;
+        const { pageId, name, messageText, contactIds, useBestTime, scheduledDate, isLoop, aiPrompt } = body;
 
-        if (!pageId || !name || !messageText) {
+        // For loop campaigns, messageText is optional (AI generates it), but aiPrompt is required
+        if (!pageId || !name) {
             return NextResponse.json(
-                { error: 'Bad Request', message: 'pageId, name, and messageText are required' },
+                { error: 'Bad Request', message: 'pageId and name are required' },
+                { status: 400 }
+            );
+        }
+
+        // Validate loop campaign requirements
+        if (isLoop && !aiPrompt) {
+            return NextResponse.json(
+                { error: 'Bad Request', message: 'aiPrompt is required for loop campaigns' },
+                { status: 400 }
+            );
+        }
+
+        // For non-loop campaigns, messageText is required
+        if (!isLoop && !messageText) {
+            return NextResponse.json(
+                { error: 'Bad Request', message: 'messageText is required for regular campaigns' },
+                { status: 400 }
+            );
+        }
+
+        // Validate scheduling params
+        if (useBestTime && !scheduledDate && !isLoop) {
+            return NextResponse.json(
+                { error: 'Bad Request', message: 'scheduledDate is required when useBestTime is enabled' },
                 { status: 400 }
             );
         }
@@ -113,17 +138,28 @@ export async function POST(request: NextRequest) {
             );
         }
 
+        // Determine campaign status
+        // Loop campaigns start as 'scheduled' with loop_status 'active'
+        // Best time campaigns are 'scheduled', regular campaigns are 'draft'
+        const campaignStatus = isLoop || useBestTime ? 'scheduled' : 'draft';
+
         // Create campaign
         const { data: campaign, error: campaignError } = await supabase
             .from('campaigns')
             .insert({
                 page_id: pageId,
                 name,
-                message_text: messageText,
-                status: 'draft',
+                message_text: isLoop ? null : messageText, // Loop campaigns use AI-generated messages
+                status: campaignStatus,
                 total_recipients: contactIds?.length || 0,
                 sent_count: 0,
-                created_by: session.user.id
+                created_by: session.user.id,
+                use_best_time: useBestTime || isLoop || false, // Loop always uses best time
+                scheduled_date: scheduledDate || null,
+                // Loop campaign fields
+                is_loop: isLoop || false,
+                ai_prompt: isLoop ? aiPrompt : null,
+                loop_status: isLoop ? 'active' : 'stopped'
             })
             .select()
             .single();
@@ -135,13 +171,61 @@ export async function POST(request: NextRequest) {
             const BATCH_SIZE = 500; // Supabase recommends batching large inserts
             console.log(`📤 Adding ${contactIds.length} recipients to campaign ${campaign.id}`);
 
+            // If using best time, we need to fetch contacts' best_contact_hour
+            let contactBestTimes: Map<string, number | null> = new Map();
+            if (useBestTime) {
+                // Fetch best_contact_hour for all contacts
+                for (let i = 0; i < contactIds.length; i += 1000) {
+                    const batchIds = contactIds.slice(i, i + 1000);
+                    const { data: contacts } = await supabase
+                        .from('contacts')
+                        .select('id, best_contact_hour')
+                        .in('id', batchIds);
+
+                    if (contacts) {
+                        for (const contact of contacts) {
+                            contactBestTimes.set(contact.id, contact.best_contact_hour);
+                        }
+                    }
+                }
+                console.log(`📤 Fetched best times for ${contactBestTimes.size} contacts`);
+            }
+
             for (let i = 0; i < contactIds.length; i += BATCH_SIZE) {
                 const batchIds = contactIds.slice(i, i + BATCH_SIZE);
-                const recipients = batchIds.map((contactId: string) => ({
-                    campaign_id: campaign.id,
-                    contact_id: contactId,
-                    status: 'pending'
-                }));
+                const recipients = batchIds.map((contactId: string) => {
+                    let scheduledAt: string | null = null;
+
+                    // For loop campaigns or useBestTime, calculate scheduled_at
+                    if (isLoop || (useBestTime && scheduledDate)) {
+                        const bestHour = contactBestTimes.get(contactId);
+                        const hour = bestHour !== null && bestHour !== undefined ? bestHour : 12; // Default to noon
+
+                        if (isLoop) {
+                            // For loops, schedule for today if hour hasn't passed, otherwise tomorrow
+                            const now = new Date();
+                            const sendDate = new Date();
+                            if (now.getUTCHours() >= hour) {
+                                // Hour already passed today, schedule for tomorrow
+                                sendDate.setDate(sendDate.getDate() + 1);
+                            }
+                            sendDate.setUTCHours(hour, 0, 0, 0);
+                            scheduledAt = sendDate.toISOString();
+                        } else {
+                            // Regular best time scheduling uses provided date
+                            const sendDate = new Date(scheduledDate);
+                            sendDate.setUTCHours(hour, 0, 0, 0);
+                            scheduledAt = sendDate.toISOString();
+                        }
+                    }
+
+                    return {
+                        campaign_id: campaign.id,
+                        contact_id: contactId,
+                        status: 'pending',
+                        scheduled_at: scheduledAt
+                    };
+                });
 
                 const { error: insertError } = await supabase
                     .from('campaign_recipients')

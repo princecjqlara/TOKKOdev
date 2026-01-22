@@ -77,12 +77,14 @@ export interface Campaign {
   page_id: string;
   name: string;
   message_text: string | null;
-  status: 'draft' | 'sending' | 'completed' | 'cancelled';
+  status: 'draft' | 'scheduled' | 'sending' | 'completed' | 'cancelled';
   total_recipients: number;
   sent_count: number;
   created_by: string;
   created_at: string;
   updated_at: string;
+  use_best_time: boolean;
+  scheduled_date: string | null;
 }
 
 export interface CampaignRecipient {
