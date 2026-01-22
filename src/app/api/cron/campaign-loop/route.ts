@@ -1,4 +1,4 @@
-import { NextRequest, NextResponse } from 'next/server';
+import { NextResponse } from 'next/server';
 import { getSupabaseAdmin } from '@/lib/supabase';
 import { sendMessage } from '@/lib/facebook';
 import { generatePersonalizedMessage } from '@/lib/ai';
@@ -8,22 +8,8 @@ const MAX_MESSAGES_PER_RUN = 5;
 const MAX_CAMPAIGNS_PER_RUN = 3;
 
 // GET /api/cron/campaign-loop - Called by cron-job.org every minute
-export async function GET(request: NextRequest) {
+export async function GET() {
     const startTime = Date.now();
-
-    // Validate cron secret to prevent unauthorized calls
-    const cronSecret = request.headers.get('x-cron-secret') || request.nextUrl.searchParams.get('secret');
-    const expectedSecret = process.env.CRON_SECRET;
-
-    if (!expectedSecret) {
-        console.warn('⚠️ CRON_SECRET not configured - endpoint is unprotected!');
-    } else if (cronSecret !== expectedSecret) {
-        console.warn('❌ Invalid cron secret provided');
-        return NextResponse.json(
-            { error: 'Unauthorized', message: 'Invalid cron secret' },
-            { status: 401 }
-        );
-    }
 
     const supabase = getSupabaseAdmin();
     const results = {
