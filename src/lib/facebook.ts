@@ -201,28 +201,43 @@ export interface ConversationMessage {
     created_time: string;
 }
 
-// Get conversation messages for AI context
+// Get conversation messages for AI context - fetches ALL messages using pagination
 export async function getConversationMessages(
     conversationId: string,
     pageAccessToken: string,
-    limit: number = 20
+    maxMessages: number = 500 // Safety limit to prevent infinite loops
 ): Promise<ConversationMessage[]> {
-    try {
-        const response = await fetch(
-            `${FACEBOOK_GRAPH_URL}/${conversationId}/messages?fields=id,message,from,created_time&limit=${limit}&access_token=${pageAccessToken}`
-        );
+    const allMessages: ConversationMessage[] = [];
+    let nextUrl: string | null = `${FACEBOOK_GRAPH_URL}/${conversationId}/messages?fields=id,message,from,created_time&limit=100&access_token=${pageAccessToken}`;
 
-        if (!response.ok) {
-            const error = await response.json().catch(() => ({}));
-            console.warn('⚠️ Failed to fetch conversation messages:', error);
-            return [];
+    try {
+        while (nextUrl && allMessages.length < maxMessages) {
+            const fetchResponse = await fetch(nextUrl);
+
+            if (!fetchResponse.ok) {
+                const errorData = await fetchResponse.json().catch(() => ({}));
+                console.warn('⚠️ Failed to fetch conversation messages:', errorData);
+                break;
+            }
+
+            const responseData: { data?: ConversationMessage[]; paging?: { next?: string } } = await fetchResponse.json();
+            const messages = responseData.data || [];
+            allMessages.push(...messages);
+
+            // Check for next page
+            nextUrl = responseData.paging?.next || null;
+
+            // If we got fewer messages than the limit, we've reached the end
+            if (messages.length < 100) {
+                break;
+            }
         }
 
-        const data = await response.json();
-        return (data.data || []) as ConversationMessage[];
+        console.log(`📨 Fetched ${allMessages.length} total messages for conversation ${conversationId}`);
+        return allMessages;
     } catch (error) {
         console.warn('⚠️ Error fetching conversation messages:', error);
-        return [];
+        return allMessages; // Return what we have so far
     }
 }
 

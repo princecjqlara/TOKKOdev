@@ -36,6 +36,7 @@ export default function CampaignsPage() {
     // Loop campaign state
     const [isLoop, setIsLoop] = useState(false);
     const [aiPrompt, setAiPrompt] = useState('');
+    const [useAiMessage, setUseAiMessage] = useState(false); // AI personalization for non-loop campaigns
 
     // Contacts pagination and filtering for modal
     const [contactsPage, setContactsPage] = useState(1);
@@ -132,6 +133,7 @@ export default function CampaignsPage() {
         setContactsPage(1);
         setIsLoop(false);
         setAiPrompt('');
+        setUseAiMessage(false);
         setSelectedTagFilter('');
         setIsSelectAllMode(false);
         await Promise.all([fetchContacts(), fetchTags()]);
@@ -139,11 +141,16 @@ export default function CampaignsPage() {
     };
 
     const handleCreate = async () => {
-        // For loop campaigns, need aiPrompt; for regular campaigns, need messageText
+        // Validation: need campaign name and recipients
         const hasRecipients = isSelectAllMode ? contactsTotal > 0 : selectedContactIds.size > 0;
         if (!campaignName.trim() || !hasRecipients) return;
+
+        // For loop campaigns, need aiPrompt
+        // For regular campaigns with AI: need aiPrompt
+        // For regular campaigns without AI: need messageText
         if (isLoop && !aiPrompt.trim()) return;
-        if (!isLoop && !messageText.trim()) return;
+        if (!isLoop && useAiMessage && !aiPrompt.trim()) return;
+        if (!isLoop && !useAiMessage && !messageText.trim()) return;
 
         setActionLoading(true);
         try {
@@ -170,10 +177,11 @@ export default function CampaignsPage() {
                 body: JSON.stringify({
                     pageId: selectedPageId,
                     name: campaignName.trim(),
-                    messageText: isLoop ? null : messageText.trim(),
+                    messageText: (isLoop || useAiMessage) ? null : messageText.trim(),
                     contactIds,
                     isLoop,
-                    aiPrompt: isLoop ? aiPrompt.trim() : null
+                    useAiMessage, // New field for AI personalized regular campaigns
+                    aiPrompt: (isLoop || useAiMessage) ? aiPrompt.trim() : null
                 })
             });
 
@@ -493,19 +501,55 @@ export default function CampaignsPage() {
                                 className="input-wireframe resize-none h-auto p-3"
                             />
                             <p className="text-xs text-gray-400 font-mono mt-2">
-                                AI will use this prompt to generate unique messages for each contact using their name
+                                AI will use this prompt to generate unique messages for each contact using their conversation history
                             </p>
                         </div>
                     ) : (
-                        <div>
-                            <label className="label-wireframe">Message Content</label>
-                            <textarea
-                                value={messageText}
-                                onChange={(e) => setMessageText(e.target.value)}
-                                placeholder="TYPE YOUR MESSAGE HERE..."
-                                rows={4}
-                                className="input-wireframe resize-none h-auto p-3"
-                            />
+                        <div className="space-y-4">
+                            {/* AI Personalization Toggle */}
+                            <div className="border border-gray-200 p-3 bg-gray-50">
+                                <label className="flex items-center gap-3 cursor-pointer">
+                                    <input
+                                        type="checkbox"
+                                        checked={useAiMessage}
+                                        onChange={(e) => setUseAiMessage(e.target.checked)}
+                                        className="w-4 h-4 accent-black"
+                                    />
+                                    <div>
+                                        <span className="font-bold uppercase text-xs">Use AI Personalized Message</span>
+                                        <p className="text-xs text-gray-500 font-mono">
+                                            AI generates unique messages for each contact based on their conversation history
+                                        </p>
+                                    </div>
+                                </label>
+                            </div>
+
+                            {useAiMessage ? (
+                                <div>
+                                    <label className="label-wireframe">AI Prompt</label>
+                                    <textarea
+                                        value={aiPrompt}
+                                        onChange={(e) => setAiPrompt(e.target.value)}
+                                        placeholder="E.G. Follow up on our previous conversation and mention our new arrivals..."
+                                        rows={4}
+                                        className="input-wireframe resize-none h-auto p-3"
+                                    />
+                                    <p className="text-xs text-gray-400 font-mono mt-2">
+                                        AI will analyze each contact&apos;s conversation history and generate a personalized message
+                                    </p>
+                                </div>
+                            ) : (
+                                <div>
+                                    <label className="label-wireframe">Message Content</label>
+                                    <textarea
+                                        value={messageText}
+                                        onChange={(e) => setMessageText(e.target.value)}
+                                        placeholder="TYPE YOUR MESSAGE HERE..."
+                                        rows={4}
+                                        className="input-wireframe resize-none h-auto p-3"
+                                    />
+                                </div>
+                            )}
                         </div>
                     )}
 
@@ -618,13 +662,16 @@ export default function CampaignsPage() {
                         onClick={handleCreate}
                         disabled={
                             !campaignName.trim() ||
-                            selectedContactIds.size === 0 ||
+                            (!isSelectAllMode && selectedContactIds.size === 0) ||
+                            (isSelectAllMode && contactsTotal === 0) ||
                             actionLoading ||
-                            (isLoop ? !aiPrompt.trim() : !messageText.trim())
+                            (isLoop && !aiPrompt.trim()) ||
+                            (!isLoop && useAiMessage && !aiPrompt.trim()) ||
+                            (!isLoop && !useAiMessage && !messageText.trim())
                         }
                         className="btn-wireframe bg-black text-white hover:bg-gray-800"
                     >
-                        {actionLoading ? 'Creating...' : (isLoop ? 'Create Loop Campaign' : 'Create Campaign')}
+                        {actionLoading ? 'Creating...' : (isLoop ? 'Create Loop Campaign' : (useAiMessage ? 'Create AI Campaign' : 'Create Campaign'))}
                     </button>
                 </div>
             </Modal>

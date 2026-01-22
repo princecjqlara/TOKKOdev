@@ -87,7 +87,7 @@ export async function POST(request: NextRequest) {
         }
 
         const body = await request.json();
-        const { pageId, name, messageText, contactIds, useBestTime, scheduledDate, isLoop, aiPrompt } = body;
+        const { pageId, name, messageText, contactIds, useBestTime, scheduledDate, isLoop, aiPrompt, useAiMessage } = body;
 
         // For loop campaigns, messageText is optional (AI generates it), but aiPrompt is required
         if (!pageId || !name) {
@@ -105,8 +105,16 @@ export async function POST(request: NextRequest) {
             );
         }
 
-        // For non-loop campaigns, messageText is required
-        if (!isLoop && !messageText) {
+        // For regular campaigns with AI personalization, need aiPrompt
+        if (!isLoop && useAiMessage && !aiPrompt) {
+            return NextResponse.json(
+                { error: 'Bad Request', message: 'aiPrompt is required for AI personalized campaigns' },
+                { status: 400 }
+            );
+        }
+
+        // For non-loop, non-AI campaigns, messageText is required
+        if (!isLoop && !useAiMessage && !messageText) {
             return NextResponse.json(
                 { error: 'Bad Request', message: 'messageText is required for regular campaigns' },
                 { status: 400 }
@@ -149,7 +157,7 @@ export async function POST(request: NextRequest) {
             .insert({
                 page_id: pageId,
                 name,
-                message_text: isLoop ? null : messageText, // Loop campaigns use AI-generated messages
+                message_text: (isLoop || useAiMessage) ? null : messageText, // AI campaigns don't use pre-written message
                 status: campaignStatus,
                 total_recipients: contactIds?.length || 0,
                 sent_count: 0,
@@ -158,8 +166,9 @@ export async function POST(request: NextRequest) {
                 scheduled_date: scheduledDate || null,
                 // Loop campaign fields
                 is_loop: isLoop || false,
-                ai_prompt: isLoop ? aiPrompt : null,
-                loop_status: isLoop ? 'active' : 'stopped'
+                ai_prompt: (isLoop || useAiMessage) ? aiPrompt : null, // Store aiPrompt for AI campaigns
+                loop_status: isLoop ? 'active' : 'stopped',
+                use_ai_message: useAiMessage || false // New field for AI personalized regular campaigns
             })
             .select()
             .single();

@@ -253,11 +253,11 @@ export async function POST(
                     let interactionCount = 0;
 
                     try {
-                        // Fetch messages from this conversation
+                        // Fetch ALL messages from this conversation for analysis
                         const messages = await getConversationMessages(
                             conversation.id,
-                            page.access_token,
-                            50 // Get up to 50 messages for analysis
+                            page.access_token
+                            // No limit - fetch all messages
                         );
 
                         // Filter messages FROM the contact (not from the page)
@@ -267,12 +267,15 @@ export async function POST(
 
                         if (contactMessages.length > 0) {
                             // Build hour distribution from all contact messages
+                            // Convert to PHT (UTC+8)
                             const hourCounts: Record<number, number> = {};
 
                             for (const msg of contactMessages) {
                                 const msgDate = new Date(msg.created_time);
-                                const hour = msgDate.getUTCHours();
-                                hourCounts[hour] = (hourCounts[hour] || 0) + 1;
+                                // Convert UTC to PHT by adding 8 hours
+                                const utcHour = msgDate.getUTCHours();
+                                const phtHour = (utcHour + 8) % 24;
+                                hourCounts[phtHour] = (hourCounts[phtHour] || 0) + 1;
                             }
 
                             // Convert to sorted array of {hour, count}

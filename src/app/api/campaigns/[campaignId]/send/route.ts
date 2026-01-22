@@ -2,7 +2,8 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getServerSession } from 'next-auth';
 import { authOptions } from '@/lib/auth';
 import { getSupabaseAdmin } from '@/lib/supabase';
-import { sendMessage } from '@/lib/facebook';
+import { sendMessage, getConversationIdForPsid, getConversationMessages } from '@/lib/facebook';
+import { generatePersonalizedMessage } from '@/lib/ai';
 
 // Increase timeout for sending campaigns (up to 5 minutes)
 export const maxDuration = 300;
@@ -28,7 +29,7 @@ export async function POST(
         // Get campaign with page info
         const { data: campaign } = await supabase
             .from('campaigns')
-            .select('*, pages(fb_page_id, access_token)')
+            .select('*, pages(fb_page_id, access_token, id)')
             .eq('id', campaignId)
             .single();
 
@@ -69,7 +70,7 @@ export async function POST(
 
         // Get ALL recipients with contact info - use pagination to handle large lists
         // Supabase default limit is 1000, so we need to paginate for larger campaigns
-        let allRecipients: { id: string; contact_id: string; contacts: { psid: string } | { psid: string }[] | null }[] = [];
+        let allRecipients: { id: string; contact_id: string; contacts: { psid: string; name?: string } | { psid: string; name?: string }[] | null }[] = [];
         const BATCH_SIZE = 1000;
         let offset = 0;
         let hasMore = true;
@@ -79,7 +80,7 @@ export async function POST(
         while (hasMore) {
             const { data: recipientBatch, error: recipientError } = await supabase
                 .from('campaign_recipients')
-                .select('id, contact_id, contacts(psid)')
+                .select('id, contact_id, contacts(psid, name)')
                 .eq('campaign_id', campaignId)
                 .eq('status', 'pending')
                 .range(offset, offset + BATCH_SIZE - 1);
@@ -180,6 +181,9 @@ export async function POST(
 
             const batch = recipients.slice(i, i + SEND_BATCH_SIZE);
 
+            // Check if this campaign uses AI-generated messages
+            const useAiMessages = campaign.use_ai_message || campaign.is_loop;
+
             // Process batch in parallel
             const batchPromises = batch.map(async (recipient) => {
                 const contactData = recipient.contacts;
@@ -197,11 +201,51 @@ export async function POST(
                 }
 
                 try {
+                    let messageToSend = campaign.message_text;
+
+                    // Generate AI personalized message if enabled
+                    if (useAiMessages && campaign.ai_prompt) {
+                        try {
+                            // Fetch conversation history for context
+                            const conversationId = await getConversationIdForPsid(
+                                page.fb_page_id,
+                                contact.psid,
+                                page.access_token
+                            );
+
+                            let messages: { id: string; message: string; from: { id: string; name?: string }; created_time: string }[] = [];
+                            if (conversationId) {
+                                messages = await getConversationMessages(
+                                    conversationId,
+                                    page.access_token
+                                );
+                            }
+
+                            // Generate personalized message using AI
+                            messageToSend = await generatePersonalizedMessage(
+                                campaign.ai_prompt,
+                                contact.name || 'Friend',
+                                messages
+                            );
+
+                            console.log(`🤖 AI generated message for ${contact.name || contact.psid}`);
+                        } catch (aiError) {
+                            console.warn(`⚠️ AI generation failed for ${contact.psid}, using fallback:`, (aiError as Error).message);
+                            // Fallback to a simple personalized greeting if AI fails
+                            messageToSend = campaign.ai_prompt.replace(/{name}/gi, contact.name || 'Friend');
+                        }
+                    }
+
+                    // Ensure we have a message to send
+                    if (!messageToSend) {
+                        throw new Error('No message content available');
+                    }
+
                     await sendMessage(
                         page.fb_page_id,
                         page.access_token,
                         contact.psid,
-                        campaign.message_text
+                        messageToSend
                     );
 
                     await supabase
