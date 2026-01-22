@@ -75,7 +75,7 @@ export async function POST(
         // Determine if this is a full sync or incremental sync
         const isIncremental = !forceFullSync && !!page.last_synced_at;
         const syncStartTime = new Date().toISOString();
-        
+
         console.log(`🔵 Starting ${isIncremental ? 'incremental' : 'full'} sync for page: ${page.fb_page_id} (${pageId})`);
         if (isIncremental) {
             console.log(`🔵 Last synced: ${page.last_synced_at}, fetching only new/updated conversations`);
@@ -97,19 +97,19 @@ export async function POST(
         } catch (error) {
             console.error('🔴 Error fetching conversations from Facebook:', error);
             const errorMessage = (error as Error).message || String(error);
-            
+
             // Check if it's a permissions error
             if (errorMessage.includes('permission') || errorMessage.includes('must be granted')) {
                 return NextResponse.json(
-                    { 
-                        error: 'Permission Error', 
+                    {
+                        error: 'Permission Error',
                         message: 'The page access token is missing required permissions. Please disconnect and reconnect this page to refresh permissions.',
                         requiresReconnect: true
                     },
                     { status: 403 }
                 );
             }
-            
+
             return NextResponse.json(
                 { error: 'Failed to fetch conversations', message: errorMessage },
                 { status: 500 }
@@ -168,18 +168,18 @@ export async function POST(
 
         console.log(`Processing ${validConversations.length} valid conversations in batches of ${SYNC_BATCH_SIZE}`);
         // #region agent log
-        fetch('http://127.0.0.1:7242/ingest/6358f30b-ef0a-4ea4-8acc-50c08c025924',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'sync/route.ts:169',message:'Sync start',data:{totalConversations:validConversations.length,isIncremental,lastSyncedAt:page.last_synced_at,startTime},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'E'})}).catch(()=>{});
+        fetch('http://127.0.0.1:7242/ingest/6358f30b-ef0a-4ea4-8acc-50c08c025924', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ location: 'sync/route.ts:169', message: 'Sync start', data: { totalConversations: validConversations.length, isIncremental, lastSyncedAt: page.last_synced_at, startTime }, timestamp: Date.now(), sessionId: 'debug-session', runId: 'run1', hypothesisId: 'E' }) }).catch(() => { });
         // #endregion
 
         for (let i = 0; i < validConversations.length; i += SYNC_BATCH_SIZE) {
             // Check if we're approaching timeout
             const elapsed = Date.now() - startTime;
             // #region agent log
-            fetch('http://127.0.0.1:7242/ingest/6358f30b-ef0a-4ea4-8acc-50c08c025924',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'sync/route.ts:174',message:'Sync timeout check',data:{batchIndex:i,processed:i,total:validConversations.length,elapsed,MAX_PROCESSING_TIME,willTimeout:elapsed>MAX_PROCESSING_TIME},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'E'})}).catch(()=>{});
+            fetch('http://127.0.0.1:7242/ingest/6358f30b-ef0a-4ea4-8acc-50c08c025924', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ location: 'sync/route.ts:174', message: 'Sync timeout check', data: { batchIndex: i, processed: i, total: validConversations.length, elapsed, MAX_PROCESSING_TIME, willTimeout: elapsed > MAX_PROCESSING_TIME }, timestamp: Date.now(), sessionId: 'debug-session', runId: 'run1', hypothesisId: 'E' }) }).catch(() => { });
             // #endregion
             if (elapsed > MAX_PROCESSING_TIME) {
                 // #region agent log
-                fetch('http://127.0.0.1:7242/ingest/6358f30b-ef0a-4ea4-8acc-50c08c025924',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'sync/route.ts:175',message:'Sync timeout triggered',data:{processed:i,total:validConversations.length,remaining:validConversations.length-i,elapsed,synced,failed},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'E'})}).catch(()=>{});
+                fetch('http://127.0.0.1:7242/ingest/6358f30b-ef0a-4ea4-8acc-50c08c025924', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ location: 'sync/route.ts:175', message: 'Sync timeout triggered', data: { processed: i, total: validConversations.length, remaining: validConversations.length - i, elapsed, synced, failed }, timestamp: Date.now(), sessionId: 'debug-session', runId: 'run1', hypothesisId: 'E' }) }).catch(() => { });
                 // #endregion
                 const remainingConversations = validConversations.slice(i);
                 const remainingPsids = remainingConversations
@@ -188,7 +188,7 @@ export async function POST(
                         return participant?.id;
                     })
                     .filter((psid): psid is string => !!psid);
-                
+
                 console.warn(`⚠️ Approaching timeout, processed ${i}/${validConversations.length} conversations. ${remainingConversations.length} conversations remaining.`);
                 return NextResponse.json({
                     success: true,
@@ -223,10 +223,10 @@ export async function POST(
                     // Try to fetch profile with timeout, but don't let it block the sync
                     try {
                         const profilePromise = getUserProfile(participant.id, page.access_token);
-                        const timeoutPromise = new Promise((_, reject) => 
+                        const timeoutPromise = new Promise((_, reject) =>
                             setTimeout(() => reject(new Error('Profile fetch timeout')), PROFILE_FETCH_TIMEOUT)
                         );
-                        
+
                         const profile = await Promise.race([profilePromise, timeoutPromise]) as { name: string; profile_pic?: string };
                         name = profile.name || name;
                         profilePic = profile.profile_pic;
@@ -235,15 +235,24 @@ export async function POST(
                         // These are common for users with privacy settings or invalid PSIDs
                         // Only log if it's not a timeout or permission issue (reduce noise)
                         const errorMsg = (profileError as Error).message || String(profileError);
-                        const isExpectedError = 
-                            errorMsg.includes('timeout') || 
-                            errorMsg.includes('does not exist') || 
+                        const isExpectedError =
+                            errorMsg.includes('timeout') ||
+                            errorMsg.includes('does not exist') ||
                             errorMsg.includes('missing permissions') ||
                             errorMsg.includes('does not support this operation');
-                        
+
                         if (!isExpectedError) {
                             console.warn(`⚠️ Failed to fetch profile for ${participant.id}:`, errorMsg);
                         }
+                    }
+
+                    // Calculate initial best_contact_hour from last interaction time
+                    let bestContactHour: number | null = null;
+                    let bestContactConfidence: string = 'none';
+                    if (conversation.updated_time) {
+                        const interactionDate = new Date(conversation.updated_time);
+                        bestContactHour = interactionDate.getUTCHours();
+                        bestContactConfidence = 'low'; // Low confidence since it's just one data point
                     }
 
                     const { error: upsertError } = await supabase
@@ -254,9 +263,13 @@ export async function POST(
                             name,
                             profile_pic: profilePic,
                             last_interaction_at: conversation.updated_time,
+                            best_contact_hour: bestContactHour,
+                            best_contact_confidence: bestContactConfidence,
                             updated_at: new Date().toISOString()
                         }, {
-                            onConflict: 'page_id,psid'
+                            onConflict: 'page_id,psid',
+                            // Only update best_contact_hour if it's currently null
+                            ignoreDuplicates: false
                         });
 
                     if (upsertError) {
@@ -303,13 +316,13 @@ export async function POST(
                 const elapsed = Date.now() - startTime;
                 const remaining = validConversations.length - (i + SYNC_BATCH_SIZE);
                 const estimatedTimeRemaining = remaining > 0 ? Math.round((elapsed / (i + SYNC_BATCH_SIZE)) * remaining / 1000) : 0;
-                console.log(`Progress: ${Math.min(i + SYNC_BATCH_SIZE, validConversations.length)}/${validConversations.length} conversations processed (Synced: ${synced}, Failed: ${failed}, Elapsed: ${Math.round(elapsed/1000)}s, Est. remaining: ${estimatedTimeRemaining}s)`);
+                console.log(`Progress: ${Math.min(i + SYNC_BATCH_SIZE, validConversations.length)}/${validConversations.length} conversations processed (Synced: ${synced}, Failed: ${failed}, Elapsed: ${Math.round(elapsed / 1000)}s, Est. remaining: ${estimatedTimeRemaining}s)`);
             }
         }
 
         console.log(`✅ Sync complete: ${synced} synced, ${failed} failed${restoredCount > 0 ? `, ${restoredCount} deleted contacts restored` : ''}`);
         // #region agent log
-        fetch('http://127.0.0.1:7242/ingest/6358f30b-ef0a-4ea4-8acc-50c08c025924',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'sync/route.ts:291',message:'Sync complete',data:{synced,failed,total:validConversations.length,restored:restoredCount,elapsed:Date.now()-startTime},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'E'})}).catch(()=>{});
+        fetch('http://127.0.0.1:7242/ingest/6358f30b-ef0a-4ea4-8acc-50c08c025924', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ location: 'sync/route.ts:291', message: 'Sync complete', data: { synced, failed, total: validConversations.length, restored: restoredCount, elapsed: Date.now() - startTime }, timestamp: Date.now(), sessionId: 'debug-session', runId: 'run1', hypothesisId: 'E' }) }).catch(() => { });
         // #endregion
 
         // Always update last_synced_at to the start time of this sync
@@ -322,7 +335,7 @@ export async function POST(
                 updated_at: new Date().toISOString()
             })
             .eq('id', pageId);
-        
+
         if (synced + failed < validConversations.length) {
             console.log(`⚠️ Partial sync - processed ${synced + failed}/${validConversations.length} conversations. last_synced_at updated to ${syncStartTime}`);
         }
