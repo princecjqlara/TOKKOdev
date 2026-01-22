@@ -24,7 +24,7 @@ export async function GET(request: NextRequest) {
     const isDevelopment = process.env.NODE_ENV !== 'production';
     if (showToken && isDevelopment) {
         console.log('🔵 Webhook verify token requested (development mode)');
-        return NextResponse.json({ 
+        return NextResponse.json({
             verify_token: verifyToken,
             message: 'Use this token when setting up your Facebook webhook',
             webhook_url: `${process.env.NEXTAUTH_URL || 'http://localhost:3000'}/api/facebook/webhook`,
@@ -94,21 +94,92 @@ export async function POST(request: NextRequest) {
                 if (entry.messaging) {
                     for (const event of entry.messaging) {
                         const senderId = event.sender?.id;
+                        const isFromContact = senderId !== pageId;
 
-                        // Skip if sender is the page itself
-                        if (senderId === pageId) continue;
+                        // Skip if sender is the page itself (for contact upsert)
+                        if (!isFromContact) continue;
+
+                        const interactionTime = new Date(event.timestamp);
+                        const interactionAt = interactionTime.toISOString();
 
                         // Upsert contact
-                        await supabase
+                        const { data: contact } = await supabase
                             .from('contacts')
                             .upsert({
                                 page_id: page.id,
                                 psid: senderId,
-                                last_interaction_at: new Date(event.timestamp).toISOString(),
+                                last_interaction_at: interactionAt,
                                 updated_at: new Date().toISOString()
                             }, {
                                 onConflict: 'page_id,psid'
-                            });
+                            })
+                            .select('id')
+                            .single();
+
+                        // Record interaction for best time to contact analysis
+                        if (contact) {
+                            const hourOfDay = interactionTime.getUTCHours();
+                            const dayOfWeek = interactionTime.getUTCDay();
+
+                            await supabase
+                                .from('contact_interactions')
+                                .insert({
+                                    contact_id: contact.id,
+                                    page_id: page.id,
+                                    interaction_at: interactionAt,
+                                    hour_of_day: hourOfDay,
+                                    day_of_week: dayOfWeek,
+                                    is_from_contact: true
+                                });
+
+                            // Automatically recalculate best time to contact
+                            const { data: interactions } = await supabase
+                                .from('contact_interactions')
+                                .select('hour_of_day')
+                                .eq('contact_id', contact.id)
+                                .eq('is_from_contact', true);
+
+                            const interactionCount = interactions?.length || 0;
+                            const hourDistribution: Record<number, number> = {};
+
+                            for (const interaction of interactions || []) {
+                                const hour = interaction.hour_of_day;
+                                hourDistribution[hour] = (hourDistribution[hour] || 0) + 1;
+                            }
+
+                            // Find most common hour
+                            let bestHour: number | null = null;
+                            let maxCount = 0;
+                            for (const [hour, count] of Object.entries(hourDistribution)) {
+                                if (count > maxCount) {
+                                    maxCount = count;
+                                    bestHour = parseInt(hour);
+                                }
+                            }
+
+                            // Determine confidence level
+                            let confidence: string;
+                            if (interactionCount >= 5) {
+                                confidence = 'high';
+                            } else if (interactionCount >= 2) {
+                                confidence = 'medium';
+                            } else if (interactionCount === 1) {
+                                confidence = 'inferred';
+                                // For single interaction, use neighbor inference (simplified - use this hour)
+                                bestHour = hourOfDay;
+                            } else {
+                                confidence = 'none';
+                            }
+
+                            // Update contact with best time data
+                            await supabase
+                                .from('contacts')
+                                .update({
+                                    best_contact_hour: bestHour,
+                                    best_contact_confidence: confidence
+                                })
+                                .eq('id', contact.id);
+                        }
                     }
                 }
             }

@@ -9,6 +9,26 @@ interface ContactRecord {
     id: string;
     psid: string;
     page_id: string;
+    name: string | null;
+}
+
+// Template variable replacements for personalized messages
+function replaceTemplateVariables(template: string, contact: ContactRecord): string {
+    let message = template;
+
+    const name = contact.name || 'there';
+    const nameParts = name.split(' ');
+    const firstName = nameParts[0] || 'there';
+    const lastName = nameParts.length > 1 ? nameParts.slice(1).join(' ') : '';
+
+    // Replace all template variables (case-insensitive)
+    message = message.replace(/\{name\}/gi, name);
+    message = message.replace(/\{first_name\}/gi, firstName);
+    message = message.replace(/\{firstname\}/gi, firstName);
+    message = message.replace(/\{last_name\}/gi, lastName);
+    message = message.replace(/\{lastname\}/gi, lastName);
+
+    return message;
 }
 
 // Increase timeout for sending messages (up to 5 minutes)
@@ -147,7 +167,7 @@ export async function POST(request: NextRequest) {
         // Get contacts - handle large arrays by batching
         // Note: We trust that contactIds were fetched correctly for this page
         // So we don't need to filter by page_id again - just query by IDs
-        let allContacts: { id: string; psid: string }[] = [];
+        let allContacts: { id: string; psid: string; name: string | null }[] = [];
         const batchSize = 1000; // Supabase has limits on .in() array size
 
         console.log(`📤 Processing ${contactIds.length} contact IDs for page ${pageId}`);
@@ -176,7 +196,7 @@ export async function POST(request: NextRequest) {
 
             const { data: batchContacts, error: batchError } = await supabase
                 .from('contacts')
-                .select('id, psid, page_id')
+                .select('id, psid, page_id, name')
                 .in('id', batchIds);
 
             if (batchError) {
@@ -257,7 +277,7 @@ export async function POST(request: NextRequest) {
 
             if (validContacts.length) {
                 const beforeConcat = allContacts.length;
-                allContacts = allContacts.concat(validContacts.map(c => ({ id: c.id, psid: c.psid.trim() })));
+                allContacts = allContacts.concat(validContacts.map(c => ({ id: c.id, psid: c.psid.trim(), name: c.name })));
                 // #region agent log
                 writeDebugLog('api/facebook/messages/send/route.ts:245', 'Valid contacts added to allContacts', { batchNumber, validCount: validContacts.length, beforeConcat, afterConcat: allContacts.length, totalValidSoFar: allContacts.length }, 'B');
                 // #endregion
@@ -287,7 +307,7 @@ export async function POST(request: NextRequest) {
             // Fallback: fetch all contacts for the page and use those with valid psid
             const { data: pageContacts, error: pageContactsError } = await supabase
                 .from('contacts')
-                .select('id, page_id, psid')
+                .select('id, page_id, psid, name')
                 .eq('page_id', pageId)
                 .not('psid', 'is', null)
                 .limit(10000);
@@ -302,7 +322,7 @@ export async function POST(request: NextRequest) {
                     console.warn(
                         `No valid contacts matched provided IDs; falling back to ${validPageContacts.length} contacts on page ${pageId}`
                     );
-                    allContacts = validPageContacts.map(c => ({ id: c.id, psid: c.psid.trim() }));
+                    allContacts = validPageContacts.map(c => ({ id: c.id, psid: c.psid.trim(), name: c.name || null }));
                 }
             }
 
@@ -503,7 +523,14 @@ export async function POST(request: NextRequest) {
             // Process batch in parallel - use allSettled to continue even if some fail
             const batchPromises = batch.map(async (contact) => {
                 try {
-                    const result = await sendMessage(page.fb_page_id, page.access_token, contact.psid, messageText);
+                    // Replace template variables with contact data for personalized messages
+                    const personalizedMessage = replaceTemplateVariables(messageText, {
+                        id: contact.id,
+                        psid: contact.psid,
+                        page_id: pageId,
+                        name: contact.name
+                    });
+                    const result = await sendMessage(page.fb_page_id, page.access_token, contact.psid, personalizedMessage);
                     console.log(`✅ Successfully sent message to contact ${contact.id} (PSID: ${contact.psid})`);
                     return { success: true as const, contactId: contact.id, error: undefined };
                 } catch (error) {

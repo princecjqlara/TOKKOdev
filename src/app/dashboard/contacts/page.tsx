@@ -1062,19 +1062,20 @@ export default function ContactsPage() {
                             </th>
                             <th>Contact Name</th>
                             <th>Tags</th>
+                            <th>Best Time</th>
                             <th>Last Active</th>
                         </tr>
                     </thead>
                     <tbody className="bg-white">
                         {loading ? (
                             <tr>
-                                <td colSpan={4} className="text-center py-12">
+                                <td colSpan={5} className="text-center py-12">
                                     <div className="animate-spin w-8 h-8 border-2 border-black border-t-transparent rounded-full mx-auto" />
                                 </td>
                             </tr>
                         ) : contacts.length === 0 ? (
                             <tr>
-                                <td colSpan={4} className="text-center py-20">
+                                <td colSpan={5} className="text-center py-20">
                                     <User className="w-12 h-12 text-gray-300 mx-auto mb-4" />
                                     <p className="text-lg font-bold uppercase">No contacts found</p>
                                     <p className="font-mono text-xs text-gray-500 mt-2">
@@ -1137,6 +1138,30 @@ export default function ContactsPage() {
                                                 </span>
                                             )}
                                         </div>
+                                    </td>
+                                    <td>
+                                        {contact.best_contact_hour !== null && contact.best_contact_hour !== undefined ? (
+                                            <div className="flex items-center gap-2">
+                                                <span className="font-mono text-xs">
+                                                    {(() => {
+                                                        const hour = contact.best_contact_hour;
+                                                        const displayHour = hour === 0 ? 12 : hour > 12 ? hour - 12 : hour;
+                                                        const ampm = hour < 12 ? 'AM' : 'PM';
+                                                        return `${displayHour}:00 ${ampm}`;
+                                                    })()}
+                                                </span>
+                                                <span className={`text-[10px] px-1.5 py-0.5 border font-bold uppercase ${contact.best_contact_confidence === 'high' ? 'bg-green-100 border-green-500 text-green-700' :
+                                                    contact.best_contact_confidence === 'medium' ? 'bg-yellow-100 border-yellow-500 text-yellow-700' :
+                                                        contact.best_contact_confidence === 'inferred' ? 'bg-blue-100 border-blue-500 text-blue-700' :
+                                                            contact.best_contact_confidence === 'low' ? 'bg-gray-100 border-gray-400 text-gray-600' :
+                                                                'bg-gray-50 border-gray-300 text-gray-400'
+                                                    }`}>
+                                                    {contact.best_contact_confidence || 'none'}
+                                                </span>
+                                            </div>
+                                        ) : (
+                                            <span className="font-mono text-xs text-gray-400">—</span>
+                                        )}
                                     </td>
                                     <td className="font-mono text-xs text-gray-500">
                                         {contact.last_interaction_at
@@ -1305,10 +1330,19 @@ export default function ContactsPage() {
                     <textarea
                         value={messageText}
                         onChange={(e) => setMessageText(e.target.value)}
-                        placeholder="TYPE YOUR MESSAGE HERE..."
+                        placeholder="Hi {name}, TYPE YOUR MESSAGE HERE..."
                         rows={5}
                         className="input-wireframe w-full h-auto p-3 resize-none"
                     />
+                    <div className="bg-gray-50 border border-gray-200 p-3 rounded text-xs">
+                        <p className="font-bold text-gray-700 mb-1">💡 Personalize your message:</p>
+                        <div className="flex flex-wrap gap-2 font-mono">
+                            <span className="bg-blue-100 text-blue-700 px-2 py-0.5 rounded">{'{name}'}</span>
+                            <span className="bg-blue-100 text-blue-700 px-2 py-0.5 rounded">{'{first_name}'}</span>
+                            <span className="bg-blue-100 text-blue-700 px-2 py-0.5 rounded">{'{last_name}'}</span>
+                        </div>
+                        <p className="text-gray-500 mt-1">Use these to personalize each message with the contact&apos;s name</p>
+                    </div>
                     <div className="flex justify-end gap-3 pt-4 border-t border-black">
                         <button
                             onClick={() => {

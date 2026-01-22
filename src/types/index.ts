@@ -51,6 +51,8 @@ export interface Contact {
   created_at: string;
   updated_at: string;
   tags?: Tag[];
+  best_contact_hour: number | null;
+  best_contact_confidence: 'high' | 'medium' | 'low' | 'inferred' | 'none';
 }
 
 export interface Tag {
