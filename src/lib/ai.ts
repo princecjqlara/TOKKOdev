@@ -56,49 +56,37 @@ export async function generatePersonalizedMessage(
     const conversationContext = formatConversationHistory(conversationHistory, pageId, firstName);
     const hasHistory = conversationHistory.length > 0;
 
-    const systemPrompt = `You are a helpful assistant that analyzes conversations and writes personalized follow-up messages for a business.
+    const systemPrompt = `You write short, personalized follow-up messages for a business.
 
-Your task:
-1. ANALYZE the conversation history to understand:
-   - What the contact is interested in
-   - Any questions they've asked
-   - The tone and style of the conversation
-   - What stage of the relationship they're in (new lead, ongoing discussion, etc.)
-   - Any specific topics or concerns mentioned
+CRITICAL RULES:
+1. OUTPUT ONLY THE MESSAGE TEXT - no explanations, no reasoning, no quotes, no labels
+2. Keep messages SHORT - under 300 characters, 1-3 sentences max
+3. Be conversational and warm, like texting a friend
+4. Use the contact's first name naturally (once, if at all)
+5. NO formal greetings (Dear, Hello, Hi there) or closings (Best, Regards, Sincerely)
+6. Match the casual tone of a Messenger chat
 
-2. CREATE a follow-up message that:
-   - Is relevant to the conversation context
-   - Feels natural and continues the discussion
-   - Is concise (under 160 characters if possible)
-   - Uses a warm, conversational tone matching the previous exchanges
-   - Addresses the contact by their first name naturally
-   - Does NOT repeat information already discussed
-   - Does NOT include formal greetings like "Dear" or formal closings
+BAD OUTPUT (DO NOT DO THIS):
+"Here's a message for John: Hey John! How are you?"
+"Based on the conversation, I suggest: Hi John..."
 
-The user's prompt describes the MESSAGE STYLE and PURPOSE - use it to guide the type of message (friendly check-in, sale reminder, etc.) while making it contextual to the conversation.`;
+GOOD OUTPUT (DO THIS):
+Hey John! Just checking in - did you have any questions about the property?`;
 
     const userPrompt = hasHistory
-        ? `Contact Name: ${firstName}
+        ? `Contact: ${firstName}
 
-CONVERSATION HISTORY:
+RECENT MESSAGES:
 ${conversationContext}
 
-MESSAGE STYLE/PURPOSE FROM BUSINESS:
-${prompt}
+PURPOSE: ${prompt}
 
-Based on the conversation history above, write a contextual follow-up message for ${firstName}. The message should:
-- Reference or continue naturally from the conversation
-- Match the specified style/purpose
-- Feel like a genuine continuation, not a generic message
-- Be personalized based on what you learned about ${firstName} from the conversation`
-        : `Contact Name: ${firstName}
+Write a short follow-up message (1-3 sentences). Output ONLY the message, nothing else.`
+        : `Contact: ${firstName}
 
-No previous conversation history is available.
+PURPOSE: ${prompt}
 
-MESSAGE STYLE/PURPOSE FROM BUSINESS:
-${prompt}
-
-Write a friendly introductory message for ${firstName} based on the style/purpose above. Since there's no conversation history, keep it warm but general.`;
+Write a short, friendly intro message (1-2 sentences). Output ONLY the message, nothing else.`;
 
     try {
         const response = await fetch(NVIDIA_API_URL, {
@@ -113,7 +101,7 @@ Write a friendly introductory message for ${firstName} based on the style/purpos
                     { role: 'system', content: systemPrompt },
                     { role: 'user', content: userPrompt }
                 ],
-                max_tokens: 200,
+                max_tokens: 100, // Keep messages short
                 temperature: 0.7,
                 top_p: 0.9
             })
@@ -129,13 +117,23 @@ Write a friendly introductory message for ${firstName} based on the style/purpos
         }
 
         const data = await response.json();
-        const generatedMessage = data.choices?.[0]?.message?.content?.trim();
+        let generatedMessage = data.choices?.[0]?.message?.content?.trim();
 
         if (!generatedMessage) {
             throw new Error('No message generated from NVIDIA API');
         }
 
-        console.log('✅ AI generated contextual message for', firstName, ':', generatedMessage.substring(0, 50) + '...');
+        // Clean up any reasoning/prefixes the AI might have added
+        // Remove common prefixes like "Here's a message:", "Message:", etc.
+        generatedMessage = generatedMessage
+            .replace(/^(Here('s| is) (a |the )?message:?\s*)/i, '')
+            .replace(/^(Message:?\s*)/i, '')
+            .replace(/^(Sure!?\s*(,|\.|\!)??\s*)/i, '')
+            .replace(/^(Here you go:?\s*)/i, '')
+            .replace(/^["']|["']$/g, '') // Remove surrounding quotes
+            .trim();
+
+        console.log('✅ AI generated message for', firstName, ':', generatedMessage.substring(0, 50) + '...');
         return generatedMessage;
     } catch (error) {
         console.error('❌ Error generating AI message:', error);

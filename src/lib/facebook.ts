@@ -144,124 +144,50 @@ export async function getUserProfile(
     return await response.json();
 }
 
-// Split a long message into chunks for Facebook's 2000 character limit
-function splitMessage(text: string, maxLength: number = 1900): string[] {
-    if (text.length <= maxLength) {
-        return [text];
-    }
-
-    const chunks: string[] = [];
-    let remaining = text;
-
-    while (remaining.length > 0) {
-        if (remaining.length <= maxLength) {
-            chunks.push(remaining);
-            break;
-        }
-
-        // Find a good break point (sentence end, newline, or space)
-        let breakPoint = maxLength;
-
-        // Try to break at sentence end
-        const sentenceEnd = remaining.lastIndexOf('. ', maxLength);
-        if (sentenceEnd > maxLength / 2) {
-            breakPoint = sentenceEnd + 1;
-        } else {
-            // Try to break at newline
-            const newlineEnd = remaining.lastIndexOf('\n', maxLength);
-            if (newlineEnd > maxLength / 2) {
-                breakPoint = newlineEnd + 1;
-            } else {
-                // Break at last space
-                const spaceEnd = remaining.lastIndexOf(' ', maxLength);
-                if (spaceEnd > maxLength / 2) {
-                    breakPoint = spaceEnd + 1;
-                }
-            }
-        }
-
-        chunks.push(remaining.substring(0, breakPoint).trim());
-        remaining = remaining.substring(breakPoint).trim();
-    }
-
-    return chunks;
-}
-
-// Send message to a contact (with automatic message splitting for long messages)
+// Send message to a contact
 export async function sendMessage(
     pageId: string,
     pageAccessToken: string,
     recipientPsid: string,
     messageText: string
 ): Promise<{ message_id: string }> {
-    // Split message if too long for Facebook (2000 char limit)
-    const chunks = splitMessage(messageText, 1900);
-
-    let lastResult: { message_id: string } = { message_id: '' };
-
-    for (let i = 0; i < chunks.length; i++) {
-        const chunk = chunks[i];
-
-        // Add small delay between chunks to maintain order
-        if (i > 0) {
-            await new Promise(resolve => setTimeout(resolve, 500));
+    // Facebook Messenger API endpoint - use /me/messages with page access token
+    const response = await fetch(
+        `${FACEBOOK_GRAPH_URL}/me/messages?access_token=${pageAccessToken}`,
+        {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+                recipient: { id: recipientPsid },
+                message: { text: messageText },
+                messaging_type: 'MESSAGE_TAG',
+                tag: 'ACCOUNT_UPDATE'
+            })
         }
+    );
 
-        // Facebook Messenger API endpoint - use /me/messages with page access token
-        const response = await fetch(
-            `${FACEBOOK_GRAPH_URL}/me/messages?access_token=${pageAccessToken}`,
-            {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json'
-                },
-                body: JSON.stringify({
-                    recipient: { id: recipientPsid },
-                    message: { text: chunk },
-                    messaging_type: 'MESSAGE_TAG',
-                    tag: 'ACCOUNT_UPDATE'
-                })
-            }
-        );
-
-        if (!response.ok) {
-            const errorData = await response.json().catch(() => ({ error: { message: 'Unknown error' } }));
-            const errorMessage = errorData.error?.message || `HTTP ${response.status}: ${response.statusText}`;
-            console.error('🔴 Facebook send message error:', {
-                pageId,
-                recipientPsid,
-                status: response.status,
-                error: errorMessage,
-                fullError: errorData,
-                chunk: i + 1,
-                totalChunks: chunks.length
-            });
-            throw new Error(errorMessage);
-        }
-
-        lastResult = await response.json();
-
-        if (chunks.length > 1) {
-            console.log(`✅ Message chunk ${i + 1}/${chunks.length} sent:`, {
-                pageId,
-                recipientPsid,
-                messageId: lastResult.message_id,
-                chunkLength: chunk.length
-            });
-        }
-    }
-
-    if (chunks.length === 1) {
-        console.log('✅ Message sent successfully:', {
+    if (!response.ok) {
+        const errorData = await response.json().catch(() => ({ error: { message: 'Unknown error' } }));
+        const errorMessage = errorData.error?.message || `HTTP ${response.status}: ${response.statusText}`;
+        console.error('🔴 Facebook send message error:', {
             pageId,
             recipientPsid,
-            messageId: lastResult.message_id
+            status: response.status,
+            error: errorMessage,
+            fullError: errorData
         });
-    } else {
-        console.log(`✅ All ${chunks.length} message chunks sent successfully`);
+        throw new Error(errorMessage);
     }
 
-    return lastResult;
+    const result = await response.json();
+    console.log('✅ Message sent successfully:', {
+        pageId,
+        recipientPsid,
+        messageId: result.message_id
+    });
+    return result;
 }
 
 // Message type for conversation history
