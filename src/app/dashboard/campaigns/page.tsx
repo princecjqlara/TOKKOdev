@@ -37,9 +37,12 @@ export default function CampaignsPage() {
     const [isLoop, setIsLoop] = useState(false);
     const [aiPrompt, setAiPrompt] = useState('');
 
-    // Contacts pagination for modal
+    // Contacts pagination and filtering for modal
     const [contactsPage, setContactsPage] = useState(1);
     const [contactsTotal, setContactsTotal] = useState(0);
+    const [tags, setTags] = useState<{ id: string; name: string; color: string }[]>([]);
+    const [selectedTagFilter, setSelectedTagFilter] = useState('');
+    const [isSelectAllMode, setIsSelectAllMode] = useState(false);
 
     useEffect(() => {
         fetchPages();
@@ -87,7 +90,7 @@ export default function CampaignsPage() {
         }
     };
 
-    const fetchContacts = async () => {
+    const fetchContacts = async (tagFilter?: string) => {
         if (!selectedPageId) return;
 
         try {
@@ -95,6 +98,11 @@ export default function CampaignsPage() {
                 page: contactsPage.toString(),
                 pageSize: '50'
             });
+
+            // Add tag filter if specified
+            if (tagFilter) {
+                params.set('tagId', tagFilter);
+            }
 
             const res = await fetch(`/api/pages/${selectedPageId}/contacts?${params}`);
             const data: PaginatedResponse<Contact> = await res.json();
@@ -106,6 +114,17 @@ export default function CampaignsPage() {
         }
     };
 
+    const fetchTags = async () => {
+        if (!selectedPageId) return;
+        try {
+            const res = await fetch(`/api/tags?pageId=${selectedPageId}`);
+            const data = await res.json();
+            setTags(data.tags || []);
+        } catch (error) {
+            console.error('Error fetching tags:', error);
+        }
+    };
+
     const handleOpenCreateModal = async () => {
         setCampaignName('');
         setMessageText('');
@@ -113,18 +132,38 @@ export default function CampaignsPage() {
         setContactsPage(1);
         setIsLoop(false);
         setAiPrompt('');
-        await fetchContacts();
+        setSelectedTagFilter('');
+        setIsSelectAllMode(false);
+        await Promise.all([fetchContacts(), fetchTags()]);
         setShowCreateModal(true);
     };
 
     const handleCreate = async () => {
         // For loop campaigns, need aiPrompt; for regular campaigns, need messageText
-        if (!campaignName.trim() || selectedContactIds.size === 0) return;
+        const hasRecipients = isSelectAllMode ? contactsTotal > 0 : selectedContactIds.size > 0;
+        if (!campaignName.trim() || !hasRecipients) return;
         if (isLoop && !aiPrompt.trim()) return;
         if (!isLoop && !messageText.trim()) return;
 
         setActionLoading(true);
         try {
+            // If selectAll mode, fetch all contact IDs
+            let contactIds = Array.from(selectedContactIds);
+
+            if (isSelectAllMode) {
+                // Fetch all contact IDs with the current filter
+                const params = new URLSearchParams({
+                    page: '1',
+                    pageSize: contactsTotal.toString()
+                });
+                if (selectedTagFilter) {
+                    params.set('tagId', selectedTagFilter);
+                }
+                const res = await fetch(`/api/pages/${selectedPageId}/contacts?${params}`);
+                const data: PaginatedResponse<Contact> = await res.json();
+                contactIds = data.items.map(c => c.id);
+            }
+
             await fetch('/api/campaigns', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
@@ -132,7 +171,7 @@ export default function CampaignsPage() {
                     pageId: selectedPageId,
                     name: campaignName.trim(),
                     messageText: isLoop ? null : messageText.trim(),
-                    contactIds: Array.from(selectedContactIds),
+                    contactIds,
                     isLoop,
                     aiPrompt: isLoop ? aiPrompt.trim() : null
                 })
@@ -471,19 +510,54 @@ export default function CampaignsPage() {
                     )}
 
                     <div>
-                        <div className="flex items-center justify-between mb-2">
+                        <div className="flex items-center justify-between mb-3">
                             <label className="label-wireframe mb-0">
-                                Select Recipients ({selectedContactIds.size})
+                                Select Recipients ({isSelectAllMode ? contactsTotal : selectedContactIds.size})
                             </label>
-                            <button
-                                onClick={selectAllContacts}
-                                className="text-xs font-bold uppercase underline hover:text-gray-600"
-                            >
-                                {contacts.every(c => selectedContactIds.has(c.id))
-                                    ? 'Deselect Page'
-                                    : 'Select Page'}
-                            </button>
+                            <div className="flex items-center gap-2">
+                                {/* Tag Filter */}
+                                <select
+                                    value={selectedTagFilter}
+                                    onChange={(e) => {
+                                        setSelectedTagFilter(e.target.value);
+                                        setContactsPage(1);
+                                        setSelectedContactIds(new Set());
+                                        setIsSelectAllMode(false);
+                                        fetchContacts(e.target.value);
+                                    }}
+                                    className="input-wireframe h-8 text-xs w-auto"
+                                >
+                                    <option value="">ALL TAGS</option>
+                                    {tags.map((tag) => (
+                                        <option key={tag.id} value={tag.id}>
+                                            {tag.name}
+                                        </option>
+                                    ))}
+                                </select>
+                                {/* Select All */}
+                                <button
+                                    onClick={() => {
+                                        if (isSelectAllMode) {
+                                            setIsSelectAllMode(false);
+                                            setSelectedContactIds(new Set());
+                                        } else {
+                                            setIsSelectAllMode(true);
+                                            // Add all currently visible contacts
+                                            const allIds = new Set(contacts.map(c => c.id));
+                                            setSelectedContactIds(allIds);
+                                        }
+                                    }}
+                                    className="text-xs font-bold uppercase underline hover:text-gray-600 whitespace-nowrap"
+                                >
+                                    {isSelectAllMode ? `Deselect All (${contactsTotal})` : `Select All (${contactsTotal})`}
+                                </button>
+                            </div>
                         </div>
+                        {isSelectAllMode && (
+                            <div className="bg-green-50 border border-green-300 p-2 mb-2 text-xs font-mono text-green-800">
+                                ✓ All {contactsTotal} contacts{selectedTagFilter ? ' with this tag' : ''} will be added to the campaign
+                            </div>
+                        )}
                         <div className="max-h-64 overflow-y-auto border border-black p-2 space-y-1">
                             {contacts.map((contact) => (
                                 <button
