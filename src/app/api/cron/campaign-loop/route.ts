@@ -123,7 +123,7 @@ export async function GET() {
                             conversationHistory = await getConversationMessages(
                                 conversationId,
                                 page.access_token,
-                                15 // Get last 15 messages for context
+                                100 // Get all messages for full context
                             );
                             console.log(`📝 Fetched ${conversationHistory.length} messages for context`);
                         }
