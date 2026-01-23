@@ -88,6 +88,7 @@ export const authOptions: NextAuthOptions = {
 // Extended session type
 declare module 'next-auth' {
     interface Session {
+        accessToken?: string;
         user: {
             id?: string;
             name?: string | null;

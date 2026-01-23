@@ -20,7 +20,7 @@ export default function ConnectPage() {
     }, [session]);
 
     const fetchFacebookPages = async () => {
-        if (!session?.accessToken) {
+        if (!session?.user) {
             setLoading(false);
             return;
         }
@@ -89,8 +89,8 @@ export default function ConnectPage() {
         signIn('facebook', { callbackUrl: '/dashboard/connect' });
     };
 
-    // Not logged in with Facebook
-    if (!session?.accessToken) {
+    // Show connected pages from database
+    if (!session?.user) {
         return (
             <div className="max-w-[600px] mx-auto p-8 mt-12">
                 <div className="wireframe-card text-center py-12">
@@ -99,14 +99,8 @@ export default function ConnectPage() {
                         Connect Facebook
                     </h1>
                     <p className="font-mono text-sm text-gray-500 mb-8 max-w-sm mx-auto">
-                        Connect your Facebook account to access your pages and start managing contacts securely.
+                        Please sign in to view connected pages.
                     </p>
-                    <button
-                        onClick={handleFacebookLogin}
-                        className="btn-wireframe bg-blue-600 text-white border-blue-600 hover:bg-blue-700 hover:text-white"
-                    >
-                        Login with Facebook
-                    </button>
                 </div>
             </div>
         );

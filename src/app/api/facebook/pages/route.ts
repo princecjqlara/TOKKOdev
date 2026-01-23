@@ -8,11 +8,18 @@ export async function GET(request: NextRequest) {
     try {
         const session = await getServerSession(authOptions);
 
-        if (!session?.accessToken) {
+        if (!session?.user) {
             return NextResponse.json(
-                { error: 'Unauthorized', message: 'Please sign in with Facebook' },
+                { error: 'Unauthorized', message: 'Please sign in' },
                 { status: 401 }
             );
+        }
+
+        // Note: Facebook pages functionality requires Facebook OAuth
+        // With email/password login, this endpoint returns empty pages
+        // Pages should be connected via the admin or API with stored tokens
+        if (!session.accessToken) {
+            return NextResponse.json({ pages: [], message: 'No Facebook token available' });
         }
 
         const pages = await getFacebookPages(session.accessToken);
