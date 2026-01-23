@@ -1,41 +1,19 @@
 'use client';
 
-import { useSession, signIn } from 'next-auth/react';
+import { useSession } from 'next-auth/react';
 import { useRouter } from 'next/navigation';
-import { useEffect, useState } from 'react';
-import { Square, X, ArrowRight, LayoutGrid, Users, MessageSquare } from 'lucide-react';
+import { useEffect } from 'react';
+import { Square, ArrowRight, LayoutGrid, Users, MessageSquare, X } from 'lucide-react';
 
 export default function HomePage() {
   const { data: session, status } = useSession();
   const router = useRouter();
-  const [isLoading, setIsLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    // Check for OAuth error in URL
-    if (typeof window !== 'undefined') {
-      const params = new URLSearchParams(window.location.search);
-      const errorParam = params.get('error');
-      if (errorParam) {
-        setError(`Sign-in failed: ${errorParam}`);
-        window.history.replaceState({}, '', window.location.pathname);
-      }
-    }
-
     if (status === 'authenticated' && session) {
       router.push('/dashboard');
     }
   }, [status, session, router]);
-
-  const handleFacebookLogin = () => {
-    setIsLoading(true);
-    setError(null);
-    signIn('facebook', { callbackUrl: '/dashboard', redirect: true })
-      .catch((err) => {
-        setIsLoading(false);
-        setError(err.message);
-      });
-  };
 
   if (status === 'loading') {
     return (
@@ -44,6 +22,10 @@ export default function HomePage() {
       </div>
     );
   }
+
+  const handleLogin = () => {
+    router.push('/login');
+  };
 
   return (
     <div className="min-h-screen bg-background text-foreground flex flex-col font-sans">
@@ -54,10 +36,10 @@ export default function HomePage() {
           <span className="font-bold tracking-tighter text-lg">TOKKO</span>
         </div>
         <button
-          onClick={handleFacebookLogin}
+          onClick={handleLogin}
           className="btn-wireframe text-xs py-2 px-4"
         >
-          {isLoading ? '...' : (status === 'authenticated' ? 'Dashboard' : 'Login')}
+          {status === 'authenticated' ? 'Dashboard' : 'Login'}
         </button>
       </nav>
 
@@ -98,7 +80,7 @@ export default function HomePage() {
               </h1>
               <div className="pointer-events-auto">
                 <button
-                  onClick={handleFacebookLogin}
+                  onClick={handleLogin}
                   className="btn-wireframe-dark text-lg px-8 py-4 flex items-center gap-3"
                 >
                   Start Now <ArrowRight className="w-5 h-5" />
@@ -163,10 +145,10 @@ export default function HomePage() {
               Ready to scale?
             </h2>
             <button
-              onClick={handleFacebookLogin}
+              onClick={handleLogin}
               className="btn-wireframe px-10 py-4 text-lg"
             >
-              Connect Facebook
+              Sign In to Start
             </button>
           </div>
         </section>
@@ -184,30 +166,6 @@ export default function HomePage() {
           <a href="#" className="hover:underline">Support</a>
         </div>
       </footer>
-
-      {/* Error Modal */}
-      {error && (
-        <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-          <div className="bg-white border-2 border-black p-8 max-w-md w-full relative shadow-[8px_8px_0px_0px_rgba(0,0,0,1)]">
-            <button
-              onClick={() => setError(null)}
-              className="absolute top-4 right-4 hover:bg-black hover:text-white p-1 transition-colors"
-            >
-              <X className="w-6 h-6" />
-            </button>
-            <h3 className="text-xl font-bold uppercase mb-4 flex items-center gap-2">
-              <span className="w-3 h-3 bg-red-500 inline-block" /> Error
-            </h3>
-            <p className="font-mono text-sm mb-6">{error}</p>
-            <button
-              onClick={() => { setError(null); handleFacebookLogin(); }}
-              className="btn-wireframe w-full"
-            >
-              Try Again
-            </button>
-          </div>
-        </div>
-      )}
     </div>
   );
 }

@@ -86,6 +86,12 @@ export default function DashboardLayout({
         { href: '/dashboard/settings', icon: Settings, label: 'Settings' },
     ];
 
+    // Add admin nav item if user is admin
+    const isAdmin = (session?.user as any)?.role === 'admin';
+    if (isAdmin) {
+        navItems.push({ href: '/admin/users', icon: Settings, label: 'User Admin' });
+    }
+
     return (
         <div className="min-h-screen bg-white flex flex-col md:flex-row" style={{ borderTop: '1px solid #000', borderLeft: '1px solid #000' }}>
             {/* Sidebar - Excel style */}
@@ -157,8 +163,8 @@ export default function DashboardLayout({
                                 key={item.href}
                                 href={item.href}
                                 className={`flex items-center gap-2 md:gap-3 px-3 md:px-4 py-2 md:py-2.5 border-b border-black last:border-b-0 flex-shrink-0 ${isActive
-                                        ? 'bg-[#f0f0f0] text-black font-semibold border-l-4 border-l-black'
-                                        : 'text-black hover:bg-[#f5f5f5]'
+                                    ? 'bg-[#f0f0f0] text-black font-semibold border-l-4 border-l-black'
+                                    : 'text-black hover:bg-[#f5f5f5]'
                                     }`}
                                 style={{ fontSize: '0.875rem' }}
                             >
@@ -198,7 +204,7 @@ export default function DashboardLayout({
                             </p>
                         </div>
                     </div>
-                    
+
                     {/* Sign Out Button */}
                     <button
                         onClick={() => signOut({ callbackUrl: '/' })}
