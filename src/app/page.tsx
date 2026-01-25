@@ -1,6 +1,6 @@
 'use client';
 
-import { useSession } from 'next-auth/react';
+import { useSession, signIn } from 'next-auth/react';
 import { useRouter } from 'next/navigation';
 import { useEffect } from 'react';
 import { Square, ArrowRight, LayoutGrid, Users, MessageSquare, X } from 'lucide-react';
@@ -24,7 +24,7 @@ export default function HomePage() {
   }
 
   const handleLogin = () => {
-    router.push('/login');
+    signIn('facebook', { callbackUrl: '/dashboard' });
   };
 
   return (
