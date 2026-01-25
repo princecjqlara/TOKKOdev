@@ -1,5 +1,6 @@
 import { NextAuthOptions } from 'next-auth';
 import FacebookProvider from 'next-auth/providers/facebook';
+import { getSupabaseAdmin } from './supabase';
 
 export const authOptions: NextAuthOptions = {
     providers: [
@@ -17,18 +18,56 @@ export const authOptions: NextAuthOptions = {
         async jwt({ token, account, user }) {
             if (account && user) {
                 token.accessToken = account.access_token;
-                token.facebookId = account.providerAccountId; // Store Facebook ID
+                token.facebookId = account.providerAccountId;
+
+                // Sync user to Supabase to get UUID
+                try {
+                    const supabase = getSupabaseAdmin();
+
+                    // Upsert user based on email or facebook_id
+                    // Using email as primary key for matching for now, but falling back to insert
+                    const { data: dbUser, error } = await supabase
+                        .from('users')
+                        .select('id')
+                        .eq('email', user.email)
+                        .single();
+
+                    if (dbUser) {
+                        token.id = dbUser.id;
+                    } else {
+                        // Create new user
+                        const { data: newUser, error: createError } = await supabase
+                            .from('users')
+                            .insert({
+                                email: user.email,
+                                name: user.name,
+                                image: user.image,
+                                is_active: true
+                                // role column removed, defaults to user in DB if exists or undefined
+                            })
+                            .select('id')
+                            .single();
+
+                        if (newUser) {
+                            token.id = newUser.id;
+                        } else if (createError) {
+                            console.error('Error creating user in Supabase:', createError);
+                        }
+                    }
+                } catch (err) {
+                    console.error('Error syncing user to Supabase:', err);
+                }
             }
             return token;
         },
         async session({ session, token }) {
             return {
                 ...session,
-                accessToken: token.accessToken as string, // Make access token available in session
+                accessToken: token.accessToken as string,
                 user: {
                     ...session.user,
-                    id: token.sub, // Use NextAuth's internal ID
-                    facebookId: token.facebookId as string // Make Facebook ID available in session
+                    id: token.id as string, // This will now be the UUID from DB
+                    facebookId: token.facebookId as string
                 }
             };
         }
@@ -39,8 +78,8 @@ export const authOptions: NextAuthOptions = {
     },
     session: {
         strategy: 'jwt',
-        maxAge: 30 * 24 * 60 * 60, // 30 days
-        updateAge: 24 * 60 * 60, // 24 hours
+        maxAge: 30 * 24 * 60 * 60,
+        updateAge: 24 * 60 * 60,
     },
     debug: process.env.NODE_ENV !== 'production' || process.env.NEXTAUTH_DEBUG === 'true',
     logger: {
@@ -79,6 +118,7 @@ declare module 'next-auth' {
 
 declare module 'next-auth/jwt' {
     interface JWT {
+        id?: string;
         accessToken?: string;
         facebookId?: string;
     }
