@@ -1,74 +1,34 @@
 import { NextAuthOptions } from 'next-auth';
-import CredentialsProvider from 'next-auth/providers/credentials';
-import bcrypt from 'bcryptjs';
-import { getSupabaseAdmin } from './supabase';
+import FacebookProvider from 'next-auth/providers/facebook';
 
 export const authOptions: NextAuthOptions = {
     providers: [
-        CredentialsProvider({
-            name: 'credentials',
-            credentials: {
-                email: { label: 'Email', type: 'email' },
-                password: { label: 'Password', type: 'password' }
-            },
-            async authorize(credentials) {
-                if (!credentials?.email || !credentials?.password) {
-                    throw new Error('Please enter email and password');
+        FacebookProvider({
+            clientId: process.env.FACEBOOK_CLIENT_ID!,
+            clientSecret: process.env.FACEBOOK_CLIENT_SECRET!,
+            authorization: {
+                params: {
+                    scope: 'email,public_profile,pages_show_list,pages_read_engagement,pages_manage_metadata,pages_read_user_content,pages_manage_posts,pages_manage_engagement,pages_messaging'
                 }
-
-                const supabase = getSupabaseAdmin();
-
-                // Fetch user by email
-                const { data: user, error } = await supabase
-                    .from('users')
-                    .select('id, email, name, image, password_hash, role, is_active')
-                    .eq('email', credentials.email)
-                    .single();
-
-                if (error || !user) {
-                    throw new Error('Invalid email or password');
-                }
-
-                if (!user.is_active) {
-                    throw new Error('Account is disabled');
-                }
-
-                if (!user.password_hash) {
-                    throw new Error('Invalid email or password');
-                }
-
-                // Verify password
-                const isValid = await bcrypt.compare(credentials.password, user.password_hash);
-
-                if (!isValid) {
-                    throw new Error('Invalid email or password');
-                }
-
-                return {
-                    id: user.id,
-                    email: user.email,
-                    name: user.name,
-                    image: user.image,
-                    role: user.role
-                };
             }
         })
     ],
     callbacks: {
-        async jwt({ token, user }) {
-            if (user) {
-                token.id = user.id;
-                token.role = (user as any).role;
+        async jwt({ token, account, user }) {
+            if (account && user) {
+                token.accessToken = account.access_token;
+                token.facebookId = account.providerAccountId; // Store Facebook ID
             }
             return token;
         },
         async session({ session, token }) {
             return {
                 ...session,
+                accessToken: token.accessToken as string, // Make access token available in session
                 user: {
                     ...session.user,
-                    id: token.id as string,
-                    role: token.role as string
+                    id: token.sub, // Use NextAuth's internal ID
+                    facebookId: token.facebookId as string // Make Facebook ID available in session
                 }
             };
         }
@@ -79,10 +39,28 @@ export const authOptions: NextAuthOptions = {
     },
     session: {
         strategy: 'jwt',
-        maxAge: 30 * 24 * 60 * 60,
-        updateAge: 24 * 60 * 60
+        maxAge: 30 * 24 * 60 * 60, // 30 days
+        updateAge: 24 * 60 * 60, // 24 hours
     },
-    debug: process.env.NODE_ENV !== 'production'
+    debug: process.env.NODE_ENV !== 'production' || process.env.NEXTAUTH_DEBUG === 'true',
+    logger: {
+        error(code, metadata) {
+            console.error('NextAuth error:', code);
+            if (metadata) {
+                console.error('Error metadata:', JSON.stringify(metadata, null, 2));
+            }
+        },
+        warn(code) {
+            if (process.env.NODE_ENV !== 'production') {
+                console.warn('NextAuth warning:', code);
+            }
+        },
+        debug(code, metadata) {
+            if (process.env.NODE_ENV !== 'production') {
+                console.log('NextAuth debug:', code, metadata);
+            }
+        }
+    }
 };
 
 // Extended session type
@@ -94,14 +72,14 @@ declare module 'next-auth' {
             name?: string | null;
             email?: string | null;
             image?: string | null;
-            role?: string;
+            facebookId?: string;
         };
     }
 }
 
 declare module 'next-auth/jwt' {
     interface JWT {
-        id?: string;
-        role?: string;
+        accessToken?: string;
+        facebookId?: string;
     }
 }

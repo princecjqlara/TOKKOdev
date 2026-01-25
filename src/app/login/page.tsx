@@ -1,43 +1,16 @@
 'use client';
 
-import { useState, FormEvent, Suspense } from 'react';
 import { signIn } from 'next-auth/react';
-import { useRouter, useSearchParams } from 'next/navigation';
-import { Square, Lock, Mail, ArrowRight, AlertCircle } from 'lucide-react';
+import { Square, ArrowRight } from 'lucide-react';
+import { useSearchParams } from 'next/navigation';
+import { Suspense } from 'react';
 
 function LoginForm() {
-    const router = useRouter();
     const searchParams = useSearchParams();
-    const [email, setEmail] = useState('');
-    const [password, setPassword] = useState('');
-    const [isLoading, setIsLoading] = useState(false);
-    const [error, setError] = useState<string | null>(null);
+    const error = searchParams.get('error');
 
-    // Check for error from NextAuth
-    const callbackError = searchParams.get('error');
-
-    const handleSubmit = async (e: FormEvent) => {
-        e.preventDefault();
-        setIsLoading(true);
-        setError(null);
-
-        try {
-            const result = await signIn('credentials', {
-                email,
-                password,
-                redirect: false
-            });
-
-            if (result?.error) {
-                setError(result.error);
-                setIsLoading(false);
-            } else if (result?.ok) {
-                router.push('/dashboard');
-            }
-        } catch (err) {
-            setError('An unexpected error occurred');
-            setIsLoading(false);
-        }
+    const handleFacebookLogin = () => {
+        signIn('facebook', { callbackUrl: '/dashboard' });
     };
 
     return (
@@ -46,88 +19,42 @@ function LoginForm() {
             <div className="border-2 border-black bg-white p-8 shadow-[8px_8px_0px_0px_rgba(0,0,0,1)]">
                 <div className="flex items-center gap-3 mb-8">
                     <div className="w-12 h-12 border-2 border-black flex items-center justify-center">
-                        <Lock className="w-6 h-6" />
+                        <div className="w-6 h-6 bg-[#1877F2]"></div> {/* Facebook Blue Square */}
                     </div>
                     <div>
-                        <h1 className="text-2xl font-black uppercase">Sign In</h1>
-                        <p className="text-sm text-gray-600 font-mono">Access your dashboard</p>
+                        <h1 className="text-2xl font-black uppercase">Start Here</h1>
+                        <p className="text-sm text-gray-600 font-mono">Connect with Facebook to continue</p>
                     </div>
                 </div>
 
                 {/* Error Display */}
-                {(error || callbackError) && (
-                    <div className="mb-6 p-4 border-2 border-red-500 bg-red-50 flex items-start gap-3">
-                        <AlertCircle className="w-5 h-5 text-red-500 flex-shrink-0 mt-0.5" />
-                        <div>
-                            <p className="font-bold text-red-700 text-sm">Login Failed</p>
-                            <p className="text-red-600 text-sm font-mono">
-                                {error || callbackError}
-                            </p>
-                        </div>
+                {error && (
+                    <div className="mb-6 p-4 border-2 border-red-500 bg-red-50">
+                        <p className="font-bold text-red-700 text-sm">Login Failed</p>
+                        <p className="text-red-600 text-sm font-mono">
+                            {error === 'OAuthSignin' && 'Error constructing OAuth URL.'}
+                            {error === 'OAuthCallback' && 'Error handling OAuth callback.'}
+                            {error === 'OAuthCreateAccount' && 'Could not create OAuth account.'}
+                            {error === 'EmailCreateAccount' && 'Could not create email account.'}
+                            {error === 'Callback' && 'Error in OAuth callback handler.'}
+                            {!['OAuthSignin', 'OAuthCallback', 'OAuthCreateAccount', 'EmailCreateAccount', 'Callback'].includes(error) && error}
+                        </p>
                     </div>
                 )}
 
-                <form onSubmit={handleSubmit} className="space-y-6">
-                    {/* Email Field */}
-                    <div>
-                        <label className="block text-xs font-bold uppercase tracking-wider mb-2">
-                            Email Address
-                        </label>
-                        <div className="relative">
-                            <Mail className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-400" />
-                            <input
-                                type="email"
-                                value={email}
-                                onChange={(e) => setEmail(e.target.value)}
-                                className="w-full border-2 border-black px-4 py-3 pl-11 font-mono text-sm focus:outline-none focus:ring-2 focus:ring-black focus:ring-offset-2"
-                                placeholder="you@example.com"
-                                required
-                                autoComplete="email"
-                            />
-                        </div>
-                    </div>
-
-                    {/* Password Field */}
-                    <div>
-                        <label className="block text-xs font-bold uppercase tracking-wider mb-2">
-                            Password
-                        </label>
-                        <div className="relative">
-                            <Lock className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-400" />
-                            <input
-                                type="password"
-                                value={password}
-                                onChange={(e) => setPassword(e.target.value)}
-                                className="w-full border-2 border-black px-4 py-3 pl-11 font-mono text-sm focus:outline-none focus:ring-2 focus:ring-black focus:ring-offset-2"
-                                placeholder="••••••••"
-                                required
-                                autoComplete="current-password"
-                            />
-                        </div>
-                    </div>
-
-                    {/* Submit Button */}
+                <div className="space-y-4">
                     <button
-                        type="submit"
-                        disabled={isLoading}
-                        className="w-full btn-wireframe-dark text-lg px-8 py-4 flex items-center justify-center gap-3 disabled:opacity-50 disabled:cursor-not-allowed"
+                        onClick={handleFacebookLogin}
+                        className="w-full bg-[#1877F2] text-white border-2 border-black hover:bg-[#1864D0] transition-colors p-4 flex items-center justify-between group"
                     >
-                        {isLoading ? (
-                            <>
-                                <div className="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin" />
-                                Signing in...
-                            </>
-                        ) : (
-                            <>
-                                Sign In <ArrowRight className="w-5 h-5" />
-                            </>
-                        )}
+                        <span className="font-bold text-lg uppercase tracking-wider">Sign In with Facebook</span>
+                        <ArrowRight className="w-6 h-6 transform group-hover:translate-x-1 transition-transform" />
                     </button>
-                </form>
 
-                <p className="mt-6 text-center text-xs text-gray-500 font-mono">
-                    Contact your administrator for access
-                </p>
+                    <p className="text-xs text-gray-500 font-mono text-center leading-relaxed">
+                        By continuing, you agree to grant Tokko required permissions to manage your Facebook Pages and Messages.
+                    </p>
+                </div>
             </div>
         </div>
     );
