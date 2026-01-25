@@ -87,10 +87,10 @@ export default function DashboardLayout({
     ];
 
     // Add admin nav item if user is admin
-    const isAdmin = (session?.user as any)?.role === 'admin';
-    if (isAdmin) {
-        navItems.push({ href: '/admin/users', icon: Settings, label: 'User Admin' });
-    }
+    // const isAdmin = (session?.user as any)?.role === 'admin';
+    // if (isAdmin) {
+    //     navItems.push({ href: '/admin/users', icon: Settings, label: 'User Admin' });
+    // }
 
     return (
         <div className="min-h-screen bg-white flex flex-col md:flex-row" style={{ borderTop: '1px solid #000', borderLeft: '1px solid #000' }}>
