@@ -1,4 +1,5 @@
 import { FacebookPage, FacebookConversation } from '@/types';
+import { MessageTag, normalizeMessageTag } from './message-tags';
 
 const FACEBOOK_GRAPH_URL = 'https://graph.facebook.com/v18.0';
 
@@ -145,11 +146,26 @@ export async function getUserProfile(
 }
 
 // Send message to a contact
+export function buildTaggedMessagePayload(
+    recipientPsid: string,
+    messageText: string,
+    messageTag?: MessageTag
+) {
+    const tag = normalizeMessageTag(messageTag);
+    return {
+        recipient: { id: recipientPsid },
+        message: { text: messageText },
+        messaging_type: 'MESSAGE_TAG',
+        tag
+    };
+}
+
 export async function sendMessage(
     pageId: string,
     pageAccessToken: string,
     recipientPsid: string,
-    messageText: string
+    messageText: string,
+    messageTag?: MessageTag
 ): Promise<{ message_id: string }> {
     // Facebook Messenger API endpoint - use /me/messages with page access token
     const response = await fetch(
@@ -159,12 +175,7 @@ export async function sendMessage(
             headers: {
                 'Content-Type': 'application/json'
             },
-            body: JSON.stringify({
-                recipient: { id: recipientPsid },
-                message: { text: messageText },
-                messaging_type: 'MESSAGE_TAG',
-                tag: 'ACCOUNT_UPDATE'
-            })
+            body: JSON.stringify(buildTaggedMessagePayload(recipientPsid, messageText, messageTag))
         }
     );
 
