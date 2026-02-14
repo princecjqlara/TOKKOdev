@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { getSupabaseAdmin } from '@/lib/supabase';
 import { sendMessage } from '@/lib/facebook';
+import { normalizeMessageTag } from '@/lib/message-tags';
 import { generatePersonalizedMessage } from '@/lib/ai';
 
 // Vercel Hobby has 10s limit - process small batches
@@ -29,6 +30,7 @@ export async function GET() {
                 id, 
                 page_id, 
                 ai_prompt,
+                message_tag,
                 pages(fb_page_id, access_token)
             `)
             .eq('is_loop', true)
@@ -97,6 +99,8 @@ export async function GET() {
 
             console.log(`📨 Campaign ${campaign.id}: Processing ${dueRecipients.length} recipients`);
 
+            const normalizedMessageTag = normalizeMessageTag(campaign.message_tag);
+
             // Process each recipient
             for (const recipient of dueRecipients) {
                 const contactData = recipient.contacts;
@@ -145,7 +149,8 @@ export async function GET() {
                         page.fb_page_id,
                         page.access_token,
                         contact.psid,
-                        messageText
+                        messageText,
+                        normalizedMessageTag
                     );
 
                     // Calculate next scheduled time (same hour tomorrow)

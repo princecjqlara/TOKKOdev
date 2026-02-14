@@ -1,3 +1,5 @@
+import { MessageTag } from '@/lib/message-tags';
+
 // Database types
 export interface User {
   id: string;
@@ -77,6 +79,7 @@ export interface Campaign {
   page_id: string;
   name: string;
   message_text: string | null;
+  message_tag: MessageTag;
   status: 'draft' | 'scheduled' | 'sending' | 'completed' | 'cancelled';
   total_recipients: number;
   sent_count: number;

@@ -3,6 +3,7 @@ import { getServerSession } from 'next-auth';
 import { authOptions } from '@/lib/auth';
 import { getSupabaseAdmin } from '@/lib/supabase';
 import { sendMessage, getConversationIdForPsid, getConversationMessages } from '@/lib/facebook';
+import { normalizeMessageTag } from '@/lib/message-tags';
 import { generatePersonalizedMessage } from '@/lib/ai';
 
 // Increase timeout for sending campaigns (up to 5 minutes)
@@ -122,6 +123,7 @@ export async function POST(
         }
 
         const page = campaign.pages as { fb_page_id: string; access_token: string };
+        const normalizedMessageTag = normalizeMessageTag(campaign.message_tag);
         let sent = 0;
         let failed = 0;
 
@@ -246,7 +248,8 @@ export async function POST(
                         page.fb_page_id,
                         page.access_token,
                         contact.psid,
-                        messageToSend
+                        messageToSend,
+                        normalizedMessageTag
                     );
 
                     await supabase

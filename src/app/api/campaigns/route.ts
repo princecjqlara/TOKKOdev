@@ -3,6 +3,7 @@ import { getServerSession } from 'next-auth';
 import { authOptions } from '@/lib/auth';
 import { getSupabaseAdmin } from '@/lib/supabase';
 import { PaginatedResponse, Campaign } from '@/types';
+import { isMessageTag, MESSAGE_TAGS, normalizeMessageTag } from '@/lib/message-tags';
 
 // GET /api/campaigns - Get campaigns with pagination
 export async function GET(request: NextRequest) {
@@ -87,7 +88,7 @@ export async function POST(request: NextRequest) {
         }
 
         const body = await request.json();
-        const { pageId, name, messageText, contactIds, useBestTime, scheduledDate, isLoop, aiPrompt, useAiMessage } = body;
+        const { pageId, name, messageText, contactIds, useBestTime, scheduledDate, isLoop, aiPrompt, useAiMessage, messageTag } = body;
 
         // For loop campaigns, messageText is optional (AI generates it), but aiPrompt is required
         if (!pageId || !name) {
@@ -117,6 +118,16 @@ export async function POST(request: NextRequest) {
         if (!isLoop && !useAiMessage && !messageText) {
             return NextResponse.json(
                 { error: 'Bad Request', message: 'messageText is required for regular campaigns' },
+                { status: 400 }
+            );
+        }
+
+        if (messageTag != null && !isMessageTag(messageTag)) {
+            return NextResponse.json(
+                {
+                    error: 'Bad Request',
+                    message: `Invalid messageTag. Expected ${MESSAGE_TAGS.join(' or ')}.`
+                },
                 { status: 400 }
             );
         }
@@ -151,6 +162,8 @@ export async function POST(request: NextRequest) {
         // Best time campaigns are 'scheduled', regular campaigns are 'draft'
         const campaignStatus = isLoop || useBestTime ? 'scheduled' : 'draft';
 
+        const normalizedMessageTag = normalizeMessageTag(messageTag);
+
         // Create campaign
         const { data: campaign, error: campaignError } = await supabase
             .from('campaigns')
@@ -168,7 +181,8 @@ export async function POST(request: NextRequest) {
                 is_loop: isLoop || false,
                 ai_prompt: (isLoop || useAiMessage) ? aiPrompt : null, // Store aiPrompt for AI campaigns
                 loop_status: isLoop ? 'active' : 'stopped',
-                use_ai_message: useAiMessage || false // New field for AI personalized regular campaigns
+                use_ai_message: useAiMessage || false, // New field for AI personalized regular campaigns
+                message_tag: normalizedMessageTag
             })
             .select()
             .single();
