@@ -1,4 +1,4 @@
-import { MessageTag } from '@/lib/message-tags';
+import type { MessageTag } from '@/lib/message-tags';
 
 // Database types
 export interface User {
