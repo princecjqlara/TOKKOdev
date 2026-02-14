@@ -94,6 +94,7 @@
         page_id UUID NOT NULL REFERENCES pages(id) ON DELETE CASCADE,
         name TEXT NOT NULL,
         message_text TEXT,
+        message_tag TEXT NOT NULL DEFAULT 'ACCOUNT_UPDATE',
         status TEXT NOT NULL DEFAULT 'draft', -- 'draft', 'scheduled', 'sending', 'completed', 'cancelled'
         scheduled_at TIMESTAMPTZ,
         started_at TIMESTAMPTZ,
