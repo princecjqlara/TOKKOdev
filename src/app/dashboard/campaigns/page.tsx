@@ -7,6 +7,14 @@ import Pagination from '@/components/Pagination';
 import Modal from '@/components/Modal';
 import { Campaign, Page, Contact, PaginatedResponse } from '@/types';
 
+type CampaignRecipientError = {
+    id: string;
+    contactId: string;
+    contactName: string | null;
+    contactPsid: string | null;
+    error: string;
+};
+
 export default function CampaignsPage() {
     const { data: session } = useSession();
     const [pages, setPages] = useState<Page[]>([]);
@@ -23,6 +31,7 @@ export default function CampaignsPage() {
     // Modals
     const [showCreateModal, setShowCreateModal] = useState(false);
     const [showDeleteModal, setShowDeleteModal] = useState(false);
+    const [showErrorsModal, setShowErrorsModal] = useState(false);
 
     // Form state
     const [campaignName, setCampaignName] = useState('');
@@ -37,6 +46,14 @@ export default function CampaignsPage() {
     const [isLoop, setIsLoop] = useState(false);
     const [aiPrompt, setAiPrompt] = useState('');
     const [useAiMessage, setUseAiMessage] = useState(false); // AI personalization for non-loop campaigns
+
+    // Error modal state
+    const [errorsCampaignId, setErrorsCampaignId] = useState<string | null>(null);
+    const [campaignErrors, setCampaignErrors] = useState<CampaignRecipientError[]>([]);
+    const [errorsLoading, setErrorsLoading] = useState(false);
+    const [errorsPage, setErrorsPage] = useState(1);
+    const [errorsPageSize, setErrorsPageSize] = useState(25);
+    const [errorsTotal, setErrorsTotal] = useState(0);
 
     // Contacts pagination and filtering for modal
     const [contactsPage, setContactsPage] = useState(1);
@@ -54,6 +71,11 @@ export default function CampaignsPage() {
             fetchCampaigns();
         }
     }, [selectedPageId, page, pageSize]);
+
+    useEffect(() => {
+        if (!showErrorsModal || !errorsCampaignId) return;
+        fetchCampaignErrors(errorsCampaignId, errorsPage, errorsPageSize);
+    }, [showErrorsModal, errorsCampaignId, errorsPage, errorsPageSize]);
 
     const fetchPages = async () => {
         try {
@@ -88,6 +110,31 @@ export default function CampaignsPage() {
             console.error('Error fetching campaigns:', error);
         } finally {
             setLoading(false);
+        }
+    };
+
+    const fetchCampaignErrors = async (
+        campaignId: string,
+        targetPage: number = errorsPage,
+        targetPageSize: number = errorsPageSize
+    ) => {
+        setErrorsLoading(true);
+        try {
+            const params = new URLSearchParams({
+                status: 'failed',
+                page: targetPage.toString(),
+                pageSize: targetPageSize.toString()
+            });
+
+            const res = await fetch(`/api/campaigns/${campaignId}/recipients?${params}`);
+            const data: PaginatedResponse<CampaignRecipientError> = await res.json();
+
+            setCampaignErrors(data.items || []);
+            setErrorsTotal(data.total || 0);
+        } catch (error) {
+            console.error('Error fetching campaign errors:', error);
+        } finally {
+            setErrorsLoading(false);
         }
     };
 
@@ -206,6 +253,14 @@ export default function CampaignsPage() {
         } finally {
             setSendingCampaignId(null);
         }
+    };
+
+    const handleOpenErrorsModal = (campaignId: string) => {
+        setErrorsCampaignId(campaignId);
+        setErrorsPage(1);
+        setErrorsPageSize(25);
+        setCampaignErrors([]);
+        setShowErrorsModal(true);
     };
 
     const handleCancel = async (campaignId: string) => {
@@ -383,6 +438,12 @@ export default function CampaignsPage() {
                                                 {campaign.sent_count} Sent
                                             </span>
                                         )}
+                                        {campaign.status !== 'draft' && campaign.failed_count > 0 && (
+                                            <span className="flex items-center gap-1 text-red-600">
+                                                <XCircle className="w-4 h-4" />
+                                                {campaign.failed_count} Failed
+                                            </span>
+                                        )}
                                         <span className="flex items-center gap-1">
                                             <Clock className="w-4 h-4" />
                                             {new Date(campaign.created_at).toLocaleDateString()}
@@ -421,6 +482,16 @@ export default function CampaignsPage() {
                                                     Cancel
                                                 </>
                                             )}
+                                        </button>
+                                    )}
+                                    {campaign.failed_count > 0 && (
+                                        <button
+                                            onClick={() => handleOpenErrorsModal(campaign.id)}
+                                            className="btn-wireframe border-red-300 text-red-600 hover:bg-red-50 flex-1 md:flex-none"
+                                            title="View Failed Recipients"
+                                        >
+                                            <XCircle className="w-4 h-4 mr-2" />
+                                            Errors
                                         </button>
                                     )}
                                     <button
@@ -706,6 +777,70 @@ export default function CampaignsPage() {
                     >
                         {actionLoading ? 'Deleting...' : 'Delete'}
                     </button>
+                </div>
+            </Modal>
+
+            {/* Failed Recipients Modal */}
+            <Modal
+                isOpen={showErrorsModal}
+                onClose={() => {
+                    setShowErrorsModal(false);
+                    setErrorsCampaignId(null);
+                    setCampaignErrors([]);
+                    setErrorsPage(1);
+                    setErrorsPageSize(25);
+                    setErrorsTotal(0);
+                }}
+                title="Failed Recipients"
+                size="lg"
+            >
+                <div className="space-y-4">
+                    <p className="font-mono text-sm text-gray-500">
+                        {errorsTotal > 0
+                            ? `${errorsTotal} failed recipients`
+                            : 'No failed recipients found.'}
+                    </p>
+
+                    {errorsLoading ? (
+                        <div className="flex items-center justify-center h-32 border border-black">
+                            <div className="animate-spin w-6 h-6 border-2 border-black border-t-transparent rounded-full" />
+                        </div>
+                    ) : (
+                        <div className="max-h-64 overflow-y-auto border border-black">
+                            {campaignErrors.length === 0 ? (
+                                <div className="p-6 text-center text-sm font-mono text-gray-500">
+                                    No failed recipients in this page.
+                                </div>
+                            ) : (
+                                campaignErrors.map((entry) => (
+                                    <div key={entry.id} className="border-b border-gray-200 p-3 last:border-b-0">
+                                        <p className="font-bold uppercase text-sm">
+                                            {entry.contactName || 'Unknown'}
+                                        </p>
+                                        <p className="font-mono text-xs text-gray-500">
+                                            ID: {entry.contactId.slice(0, 8)}...{entry.contactPsid ? ` | PSID: ${entry.contactPsid.slice(0, 8)}...` : ''}
+                                        </p>
+                                        <p className="text-xs text-red-700 mt-1">{entry.error}</p>
+                                    </div>
+                                ))
+                            )}
+                        </div>
+                    )}
+
+                    {errorsTotal > errorsPageSize && (
+                        <div className="border border-black bg-white p-4">
+                            <Pagination
+                                page={errorsPage}
+                                pageSize={errorsPageSize}
+                                total={errorsTotal}
+                                onPageChange={setErrorsPage}
+                                onPageSizeChange={(size) => {
+                                    setErrorsPageSize(size);
+                                    setErrorsPage(1);
+                                }}
+                            />
+                        </div>
+                    )}
                 </div>
             </Modal>
         </div>

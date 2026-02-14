@@ -110,7 +110,7 @@ export async function POST(
         if (!recipients?.length) {
             await supabase
                 .from('campaigns')
-                .update({ status: 'completed', updated_at: new Date().toISOString() })
+                .update({ status: 'completed', failed_count: 0, updated_at: new Date().toISOString() })
                 .eq('id', campaignId);
 
             return NextResponse.json({
@@ -146,6 +146,7 @@ export async function POST(
                     .update({
                         status: 'sending', // Keep as sending since there's more to do
                         sent_count: sent,
+                        failed_count: failed,
                         updated_at: new Date().toISOString()
                     })
                     .eq('id', campaignId);
@@ -294,6 +295,7 @@ export async function POST(
                 .from('campaigns')
                 .update({
                     sent_count: sent,
+                    failed_count: failed,
                     updated_at: new Date().toISOString()
                 })
                 .eq('id', campaignId);
@@ -324,6 +326,7 @@ export async function POST(
                 .update({
                     status: 'completed',
                     sent_count: sent,
+                    failed_count: failed,
                     updated_at: new Date().toISOString()
                 })
                 .eq('id', campaignId);

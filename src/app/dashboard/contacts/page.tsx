@@ -17,6 +17,7 @@ import {
 import Pagination from '@/components/Pagination';
 import Modal from '@/components/Modal';
 import { Contact, Tag as TagType, Page, PaginatedResponse } from '@/types';
+import { mergeSendErrors, SendError } from '@/lib/send-errors';
 
 export default function ContactsPage() {
     const { data: session } = useSession();
@@ -35,6 +36,7 @@ export default function ContactsPage() {
     // Filters
     const [search, setSearch] = useState('');
     const [selectedTagFilter, setSelectedTagFilter] = useState('');
+    const [excludedTagFilter, setExcludedTagFilter] = useState('');
 
     // Selection
     const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
@@ -52,6 +54,7 @@ export default function ContactsPage() {
     const [messageText, setMessageText] = useState('');
     const [actionLoading, setActionLoading] = useState(false);
     const [failedContactIds, setFailedContactIds] = useState<string[]>([]);
+    const [failedContactErrors, setFailedContactErrors] = useState<SendError[]>([]);
     const [lastSendResults, setLastSendResults] = useState<{ sent: number; failed: number } | null>(null);
 
     useEffect(() => {
@@ -63,7 +66,7 @@ export default function ContactsPage() {
             fetchContacts();
             fetchTags();
         }
-    }, [selectedPageId, page, pageSize, search, selectedTagFilter]);
+    }, [selectedPageId, page, pageSize, search, selectedTagFilter, excludedTagFilter]);
 
     const fetchPages = async () => {
         try {
@@ -87,7 +90,8 @@ export default function ContactsPage() {
                 page: page.toString(),
                 pageSize: pageSize.toString(),
                 ...(search && { search }),
-                ...(selectedTagFilter && { tagId: selectedTagFilter })
+                ...(selectedTagFilter && { tagId: selectedTagFilter }),
+                ...(excludedTagFilter && { excludeTagId: excludedTagFilter })
             });
 
             const res = await fetch(`/api/pages/${selectedPageId}/contacts?${params}`);
@@ -100,7 +104,7 @@ export default function ContactsPage() {
         } finally {
             setLoading(false);
         }
-    }, [selectedPageId, page, pageSize, search, selectedTagFilter]);
+    }, [selectedPageId, page, pageSize, search, selectedTagFilter, excludedTagFilter]);
 
     const fetchTags = async () => {
         if (!selectedPageId) return;
@@ -124,7 +128,7 @@ export default function ContactsPage() {
             let hasMore = true;
 
             // #region agent log
-            fetch('http://127.0.0.1:7242/ingest/6358f30b-ef0a-4ea4-8acc-50c08c025924', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ location: 'contacts/page.tsx:117', message: 'fetchAllContactIds started', data: { selectedPageId, search, selectedTagFilter, excludedCount: excludedIds.size }, timestamp: Date.now(), sessionId: 'debug-session', runId: 'run1', hypothesisId: 'C' }) }).catch(() => { });
+            fetch('http://127.0.0.1:7242/ingest/6358f30b-ef0a-4ea4-8acc-50c08c025924', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ location: 'contacts/page.tsx:117', message: 'fetchAllContactIds started', data: { selectedPageId, search, selectedTagFilter, excludedTagFilter, excludedCount: excludedIds.size }, timestamp: Date.now(), sessionId: 'debug-session', runId: 'run1', hypothesisId: 'C' }) }).catch(() => { });
             // #endregion
 
             while (hasMore) {
@@ -133,7 +137,8 @@ export default function ContactsPage() {
                     pageSize: pageSize.toString(),
                     sendable: 'true', // Only fetch contacts with valid PSIDs for messaging
                     ...(search && { search }),
-                    ...(selectedTagFilter && { tagId: selectedTagFilter })
+                    ...(selectedTagFilter && { tagId: selectedTagFilter }),
+                    ...(excludedTagFilter && { excludeTagId: excludedTagFilter })
                 });
 
                 const res = await fetch(`/api/pages/${selectedPageId}/contacts?${params}`);
@@ -163,7 +168,7 @@ export default function ContactsPage() {
             }
 
             // #region agent log
-            fetch('http://127.0.0.1:7242/ingest/6358f30b-ef0a-4ea4-8acc-50c08c025924', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ location: 'contacts/page.tsx:151', message: 'fetchAllContactIds completed', data: { totalPages: currentPage, beforeExcludeCount, afterExcludeCount: allIds.length, excludedCount: excludedIds.size, finalCount: allIds.length }, timestamp: Date.now(), sessionId: 'debug-session', runId: 'run1', hypothesisId: 'C' }) }).catch(() => { });
+            fetch('http://127.0.0.1:7242/ingest/6358f30b-ef0a-4ea4-8acc-50c08c025924', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ location: 'contacts/page.tsx:151', message: 'fetchAllContactIds completed', data: { totalPages: currentPage, beforeExcludeCount, afterExcludeCount: allIds.length, excludedCount: excludedIds.size, excludedTagFilter, finalCount: allIds.length }, timestamp: Date.now(), sessionId: 'debug-session', runId: 'run1', hypothesisId: 'C' }) }).catch(() => { });
             // #endregion
 
             return allIds;
@@ -344,6 +349,9 @@ export default function ContactsPage() {
 
         setActionLoading(true);
         try {
+            setFailedContactIds([]);
+            setFailedContactErrors([]);
+            setLastSendResults(null);
             const allContactIds = await getSelectedContactIds();
             console.log(`📤 ========== STARTING BULK MESSAGE SEND ==========`);
             console.log(`📤 Total contacts selected: ${allContactIds.length}`);
@@ -409,6 +417,7 @@ export default function ContactsPage() {
             let totalFiltered = 0; // Track filtered contacts (wrong page_id or missing psid)
             let totalNotFound = 0; // Track contacts not found in database
             const allFailedIds: string[] = [];
+            const errorGroups: SendError[][] = [];
 
             // Track which contacts we've attempted to send
             const contactsAttempted = new Set<string>();
@@ -504,6 +513,7 @@ export default function ContactsPage() {
                         // Collect failed contact IDs
                         if (data.results.errors?.length) {
                             allFailedIds.push(...data.results.errors.map((e: { contactId: string }) => e.contactId));
+                            errorGroups.push(data.results.errors);
                         }
 
                         // If partial (timeout), automatically retry remaining contacts in smaller chunks
@@ -576,6 +586,7 @@ export default function ContactsPage() {
                                         // Collect failed contact IDs from retry
                                         if (retryData.results.errors?.length) {
                                             allFailedIds.push(...retryData.results.errors.map((e: { contactId: string }) => e.contactId));
+                                            errorGroups.push(retryData.results.errors);
                                         }
 
                                         // If retry also timed out, update remaining list with still-remaining contacts
@@ -605,6 +616,8 @@ export default function ContactsPage() {
                                     // Mark this chunk as failed and continue with next chunk
                                     totalFailed += retryChunk.length;
                                     allFailedIds.push(...retryChunk);
+                                    const retryErrorMessage = retryError instanceof Error ? retryError.message : 'Retry failed';
+                                    errorGroups.push(retryChunk.map(contactId => ({ contactId, error: retryErrorMessage })));
                                     remainingToRetry = remainingToRetry.slice(RETRY_CHUNK_SIZE);
                                 }
 
@@ -636,6 +649,8 @@ export default function ContactsPage() {
                     // Mark all contacts in this chunk as failed
                     totalFailed += chunk.length;
                     allFailedIds.push(...chunk);
+                    const chunkErrorMessage = error instanceof Error ? error.message : 'Failed to send chunk';
+                    errorGroups.push(chunk.map(contactId => ({ contactId, error: chunkErrorMessage })));
                     // Continue with next chunk instead of stopping
                     console.log(`📤 Continuing to next chunk...`);
                 }
@@ -643,6 +658,7 @@ export default function ContactsPage() {
 
             // Store failed contact IDs for resend option
             setFailedContactIds(allFailedIds);
+            setFailedContactErrors(mergeSendErrors(errorGroups));
             setLastSendResults({ sent: totalSent, failed: totalFailed });
 
             // Calculate final totals
@@ -725,6 +741,7 @@ export default function ContactsPage() {
                 // Perfect success
                 message = `✅ All messages sent successfully!\n\nSuccess: ${totalSent}\nFailed: ${totalFailed}`;
                 setFailedContactIds([]);
+                setFailedContactErrors([]);
                 setLastSendResults(null);
                 setShowMessageModal(false);
                 setMessageText('');
@@ -804,6 +821,7 @@ export default function ContactsPage() {
                 // Only update failedContactIds with contacts that actually failed this time
                 const newFailedIds = data.results.errors?.map((e: { contactId: string }) => e.contactId) || [];
                 setFailedContactIds(newFailedIds);
+                setFailedContactErrors(mergeSendErrors([data.results.errors || []]));
                 setLastSendResults({ sent: data.results.sent, failed: data.results.failed });
 
                 console.log(`Resend results: ${data.results.sent} sent, ${data.results.failed} failed out of ${failedContactIds.length} attempted`);
@@ -831,6 +849,7 @@ export default function ContactsPage() {
                 } else {
                     alert(`Resend complete! All ${data.results.sent} messages sent successfully!`);
                     setFailedContactIds([]);
+                    setFailedContactErrors([]);
                     setLastSendResults(null);
                     setShowMessageModal(false);
                     setMessageText('');
@@ -963,6 +982,27 @@ export default function ContactsPage() {
                             className="input-wireframe w-auto"
                         >
                             <option value="">ALL TAGS</option>
+                            {tags.map((tag) => (
+                                <option key={tag.id} value={tag.id}>
+                                    {tag.name}
+                                </option>
+                            ))}
+                        </select>
+                    </div>
+
+                    {/* Exclude Tag */}
+                    <div className="flex items-center gap-2">
+                        <X className="w-4 h-4" />
+                        <select
+                            value={excludedTagFilter}
+                            onChange={(e) => {
+                                setExcludedTagFilter(e.target.value);
+                                setPage(1);
+                                clearSelection();
+                            }}
+                            className="input-wireframe w-auto"
+                        >
+                            <option value="">EXCLUDE TAG</option>
                             {tags.map((tag) => (
                                 <option key={tag.id} value={tag.id}>
                                     {tag.name}
@@ -1338,6 +1378,7 @@ export default function ContactsPage() {
                     // Clear failed contacts when closing modal (unless we just sent)
                     if (!actionLoading) {
                         setFailedContactIds([]);
+                        setFailedContactErrors([]);
                         setLastSendResults(null);
                     }
                 }}
@@ -1357,6 +1398,25 @@ export default function ContactsPage() {
                         <p className="font-mono text-sm text-gray-500">
                             Sending to <span className="font-bold text-black">{getSelectionCount()}</span> recipients.
                         </p>
+                    )}
+                    {failedContactErrors.length > 0 && (
+                        <div className="bg-red-50 border-2 border-red-300 p-3 rounded">
+                            <p className="font-mono text-xs text-red-800 mb-2">
+                                Failed error details (showing {Math.min(failedContactErrors.length, 10)} of {failedContactErrors.length})
+                            </p>
+                            <div className="max-h-40 overflow-y-auto space-y-2">
+                                {failedContactErrors.slice(0, 10).map((entry, index) => (
+                                    <div key={`${entry.contactId}-${index}`} className="text-xs font-mono text-red-900">
+                                        <span className="font-bold">{entry.contactId.slice(0, 8)}...</span> {entry.error}
+                                    </div>
+                                ))}
+                            </div>
+                            {failedContactErrors.length > 10 && (
+                                <p className="mt-2 text-xs font-mono text-red-700">
+                                    +{failedContactErrors.length - 10} more failed contacts
+                                </p>
+                            )}
+                        </div>
                     )}
                     <textarea
                         value={messageText}
@@ -1379,6 +1439,7 @@ export default function ContactsPage() {
                             onClick={() => {
                                 setShowMessageModal(false);
                                 setFailedContactIds([]);
+                                setFailedContactErrors([]);
                                 setLastSendResults(null);
                             }}
                             className="btn-wireframe bg-white"

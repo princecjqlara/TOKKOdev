@@ -80,6 +80,7 @@ export interface Campaign {
   status: 'draft' | 'scheduled' | 'sending' | 'completed' | 'cancelled';
   total_recipients: number;
   sent_count: number;
+  failed_count: number;
   created_by: string;
   created_at: string;
   updated_at: string;

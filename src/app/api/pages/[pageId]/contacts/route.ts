@@ -3,6 +3,7 @@ import { getServerSession } from 'next-auth';
 import { authOptions } from '@/lib/auth';
 import { getSupabaseAdmin } from '@/lib/supabase';
 import { PaginatedResponse, Contact } from '@/types';
+import { buildNotInFilter } from '@/lib/tag-filters';
 
 // GET /api/pages/[pageId]/contacts - Get contacts with pagination
 export async function GET(
@@ -25,6 +26,7 @@ export async function GET(
         const pageSize = parseInt(searchParams.get('pageSize') || '25');
         const search = searchParams.get('search') || '';
         const tagId = searchParams.get('tagId') || '';
+        const excludeTagId = searchParams.get('excludeTagId') || '';
         const sendableOnly = searchParams.get('sendable') === 'true'; // Only return contacts with valid PSIDs
 
         const supabase = getSupabaseAdmin();
@@ -81,6 +83,21 @@ export async function GET(
                     pageSize,
                     total: 0
                 } as PaginatedResponse<Contact>);
+            }
+        }
+
+        if (excludeTagId) {
+            const { data: excludedContacts, error: excludedError } = await supabase
+                .from('contact_tags')
+                .select('contact_id')
+                .eq('tag_id', excludeTagId);
+
+            if (excludedError) throw excludedError;
+
+            const excludedIds = excludedContacts?.map(tc => tc.contact_id) || [];
+            const notInFilter = buildNotInFilter(excludedIds);
+            if (notInFilter) {
+                query = query.not('id', 'in', notInFilter);
             }
         }
 
