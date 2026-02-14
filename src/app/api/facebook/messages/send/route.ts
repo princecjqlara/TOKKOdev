@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getSessionFromRequest } from '@/lib/get-session';
 import { getSupabaseAdmin } from '@/lib/supabase';
 import { sendMessage } from '@/lib/facebook';
+import { isMessageTag, normalizeMessageTag } from '@/lib/message-tags';
 import fs from 'fs';
 import path from 'path';
 
@@ -105,10 +106,11 @@ export async function POST(request: NextRequest) {
             );
         }
 
-        const { pageId, contactIds, messageText } = body as {
+        const { pageId, contactIds, messageText, messageTag } = body as {
             pageId?: string;
             contactIds?: string[];
             messageText?: string;
+            messageTag?: string | null;
         };
 
         if (!pageId || !contactIds?.length || !messageText) {
@@ -117,6 +119,18 @@ export async function POST(request: NextRequest) {
                 { status: 400 }
             );
         }
+
+        if (messageTag != null && !isMessageTag(messageTag)) {
+            return NextResponse.json(
+                {
+                    error: 'Bad Request',
+                    message: 'Invalid messageTag. Expected ACCOUNT_UPDATE or CONFIRMED_EVENT_UPDATE.'
+                },
+                { status: 400 }
+            );
+        }
+
+        const normalizedMessageTag = normalizeMessageTag(messageTag);
 
         // Log total contacts to send
         console.log(`📤 ========== API: MESSAGE SEND REQUEST ==========`);
@@ -530,7 +544,13 @@ export async function POST(request: NextRequest) {
                         page_id: pageId,
                         name: contact.name
                     });
-                    const result = await sendMessage(page.fb_page_id, page.access_token, contact.psid, personalizedMessage);
+                    const result = await sendMessage(
+                        page.fb_page_id,
+                        page.access_token,
+                        contact.psid,
+                        personalizedMessage,
+                        normalizedMessageTag
+                    );
                     console.log(`✅ Successfully sent message to contact ${contact.id} (PSID: ${contact.psid})`);
                     return { success: true as const, contactId: contact.id, error: undefined };
                 } catch (error) {
