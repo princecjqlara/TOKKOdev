@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getSessionFromRequest } from '@/lib/get-session';
 import { getSupabaseAdmin } from '@/lib/supabase';
 import { sendMessage } from '@/lib/facebook';
-import { isMessageTag, normalizeMessageTag } from '@/lib/message-tags';
+import { isMessageTag, MESSAGE_TAGS, normalizeMessageTag } from '@/lib/message-tags';
 import fs from 'fs';
 import path from 'path';
 
@@ -124,7 +124,7 @@ export async function POST(request: NextRequest) {
             return NextResponse.json(
                 {
                     error: 'Bad Request',
-                    message: 'Invalid messageTag. Expected ACCOUNT_UPDATE or CONFIRMED_EVENT_UPDATE.'
+                    message: `Invalid messageTag. Expected ${MESSAGE_TAGS.join(' or ')}.`
                 },
                 { status: 400 }
             );
