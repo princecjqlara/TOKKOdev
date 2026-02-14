@@ -6,6 +6,7 @@ import { Plus, Send, Trash2, Users, Clock, CheckCircle, XCircle, MessageSquare, 
 import Pagination from '@/components/Pagination';
 import Modal from '@/components/Modal';
 import { Campaign, Page, Contact, PaginatedResponse } from '@/types';
+import { DEFAULT_MESSAGE_TAG, MESSAGE_TAGS, MessageTag } from '@/lib/message-tags';
 
 type CampaignRecipientError = {
     id: string;
@@ -36,6 +37,7 @@ export default function CampaignsPage() {
     // Form state
     const [campaignName, setCampaignName] = useState('');
     const [messageText, setMessageText] = useState('');
+    const [messageTag, setMessageTag] = useState<MessageTag>(DEFAULT_MESSAGE_TAG);
     const [selectedContactIds, setSelectedContactIds] = useState<Set<string>>(new Set());
     const [editingCampaign, setEditingCampaign] = useState<Campaign | null>(null);
     const [actionLoading, setActionLoading] = useState(false);
@@ -176,6 +178,7 @@ export default function CampaignsPage() {
     const handleOpenCreateModal = async () => {
         setCampaignName('');
         setMessageText('');
+        setMessageTag(DEFAULT_MESSAGE_TAG);
         setSelectedContactIds(new Set());
         setContactsPage(1);
         setIsLoop(false);
@@ -228,7 +231,8 @@ export default function CampaignsPage() {
                     contactIds,
                     isLoop,
                     useAiMessage, // New field for AI personalized regular campaigns
-                    aiPrompt: (isLoop || useAiMessage) ? aiPrompt.trim() : null
+                    aiPrompt: (isLoop || useAiMessage) ? aiPrompt.trim() : null,
+                    messageTag
                 })
             });
 
@@ -623,6 +627,21 @@ export default function CampaignsPage() {
                             )}
                         </div>
                     )}
+
+                    <div>
+                        <label className="label-wireframe">Message Tag</label>
+                        <select
+                            value={messageTag}
+                            onChange={(e) => setMessageTag(e.target.value as MessageTag)}
+                            className="input-wireframe"
+                        >
+                            {MESSAGE_TAGS.map((tag) => (
+                                <option key={tag} value={tag}>
+                                    {tag}
+                                </option>
+                            ))}
+                        </select>
+                    </div>
 
                     <div>
                         <div className="flex items-center justify-between mb-3">

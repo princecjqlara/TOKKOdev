@@ -18,6 +18,7 @@ import Pagination from '@/components/Pagination';
 import Modal from '@/components/Modal';
 import { Contact, Tag as TagType, Page, PaginatedResponse } from '@/types';
 import { mergeSendErrors, SendError } from '@/lib/send-errors';
+import { DEFAULT_MESSAGE_TAG, MESSAGE_TAGS, MessageTag } from '@/lib/message-tags';
 
 export default function ContactsPage() {
     const { data: session } = useSession();
@@ -52,6 +53,7 @@ export default function ContactsPage() {
     // Action states
     const [selectedTagIds, setSelectedTagIds] = useState<Set<string>>(new Set());
     const [messageText, setMessageText] = useState('');
+    const [messageTag, setMessageTag] = useState<MessageTag>(DEFAULT_MESSAGE_TAG);
     const [actionLoading, setActionLoading] = useState(false);
     const [failedContactIds, setFailedContactIds] = useState<string[]>([]);
     const [failedContactErrors, setFailedContactErrors] = useState<SendError[]>([]);
@@ -448,7 +450,8 @@ export default function ContactsPage() {
                         body: JSON.stringify({
                             pageId: selectedPageId,
                             contactIds: chunk,
-                            messageText: messageText.trim()
+                            messageText: messageText.trim(),
+                            messageTag
                         })
                     });
 
@@ -548,7 +551,8 @@ export default function ContactsPage() {
                                         body: JSON.stringify({
                                             pageId: selectedPageId,
                                             contactIds: retryChunk,
-                                            messageText: messageText.trim()
+                                            messageText: messageText.trim(),
+                                            messageTag
                                         })
                                     });
 
@@ -801,7 +805,8 @@ export default function ContactsPage() {
                 body: JSON.stringify({
                     pageId: selectedPageId,
                     contactIds: failedContactIds,
-                    messageText: messageText.trim()
+                    messageText: messageText.trim(),
+                    messageTag
                 })
             });
 
@@ -1425,6 +1430,20 @@ export default function ContactsPage() {
                         rows={5}
                         className="input-wireframe w-full h-auto p-3 resize-none"
                     />
+                    <div>
+                        <label className="label-wireframe">Message Tag</label>
+                        <select
+                            value={messageTag}
+                            onChange={(e) => setMessageTag(e.target.value as MessageTag)}
+                            className="input-wireframe"
+                        >
+                            {MESSAGE_TAGS.map((tag) => (
+                                <option key={tag} value={tag}>
+                                    {tag}
+                                </option>
+                            ))}
+                        </select>
+                    </div>
                     <div className="bg-gray-50 border border-gray-200 p-3 rounded text-xs">
                         <p className="font-bold text-gray-700 mb-1">💡 Personalize your message:</p>
                         <div className="flex flex-wrap gap-2 font-mono">
