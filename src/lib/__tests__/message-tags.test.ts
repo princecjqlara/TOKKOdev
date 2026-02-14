@@ -18,6 +18,7 @@ describe('message tags', () => {
   });
 
   it('defaults invalid or missing tags', () => {
+    expect(normalizeMessageTag(null)).toBe('ACCOUNT_UPDATE');
     expect(normalizeMessageTag(undefined)).toBe('ACCOUNT_UPDATE');
     expect(normalizeMessageTag('NOPE')).toBe('ACCOUNT_UPDATE');
   });
