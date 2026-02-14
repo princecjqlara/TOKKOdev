@@ -7,6 +7,16 @@ describe('message tags', () => {
     expect(isMessageTag('CONFIRMED_EVENT_UPDATE')).toBe(true);
   });
 
+  it('rejects nullish values', () => {
+    expect(isMessageTag(null)).toBe(false);
+    expect(isMessageTag(undefined)).toBe(false);
+  });
+
+  it('passes through valid tags', () => {
+    expect(normalizeMessageTag('ACCOUNT_UPDATE')).toBe('ACCOUNT_UPDATE');
+    expect(normalizeMessageTag('CONFIRMED_EVENT_UPDATE')).toBe('CONFIRMED_EVENT_UPDATE');
+  });
+
   it('defaults invalid or missing tags', () => {
     expect(normalizeMessageTag(undefined)).toBe('ACCOUNT_UPDATE');
     expect(normalizeMessageTag('NOPE')).toBe('ACCOUNT_UPDATE');
