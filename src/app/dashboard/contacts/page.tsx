@@ -19,6 +19,7 @@ import Modal from '@/components/Modal';
 import { Contact, Tag as TagType, Page, PaginatedResponse } from '@/types';
 import { mergeSendErrors, SendError } from '@/lib/send-errors';
 import { DEFAULT_MESSAGE_TAG, MESSAGE_TAGS, MessageTag } from '@/lib/message-tags';
+import { getMessageModalDefaults } from './message-modal-state';
 
 export default function ContactsPage() {
     const { data: session } = useSession();
@@ -279,6 +280,11 @@ export default function ContactsPage() {
         setSelectAllMode(false);
         setSelectedIds(new Set());
         setExcludedIds(new Set());
+    };
+
+    const handleOpenMessageModal = () => {
+        setMessageTag(getMessageModalDefaults().messageTag);
+        setShowMessageModal(true);
     };
 
     const getSelectedContactIds = async (): Promise<string[]> => {
@@ -1050,7 +1056,7 @@ export default function ContactsPage() {
                                     <X className="w-3.5 h-3.5" />
                                 </button>
                                 <button
-                                    onClick={() => setShowMessageModal(true)}
+                                    onClick={handleOpenMessageModal}
                                     className="btn-wireframe py-1 px-3 text-xs h-8 bg-black text-white hover:bg-gray-800"
                                     title="Send Message"
                                 >
