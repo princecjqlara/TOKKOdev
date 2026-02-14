@@ -145,12 +145,30 @@ export async function getUserProfile(
 }
 
 // Send message to a contact
+// messagingType: 'RESPONSE' for contacts within 24h window, 'HUMAN_AGENT' for 7-day window
 export async function sendMessage(
     pageId: string,
     pageAccessToken: string,
     recipientPsid: string,
-    messageText: string
+    messageText: string,
+    messagingType: 'RESPONSE' | 'HUMAN_AGENT' = 'HUMAN_AGENT'
 ): Promise<{ message_id: string }> {
+    // Build the request payload based on messaging type
+    const bodyPayload: Record<string, unknown> = {
+        recipient: { id: recipientPsid },
+        message: { text: messageText },
+    };
+
+    if (messagingType === 'RESPONSE') {
+        // Standard messaging - within 24-hour window
+        bodyPayload.messaging_type = 'RESPONSE';
+    } else {
+        // HUMAN_AGENT tag - allows messaging within 7-day window
+        // Replaces deprecated ACCOUNT_UPDATE tag (removed Feb 10, 2026)
+        bodyPayload.messaging_type = 'MESSAGE_TAG';
+        bodyPayload.tag = 'HUMAN_AGENT';
+    }
+
     // Facebook Messenger API endpoint - use /me/messages with page access token
     const response = await fetch(
         `${FACEBOOK_GRAPH_URL}/me/messages?access_token=${pageAccessToken}`,
@@ -159,12 +177,7 @@ export async function sendMessage(
             headers: {
                 'Content-Type': 'application/json'
             },
-            body: JSON.stringify({
-                recipient: { id: recipientPsid },
-                message: { text: messageText },
-                messaging_type: 'MESSAGE_TAG',
-                tag: 'ACCOUNT_UPDATE'
-            })
+            body: JSON.stringify(bodyPayload)
         }
     );
 

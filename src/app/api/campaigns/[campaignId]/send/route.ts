@@ -246,7 +246,8 @@ export async function POST(
                         page.fb_page_id,
                         page.access_token,
                         contact.psid,
-                        messageToSend
+                        messageToSend,
+                        'HUMAN_AGENT'
                     );
 
                     await supabase

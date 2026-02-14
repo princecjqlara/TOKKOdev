@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getSessionFromRequest } from '@/lib/get-session';
 import { getSupabaseAdmin } from '@/lib/supabase';
 import { sendMessage } from '@/lib/facebook';
+import { chunkArray } from '@/lib/chunking';
 import fs from 'fs';
 import path from 'path';
 
@@ -10,6 +11,16 @@ interface ContactRecord {
     psid: string;
     page_id: string;
     name: string | null;
+    last_interaction_at: string | null;
+}
+
+// Determine the correct messaging type based on last interaction time
+function getMessagingType(lastInteractionAt: string | null): 'RESPONSE' | 'HUMAN_AGENT' {
+    if (!lastInteractionAt) return 'HUMAN_AGENT';
+    const lastInteraction = new Date(lastInteractionAt);
+    const twentyFourHoursAgo = new Date();
+    twentyFourHoursAgo.setHours(twentyFourHoursAgo.getHours() - 24);
+    return lastInteraction >= twentyFourHoursAgo ? 'RESPONSE' : 'HUMAN_AGENT';
 }
 
 // Template variable replacements for personalized messages
@@ -167,8 +178,8 @@ export async function POST(request: NextRequest) {
         // Get contacts - handle large arrays by batching
         // Note: We trust that contactIds were fetched correctly for this page
         // So we don't need to filter by page_id again - just query by IDs
-        let allContacts: { id: string; psid: string; name: string | null }[] = [];
-        const batchSize = 1000; // Supabase has limits on .in() array size
+        let allContacts: { id: string; psid: string; name: string | null; last_interaction_at: string | null }[] = [];
+        const batchSize = 200; // Keep queries small to avoid URL size limits
 
         console.log(`📤 Processing ${contactIds.length} contact IDs for page ${pageId}`);
         console.log(`📤 Will process in ${Math.ceil(contactIds.length / batchSize)} batches of up to ${batchSize} contacts each`);
@@ -182,29 +193,38 @@ export async function POST(request: NextRequest) {
         let batchesProcessed = 0;
         let batchesWithErrors = 0;
         let batchesWithFiltered = 0;
+        const batchErrors: string[] = [];
+        const emptyBatchSamples: string[][] = [];
 
-        for (let i = 0; i < contactIds.length; i += batchSize) {
+        const lookupBatches = chunkArray(contactIds, batchSize);
+
+        for (let index = 0; index < lookupBatches.length; index += 1) {
             batchesProcessed++;
-            const batchNumber = Math.floor(i / batchSize) + 1;
-            const totalBatches = Math.ceil(contactIds.length / batchSize);
-            console.log(`📤 Processing batch ${batchNumber}/${totalBatches} (contacts ${i + 1} to ${Math.min(i + batchSize, contactIds.length)})`);
-            const batchIds = contactIds.slice(i, i + batchSize);
+            const batchNumber = index + 1;
+            const totalBatches = lookupBatches.length;
+            const batchStartIndex = index * batchSize;
+            const batchEndIndex = Math.min(batchStartIndex + batchSize, contactIds.length) - 1;
+            console.log(`📤 Processing batch ${batchNumber}/${totalBatches} (contacts ${batchStartIndex + 1} to ${batchEndIndex + 1})`);
+            const batchIds = lookupBatches[index];
 
             // #region agent log
-            writeDebugLog('api/facebook/messages/send/route.ts:166', 'Batch loop iteration', { batchNumber, totalBatches, batchStartIndex: i, batchEndIndex: Math.min(i + batchSize, contactIds.length) - 1, batchSize: batchIds.length, totalRequested: contactIds.length, processedSoFar: i, remaining: contactIds.length - i }, 'B');
+            writeDebugLog('api/facebook/messages/send/route.ts:166', 'Batch loop iteration', { batchNumber, totalBatches, batchStartIndex, batchEndIndex, batchSize: batchIds.length, totalRequested: contactIds.length, processedSoFar: batchStartIndex, remaining: contactIds.length - batchStartIndex }, 'B');
             // #endregion
 
             const { data: batchContacts, error: batchError } = await supabase
                 .from('contacts')
-                .select('id, psid, page_id, name')
+                .select('id, psid, page_id, name, last_interaction_at')
                 .in('id', batchIds);
 
             if (batchError) {
                 batchesWithErrors++;
-                const batchNum = Math.floor(i / batchSize) + 1;
+                const batchNum = batchNumber;
                 console.error(`❌❌❌ ERROR fetching contacts batch ${batchNum}:`, batchError);
                 console.error(`❌ This batch will be skipped - ${batchIds.length} contacts will not be sent!`);
                 console.error(`❌ Batch error details:`, JSON.stringify(batchError, null, 2));
+                if (batchErrors.length < 5) {
+                    batchErrors.push(batchError.message || JSON.stringify(batchError));
+                }
                 // Mark as not found (database error)
                 totalNotFound += batchIds.length;
                 continue;
@@ -212,9 +232,12 @@ export async function POST(request: NextRequest) {
 
             if (!batchContacts?.length) {
                 batchesWithErrors++;
-                const batchNum = Math.floor(i / batchSize) + 1;
+                const batchNum = batchNumber;
                 console.error(`❌❌❌ Batch ${batchNum}: NO contacts found in database for ${batchIds.length} requested IDs!`);
                 console.error(`❌ Sample IDs that don't exist:`, batchIds.slice(0, 5));
+                if (emptyBatchSamples.length < 3) {
+                    emptyBatchSamples.push(batchIds.slice(0, 5));
+                }
                 console.error(`❌ These contacts may have been deleted from the database`);
                 // Mark as not found
                 totalNotFound += batchIds.length;
@@ -250,7 +273,7 @@ export async function POST(request: NextRequest) {
 
             if (filteredCount > 0) {
                 batchesWithFiltered++;
-                const batchNum = Math.floor(i / batchSize) + 1;
+                const batchNum = batchNumber;
                 const wrongPage = batchContacts.filter(c => c.page_id !== pageId).length;
                 const missingPsid = batchContacts.filter(c => typeof c.psid !== 'string' || c.psid.trim() === '').length;
                 console.error(`❌❌❌ Batch ${batchNum}: FILTERED ${filteredCount} contacts!`);
@@ -277,7 +300,7 @@ export async function POST(request: NextRequest) {
 
             if (validContacts.length) {
                 const beforeConcat = allContacts.length;
-                allContacts = allContacts.concat(validContacts.map(c => ({ id: c.id, psid: c.psid.trim(), name: c.name })));
+                allContacts = allContacts.concat(validContacts.map(c => ({ id: c.id, psid: c.psid.trim(), name: c.name, last_interaction_at: c.last_interaction_at || null })));
                 // #region agent log
                 writeDebugLog('api/facebook/messages/send/route.ts:245', 'Valid contacts added to allContacts', { batchNumber, validCount: validContacts.length, beforeConcat, afterConcat: allContacts.length, totalValidSoFar: allContacts.length }, 'B');
                 // #endregion
@@ -322,7 +345,7 @@ export async function POST(request: NextRequest) {
                     console.warn(
                         `No valid contacts matched provided IDs; falling back to ${validPageContacts.length} contacts on page ${pageId}`
                     );
-                    allContacts = validPageContacts.map(c => ({ id: c.id, psid: c.psid.trim(), name: c.name || null }));
+                    allContacts = validPageContacts.map(c => ({ id: c.id, psid: c.psid.trim(), name: c.name || null, last_interaction_at: null }));
                 }
             }
 
@@ -367,7 +390,9 @@ export async function POST(request: NextRequest) {
                         debug: {
                             requested: contactIds.length,
                             found: 0,
-                            sampleContacts: anyContacts?.slice(0, 5) || []
+                            sampleContacts: anyContacts?.slice(0, 5) || [],
+                            batchErrors,
+                            emptyBatchSamples
                         }
                     },
                     { status: 404 }
@@ -528,9 +553,11 @@ export async function POST(request: NextRequest) {
                         id: contact.id,
                         psid: contact.psid,
                         page_id: pageId,
-                        name: contact.name
+                        name: contact.name,
+                        last_interaction_at: contact.last_interaction_at
                     });
-                    const result = await sendMessage(page.fb_page_id, page.access_token, contact.psid, personalizedMessage);
+                    const msgType = getMessagingType(contact.last_interaction_at);
+                    const result = await sendMessage(page.fb_page_id, page.access_token, contact.psid, personalizedMessage, msgType);
                     console.log(`✅ Successfully sent message to contact ${contact.id} (PSID: ${contact.psid})`);
                     return { success: true as const, contactId: contact.id, error: undefined };
                 } catch (error) {
@@ -682,7 +709,10 @@ export async function POST(request: NextRequest) {
                 found: totalFound, // Found in database
                 valid: allContacts.length, // Valid contacts found
                 accountedFor: totalAccountedFor // Total accounted for (for validation)
-            }
+            },
+            ...(batchErrors.length > 0 || emptyBatchSamples.length > 0
+                ? { debug: { batchErrors, emptyBatchSamples } }
+                : {})
         });
     } catch (error) {
         console.error('Error sending messages:', error);

@@ -145,7 +145,8 @@ export async function GET() {
                         page.fb_page_id,
                         page.access_token,
                         contact.psid,
-                        messageText
+                        messageText,
+                        'HUMAN_AGENT'
                     );
 
                     // Calculate next scheduled time (same hour tomorrow)
