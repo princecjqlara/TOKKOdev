@@ -149,7 +149,7 @@ export async function getUserProfile(
 export function buildTaggedMessagePayload(
     recipientPsid: string,
     messageText: string,
-    messageTag?: MessageTag
+    messageTag?: string | null
 ) {
     const tag = normalizeMessageTag(messageTag);
     return {
