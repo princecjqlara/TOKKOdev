@@ -15,12 +15,19 @@ interface ContactRecord {
 }
 
 // Determine the correct messaging type based on last interaction time
-function getMessagingType(lastInteractionAt: string | null): 'RESPONSE' | 'HUMAN_AGENT' {
-    if (!lastInteractionAt) return 'HUMAN_AGENT';
+// HUMAN_AGENT: within 7-day window
+// UTILITY: outside 7-day window (requires template)
+function getMessagingType(lastInteractionAt: string | null): 'RESPONSE' | 'HUMAN_AGENT' | 'UTILITY' {
+    if (!lastInteractionAt) return 'UTILITY';
     const lastInteraction = new Date(lastInteractionAt);
     const twentyFourHoursAgo = new Date();
     twentyFourHoursAgo.setHours(twentyFourHoursAgo.getHours() - 24);
-    return lastInteraction >= twentyFourHoursAgo ? 'RESPONSE' : 'HUMAN_AGENT';
+    const sevenDaysAgo = new Date();
+    sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
+    
+    if (lastInteraction >= twentyFourHoursAgo) return 'RESPONSE';
+    if (lastInteraction >= sevenDaysAgo) return 'HUMAN_AGENT';
+    return 'UTILITY';
 }
 
 // Template variable replacements for personalized messages

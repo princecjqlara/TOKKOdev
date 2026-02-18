@@ -145,28 +145,59 @@ export async function getUserProfile(
 }
 
 // Send message to a contact
-// messagingType: 'RESPONSE' for contacts within 24h window, 'HUMAN_AGENT' for 7-day window
+// messagingType: 
+//   'RESPONSE' - within 24h window (plain text)
+//   'HUMAN_AGENT' - within 7-day window (plain text with tag)
+//   'UTILITY' - outside 7-day window (requires template)
+const DEFAULT_UTILITY_TEMPLATE = 'account_general_notification';
+
 export async function sendMessage(
     pageId: string,
     pageAccessToken: string,
     recipientPsid: string,
     messageText: string,
-    messagingType: 'RESPONSE' | 'HUMAN_AGENT' = 'HUMAN_AGENT'
+    messagingType: 'RESPONSE' | 'HUMAN_AGENT' | 'UTILITY' = 'HUMAN_AGENT',
+    templateName?: string
 ): Promise<{ message_id: string }> {
     // Build the request payload based on messaging type
-    const bodyPayload: Record<string, unknown> = {
-        recipient: { id: recipientPsid },
-        message: { text: messageText },
-    };
+    let bodyPayload: Record<string, unknown>;
 
-    if (messagingType === 'RESPONSE') {
-        // Standard messaging - within 24-hour window
-        bodyPayload.messaging_type = 'RESPONSE';
-    } else {
+    if (messagingType === 'UTILITY') {
+        // Utility message with template - no time window restrictions
+        const template = templateName || DEFAULT_UTILITY_TEMPLATE;
+        bodyPayload = {
+            recipient: { id: recipientPsid },
+            messaging_type: 'UTILITY',
+            message: {
+                template: {
+                    name: template,
+                    language: { code: 'en' },
+                    components: [
+                        {
+                            type: 'body',
+                            parameters: [
+                                { type: 'text', text: messageText }
+                            ]
+                        }
+                    ]
+                }
+            }
+        };
+    } else if (messagingType === 'HUMAN_AGENT') {
         // HUMAN_AGENT tag - allows messaging within 7-day window
-        // Replaces deprecated ACCOUNT_UPDATE tag (removed Feb 10, 2026)
-        bodyPayload.messaging_type = 'MESSAGE_TAG';
-        bodyPayload.tag = 'HUMAN_AGENT';
+        bodyPayload = {
+            recipient: { id: recipientPsid },
+            messaging_type: 'MESSAGE_TAG',
+            tag: 'HUMAN_AGENT',
+            message: { text: messageText }
+        };
+    } else {
+        // RESPONSE - standard messaging within 24-hour window
+        bodyPayload = {
+            recipient: { id: recipientPsid },
+            messaging_type: 'RESPONSE',
+            message: { text: messageText }
+        };
     }
 
     // Facebook Messenger API endpoint - use /me/messages with page access token
