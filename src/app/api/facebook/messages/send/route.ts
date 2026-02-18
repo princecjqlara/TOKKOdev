@@ -30,6 +30,14 @@ function getMessagingType(lastInteractionAt: string | null): 'RESPONSE' | 'HUMAN
     return 'UTILITY';
 }
 
+function isUtilityPermissionError(errorMessage: string): boolean {
+    const normalized = errorMessage.toLowerCase();
+    return (
+        normalized.includes('pages_utility_messaging') ||
+        normalized.includes('requires pages_utility_messaging permission')
+    );
+}
+
 // Template variable replacements for personalized messages
 function replaceTemplateVariables(template: string, contact: ContactRecord): string {
     let message = template;
@@ -498,6 +506,8 @@ export async function POST(request: NextRequest) {
             errors: [] as { contactId: string; error: string }[]
         };
 
+        let utilityPermissionMissing = false;
+
         // Process messages in parallel batches to avoid timeout and respect rate limits
         const SEND_BATCH_SIZE = 15; // Send 15 messages in parallel (increased for faster processing)
         const DELAY_BETWEEN_BATCHES = 80; // 80ms delay between batches (reduced for faster processing)
@@ -554,6 +564,16 @@ export async function POST(request: NextRequest) {
 
             // Process batch in parallel - use allSettled to continue even if some fail
             const batchPromises = batch.map(async (contact) => {
+                const msgType = getMessagingType(contact.last_interaction_at);
+
+                if (msgType === 'UTILITY' && utilityPermissionMissing) {
+                    return {
+                        success: false as const,
+                        contactId: contact.id,
+                        error: 'Skipped: missing pages_utility_messaging permission for utility messages'
+                    };
+                }
+
                 try {
                     // Replace template variables with contact data for personalized messages
                     const personalizedMessage = replaceTemplateVariables(messageText, {
@@ -563,12 +583,21 @@ export async function POST(request: NextRequest) {
                         name: contact.name,
                         last_interaction_at: contact.last_interaction_at
                     });
-                    const msgType = getMessagingType(contact.last_interaction_at);
-                    const result = await sendMessage(page.fb_page_id, page.access_token, contact.psid, personalizedMessage, msgType);
+
+                    await sendMessage(page.fb_page_id, page.access_token, contact.psid, personalizedMessage, msgType);
                     console.log(`✅ Successfully sent message to contact ${contact.id} (PSID: ${contact.psid})`);
+
                     return { success: true as const, contactId: contact.id, error: undefined };
                 } catch (error) {
                     const errorMessage = (error as Error).message || 'Unknown error';
+
+                    if (msgType === 'UTILITY' && isUtilityPermissionError(errorMessage)) {
+                        if (!utilityPermissionMissing) {
+                            console.warn('⚠️ Missing pages_utility_messaging permission detected. Remaining utility messages will be skipped.');
+                        }
+                        utilityPermissionMissing = true;
+                    }
+
                     console.warn(`❌ Failed to send message to contact ${contact.id} (PSID: ${contact.psid}): ${errorMessage}`);
                     return { success: false as const, contactId: contact.id, error: errorMessage };
                 }

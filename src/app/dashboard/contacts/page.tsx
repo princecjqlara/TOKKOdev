@@ -17,7 +17,12 @@ import {
 import Pagination from '@/components/Pagination';
 import Modal from '@/components/Modal';
 import { Contact, Tag as TagType, Page, PaginatedResponse } from '@/types';
-import { mergeSendErrors, SendError } from '@/lib/send-errors';
+import {
+    isRetryableSendError,
+    mergeSendErrors,
+    SendError,
+    summarizeSendErrors
+} from '@/lib/send-errors';
 
 export default function ContactsPage() {
     const { data: session } = useSession();
@@ -656,9 +661,15 @@ export default function ContactsPage() {
                 }
             }
 
-            // Store failed contact IDs for resend option
-            setFailedContactIds(allFailedIds);
-            setFailedContactErrors(mergeSendErrors(errorGroups));
+            // Store failed contact IDs for resend option (retryable only)
+            const mergedFailedErrors = mergeSendErrors(errorGroups);
+            const retryableFailedIds = mergedFailedErrors
+                .filter((entry) => isRetryableSendError(entry.error))
+                .map((entry) => entry.contactId);
+            const failedErrorSummary = summarizeSendErrors(mergedFailedErrors);
+
+            setFailedContactIds(retryableFailedIds);
+            setFailedContactErrors(mergedFailedErrors);
             setLastSendResults({ sent: totalSent, failed: totalFailed });
 
             // Calculate final totals
@@ -774,8 +785,18 @@ export default function ContactsPage() {
                     message += `\n\n❌ ERROR: ${unaccounted} contacts are unaccounted for (this is a bug).`;
                 }
 
-                if (totalFailed > 0) {
+                if (failedErrorSummary.utilityPermissionMissing > 0) {
+                    message += `\n\n⚠️ ${failedErrorSummary.utilityPermissionMissing} failed due to missing pages_utility_messaging permission.`;
+                }
+
+                if (failedErrorSummary.recipientUnavailable > 0) {
+                    message += `\n⚠️ ${failedErrorSummary.recipientUnavailable} recipients are unavailable right now (#551).`;
+                }
+
+                if (retryableFailedIds.length > 0) {
                     message += `\n\nYou can resend to failed contacts using the "Resend to Failed" button.`;
+                } else if (totalFailed > 0) {
+                    message += `\n\nNo retryable failures remain.`;
                 }
             }
 
@@ -819,9 +840,14 @@ export default function ContactsPage() {
             const data = await response.json();
             if (data.success) {
                 // Only update failedContactIds with contacts that actually failed this time
-                const newFailedIds = data.results.errors?.map((e: { contactId: string }) => e.contactId) || [];
-                setFailedContactIds(newFailedIds);
-                setFailedContactErrors(mergeSendErrors([data.results.errors || []]));
+                const mergedRetryErrors = mergeSendErrors([data.results.errors || []]);
+                const retryableFailedIds = mergedRetryErrors
+                    .filter((entry) => isRetryableSendError(entry.error))
+                    .map((entry) => entry.contactId);
+                const retryErrorSummary = summarizeSendErrors(mergedRetryErrors);
+
+                setFailedContactIds(retryableFailedIds);
+                setFailedContactErrors(mergedRetryErrors);
                 setLastSendResults({ sent: data.results.sent, failed: data.results.failed });
 
                 console.log(`Resend results: ${data.results.sent} sent, ${data.results.failed} failed out of ${failedContactIds.length} attempted`);
@@ -843,7 +869,21 @@ export default function ContactsPage() {
                     } else if (data.results.sent === 0) {
                         message += `\n\n⚠️ All messages failed. Please check the console for error details.`;
                     } else {
-                        message += `\n\nYou can try resending to the failed contacts again.`;
+                        if (retryableFailedIds.length > 0) {
+                            message += `\n\nYou can try resending to the failed contacts again.`;
+                        }
+                    }
+
+                    if (retryErrorSummary.utilityPermissionMissing > 0) {
+                        message += `\n\n⚠️ ${retryErrorSummary.utilityPermissionMissing} failed due to missing pages_utility_messaging permission.`;
+                    }
+
+                    if (retryErrorSummary.recipientUnavailable > 0) {
+                        message += `\n⚠️ ${retryErrorSummary.recipientUnavailable} recipients are unavailable right now (#551).`;
+                    }
+
+                    if (retryableFailedIds.length === 0) {
+                        message += `\n\nNo retryable failures remain.`;
                     }
                     alert(message);
                 } else {
@@ -908,6 +948,7 @@ export default function ContactsPage() {
     };
 
     const allOnPageSelected = contacts.length > 0 && contacts.every(c => isSelected(c.id));
+    const failedErrorSummary = summarizeSendErrors(failedContactErrors);
 
     return (
         <div className="p-6 md:p-8 max-w-[1400px] mx-auto fade-in">
@@ -1404,6 +1445,21 @@ export default function ContactsPage() {
                             <p className="font-mono text-xs text-red-800 mb-2">
                                 Failed error details (showing {Math.min(failedContactErrors.length, 10)} of {failedContactErrors.length})
                             </p>
+                            {failedErrorSummary.utilityPermissionMissing > 0 && (
+                                <p className="font-mono text-xs text-red-800 mb-1">
+                                    {failedErrorSummary.utilityPermissionMissing} failed due to missing pages_utility_messaging permission.
+                                </p>
+                            )}
+                            {failedErrorSummary.recipientUnavailable > 0 && (
+                                <p className="font-mono text-xs text-red-800 mb-1">
+                                    {failedErrorSummary.recipientUnavailable} recipients are unavailable right now (#551).
+                                </p>
+                            )}
+                            {failedContactIds.length > 0 && (
+                                <p className="font-mono text-xs text-red-700 mb-2">
+                                    {failedContactIds.length} contact(s) are retryable.
+                                </p>
+                            )}
                             <div className="max-h-40 overflow-y-auto space-y-2">
                                 {failedContactErrors.slice(0, 10).map((entry, index) => (
                                     <div key={`${entry.contactId}-${index}`} className="text-xs font-mono text-red-900">
