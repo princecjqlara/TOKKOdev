@@ -1,6 +1,6 @@
 import { FacebookPage, FacebookConversation } from '@/types';
 
-const FACEBOOK_GRAPH_URL = 'https://graph.facebook.com/v18.0';
+const FACEBOOK_GRAPH_URL = 'https://graph.facebook.com/v21.0';
 
 // Get user's Facebook pages (including business pages)
 // /me/accounts returns all pages the user manages, including business pages
@@ -309,4 +309,211 @@ export function verifyWebhookSignature(
         Buffer.from(signature),
         Buffer.from(expectedSignature)
     );
+}
+
+// Utility message template types
+export interface UtilityTemplate {
+    name: string;
+    language: string;
+    category: string;
+    components: TemplateComponent[];
+}
+
+export interface TemplateComponent {
+    type: 'BODY' | 'HEADER' | 'BUTTONS';
+    text?: string;
+    format?: 'TEXT' | 'IMAGE';
+    example?: {
+        body_text?: string[][];
+        header_text?: string[];
+    };
+    buttons?: TemplateButton[];
+}
+
+export interface TemplateButton {
+    type: 'URL' | 'POSTBACK';
+    text: string;
+    url?: string;
+    payload?: string;
+    example?: {
+        url_suffix_example?: string;
+    };
+}
+
+// Create utility message template
+export async function createUtilityTemplate(
+    pageId: string,
+    pageAccessToken: string,
+    template: UtilityTemplate
+): Promise<{ id: string; status: string; category: string }> {
+    const response = await fetch(
+        `${FACEBOOK_GRAPH_URL}/${pageId}/message_templates?access_token=${pageAccessToken}`,
+        {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify(template)
+        }
+    );
+
+    if (!response.ok) {
+        const errorData = await response.json().catch(() => ({ error: { message: 'Unknown error' } }));
+        const errorMessage = errorData.error?.message || `HTTP ${response.status}: ${response.statusText}`;
+        console.error('🔴 Facebook create template error:', {
+            pageId,
+            templateName: template.name,
+            status: response.status,
+            error: errorMessage,
+            fullError: errorData
+        });
+        throw new Error(errorMessage);
+    }
+
+    const result = await response.json();
+    console.log('✅ Template created successfully:', {
+        pageId,
+        templateName: template.name,
+        templateId: result.id,
+        status: result.status
+    });
+    return result;
+}
+
+// Get page's existing templates
+export async function getPageTemplates(
+    pageId: string,
+    pageAccessToken: string
+): Promise<any[]> {
+    const response = await fetch(
+        `${FACEBOOK_GRAPH_URL}/${pageId}/message_templates?access_token=${pageAccessToken}`
+    );
+
+    if (!response.ok) {
+        const errorData = await response.json().catch(() => ({ error: { message: 'Unknown error' } }));
+        throw new Error(errorData.error?.message || 'Failed to fetch templates');
+    }
+
+    const data = await response.json();
+    return data.data || [];
+}
+
+// Pre-defined utility templates for account notifications
+export const UTILITY_TEMPLATES: Omit<UtilityTemplate, 'language'>[] = [
+    {
+        name: 'account_security_alert',
+        category: 'UTILITY',
+        components: [
+            {
+                type: 'BODY',
+                text: '{{1}}',
+                example: {
+                    body_text: [['We detected a new login to your account. If this was not you, please secure your account immediately.']]
+                }
+            }
+        ]
+    },
+    {
+        name: 'account_update_notification',
+        category: 'UTILITY',
+        components: [
+            {
+                type: 'BODY',
+                text: '{{1}}',
+                example: {
+                    body_text: [['Your account settings have been changed successfully.']]
+                }
+            }
+        ]
+    },
+    {
+        name: 'account_general_notification',
+        category: 'UTILITY',
+        components: [
+            {
+                type: 'BODY',
+                text: '{{1}}',
+                example: {
+                    body_text: [['Your account information has been updated.']]
+                }
+            }
+        ]
+    },
+    {
+        name: 'account_verification_alert',
+        category: 'UTILITY',
+        components: [
+            {
+                type: 'BODY',
+                text: '{{1}}',
+                example: {
+                    body_text: [['Please verify your email address to complete your account setup.']]
+                }
+            }
+        ]
+    }
+];
+
+// Send utility message using template
+export async function sendUtilityMessage(
+    pageId: string,
+    pageAccessToken: string,
+    recipientPsid: string,
+    templateName: string,
+    languageCode: string,
+    bodyText: string
+): Promise<{ message_id: string; recipient_id: string }> {
+    const response = await fetch(
+        `${FACEBOOK_GRAPH_URL}/${pageId}/messages?access_token=${pageAccessToken}`,
+        {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+                recipient: { id: recipientPsid },
+                messaging_type: 'UTILITY',
+                message: {
+                    template: {
+                        name: templateName,
+                        language: { code: languageCode },
+                        components: [
+                            {
+                                type: 'body',
+                                parameters: [
+                                    {
+                                        type: 'text',
+                                        text: bodyText
+                                    }
+                                ]
+                            }
+                        ]
+                    }
+                }
+            })
+        }
+    );
+
+    if (!response.ok) {
+        const errorData = await response.json().catch(() => ({ error: { message: 'Unknown error' } }));
+        const errorMessage = errorData.error?.message || `HTTP ${response.status}: ${response.statusText}`;
+        console.error('🔴 Facebook send utility message error:', {
+            pageId,
+            recipientPsid,
+            templateName,
+            status: response.status,
+            error: errorMessage,
+            fullError: errorData
+        });
+        throw new Error(errorMessage);
+    }
+
+    const result = await response.json();
+    console.log('✅ Utility message sent successfully:', {
+        pageId,
+        recipientPsid,
+        templateName,
+        messageId: result.message_id
+    });
+    return result;
 }
