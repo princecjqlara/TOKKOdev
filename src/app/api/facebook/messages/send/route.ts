@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getSessionFromRequest } from '@/lib/get-session';
 import { getSupabaseAdmin } from '@/lib/supabase';
-import { sendMessage } from '@/lib/facebook';
+import { createUtilityTemplate, sendMessage, UTILITY_TEMPLATES } from '@/lib/facebook';
 import { chunkArray } from '@/lib/chunking';
 import fs from 'fs';
 import path from 'path';
@@ -41,6 +41,24 @@ function isUtilityPermissionError(errorMessage: string): boolean {
 function isUtilityTemplateMissingError(errorMessage: string): boolean {
     const normalized = errorMessage.toLowerCase();
     return normalized.includes('template cannot be found');
+}
+
+const DEFAULT_UTILITY_TEMPLATE_NAME = 'account_general_notification';
+const DEFAULT_UTILITY_TEMPLATE_LANGUAGE = 'en';
+
+function getDefaultUtilityTemplate() {
+    const baseTemplate =
+        UTILITY_TEMPLATES.find((template) => template.name === DEFAULT_UTILITY_TEMPLATE_NAME) ||
+        UTILITY_TEMPLATES[0];
+
+    if (!baseTemplate) {
+        return null;
+    }
+
+    return {
+        ...baseTemplate,
+        language: DEFAULT_UTILITY_TEMPLATE_LANGUAGE
+    };
 }
 
 // Template variable replacements for personalized messages
@@ -513,6 +531,44 @@ export async function POST(request: NextRequest) {
 
         let utilityPermissionMissing = false;
         let utilityTemplateMissing = false;
+        let utilityTemplateBootstrapPromise: Promise<boolean> | null = null;
+
+        const ensureUtilityTemplateExists = async (): Promise<boolean> => {
+            if (utilityTemplateMissing) {
+                return false;
+            }
+
+            if (!utilityTemplateBootstrapPromise) {
+                utilityTemplateBootstrapPromise = (async () => {
+                    const template = getDefaultUtilityTemplate();
+                    if (!template) {
+                        console.warn('⚠️ No utility templates configured in UTILITY_TEMPLATES');
+                        return false;
+                    }
+
+                    try {
+                        await createUtilityTemplate(page.fb_page_id, page.access_token, template);
+                        console.log(`✅ Utility template '${template.name}' created automatically`);
+                        return true;
+                    } catch (bootstrapError) {
+                        const bootstrapMessage = ((bootstrapError as Error).message || 'Unknown template creation error').toLowerCase();
+                        if (bootstrapMessage.includes('already exists') || bootstrapMessage.includes('duplicate')) {
+                            console.log(`ℹ️ Utility template '${template.name}' already exists`);
+                            return true;
+                        }
+
+                        console.warn('⚠️ Failed to auto-create utility template:', bootstrapError);
+                        return false;
+                    }
+                })();
+            }
+
+            const created = await utilityTemplateBootstrapPromise;
+            if (!created) {
+                utilityTemplateMissing = true;
+            }
+            return created;
+        };
 
         // Process messages in parallel batches to avoid timeout and respect rate limits
         const SEND_BATCH_SIZE = 15; // Send 15 messages in parallel (increased for faster processing)
@@ -603,7 +659,32 @@ export async function POST(request: NextRequest) {
 
                     return { success: true as const, contactId: contact.id, error: undefined };
                 } catch (error) {
-                    const errorMessage = (error as Error).message || 'Unknown error';
+                    let errorMessage = (error as Error).message || 'Unknown error';
+
+                    if (msgType === 'UTILITY' && isUtilityTemplateMissingError(errorMessage)) {
+                        const templateReady = await ensureUtilityTemplateExists();
+
+                        if (templateReady) {
+                            try {
+                                const retryMessage = replaceTemplateVariables(messageText, {
+                                    id: contact.id,
+                                    psid: contact.psid,
+                                    page_id: pageId,
+                                    name: contact.name,
+                                    last_interaction_at: contact.last_interaction_at
+                                });
+
+                                await sendMessage(page.fb_page_id, page.access_token, contact.psid, retryMessage, msgType);
+                                console.log(`✅ Retry succeeded after creating utility template for contact ${contact.id}`);
+                                return { success: true as const, contactId: contact.id, error: undefined };
+                            } catch (retryError) {
+                                errorMessage = (retryError as Error).message || errorMessage;
+                            }
+                        } else if (!utilityTemplateMissing) {
+                            console.warn('⚠️ Utility template missing and auto-create failed. Remaining utility messages will be skipped.');
+                            utilityTemplateMissing = true;
+                        }
+                    }
 
                     if (msgType === 'UTILITY' && isUtilityPermissionError(errorMessage)) {
                         if (!utilityPermissionMissing) {
