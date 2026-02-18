@@ -44,7 +44,7 @@ function isUtilityTemplateMissingError(errorMessage: string): boolean {
 }
 
 const DEFAULT_UTILITY_TEMPLATE_NAME = 'account_general_notification';
-const DEFAULT_UTILITY_TEMPLATE_LANGUAGE = 'en';
+const DEFAULT_UTILITY_TEMPLATE_LANGUAGE = 'en_US';
 
 function getDefaultUtilityTemplate() {
     const baseTemplate =
@@ -532,6 +532,7 @@ export async function POST(request: NextRequest) {
         let utilityPermissionMissing = false;
         let utilityTemplateMissing = false;
         let utilityTemplateBootstrapPromise: Promise<boolean> | null = null;
+        let utilityTemplateBootstrapError: string | null = null;
 
         const ensureUtilityTemplateExists = async (): Promise<boolean> => {
             if (utilityTemplateMissing) {
@@ -542,6 +543,7 @@ export async function POST(request: NextRequest) {
                 utilityTemplateBootstrapPromise = (async () => {
                     const template = getDefaultUtilityTemplate();
                     if (!template) {
+                        utilityTemplateBootstrapError = 'No utility templates configured in UTILITY_TEMPLATES';
                         console.warn('⚠️ No utility templates configured in UTILITY_TEMPLATES');
                         return false;
                     }
@@ -554,9 +556,11 @@ export async function POST(request: NextRequest) {
                         const bootstrapMessage = ((bootstrapError as Error).message || 'Unknown template creation error').toLowerCase();
                         if (bootstrapMessage.includes('already exists') || bootstrapMessage.includes('duplicate')) {
                             console.log(`ℹ️ Utility template '${template.name}' already exists`);
+                            utilityTemplateBootstrapError = null;
                             return true;
                         }
 
+                        utilityTemplateBootstrapError = (bootstrapError as Error).message || 'Template auto-create failed';
                         console.warn('⚠️ Failed to auto-create utility template:', bootstrapError);
                         return false;
                     }
@@ -640,7 +644,9 @@ export async function POST(request: NextRequest) {
                     return {
                         success: false as const,
                         contactId: contact.id,
-                        error: 'Skipped: utility template not found for this page'
+                        error: utilityTemplateBootstrapError
+                            ? `Skipped: utility template not found for this page. Auto-create failed: ${utilityTemplateBootstrapError}`
+                            : 'Skipped: utility template not found for this page'
                     };
                 }
 
@@ -683,6 +689,9 @@ export async function POST(request: NextRequest) {
                         } else if (!utilityTemplateMissing) {
                             console.warn('⚠️ Utility template missing and auto-create failed. Remaining utility messages will be skipped.');
                             utilityTemplateMissing = true;
+                            if (utilityTemplateBootstrapError) {
+                                errorMessage = `Template cannot be found. Auto-create failed: ${utilityTemplateBootstrapError}`;
+                            }
                         }
                     }
 

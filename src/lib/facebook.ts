@@ -150,6 +150,7 @@ export async function getUserProfile(
 //   'HUMAN_AGENT' - within 7-day window (plain text with tag)
 //   'UTILITY' - outside 7-day window (requires template)
 const DEFAULT_UTILITY_TEMPLATE = 'account_general_notification';
+const DEFAULT_UTILITY_LANGUAGE = 'en_US';
 
 export async function sendMessage(
     pageId: string,
@@ -157,7 +158,8 @@ export async function sendMessage(
     recipientPsid: string,
     messageText: string,
     messagingType: 'RESPONSE' | 'HUMAN_AGENT' | 'UTILITY' = 'HUMAN_AGENT',
-    templateName?: string
+    templateName?: string,
+    templateLanguage: string = DEFAULT_UTILITY_LANGUAGE
 ): Promise<{ message_id: string }> {
     // Build the request payload based on messaging type
     let bodyPayload: Record<string, unknown>;
@@ -171,7 +173,7 @@ export async function sendMessage(
             message: {
                 template: {
                     name: template,
-                    language: { code: 'en' },
+                    language: { code: templateLanguage },
                     components: [
                         {
                             type: 'body',

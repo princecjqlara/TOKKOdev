@@ -16,7 +16,7 @@ export async function POST(request: NextRequest) {
         }
 
         const body = await request.json();
-        const { pageId, recipientPsid, templateName, language = 'en', messageText } = body;
+        const { pageId, recipientPsid, templateName, language = 'en_US', messageText } = body;
 
         if (!pageId || !recipientPsid || !templateName || !messageText) {
             return NextResponse.json(

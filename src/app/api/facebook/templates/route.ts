@@ -78,7 +78,7 @@ export async function POST(request: NextRequest) {
         }
 
         const body = await request.json();
-        const { pageId, language = 'en', templates: customTemplates } = body;
+        const { pageId, language = 'en_US', templates: customTemplates } = body;
 
         if (!pageId) {
             return NextResponse.json(
