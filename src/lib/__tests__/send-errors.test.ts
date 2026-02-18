@@ -39,6 +39,10 @@ describe('mergeSendErrors', () => {
         ).toBe('utility_permission_missing');
 
         expect(
+            categorizeSendError('(#100) Template cannot be found.')
+        ).toBe('utility_template_missing');
+
+        expect(
             categorizeSendError("(#551) This person isn't available right now.")
         ).toBe('recipient_unavailable');
 
@@ -50,12 +54,14 @@ describe('mergeSendErrors', () => {
         expect(
             isRetryableSendError('Requires pages_utility_messaging permission to manage the object')
         ).toBe(false);
+        expect(isRetryableSendError('(#100) Template cannot be found.')).toBe(false);
         expect(isRetryableSendError("(#551) This person isn't available right now.")).toBe(false);
     });
 
     it('summarizes send error categories', () => {
         const summary = summarizeSendErrors([
             { contactId: 'a', error: 'Requires pages_utility_messaging permission to manage the object' },
+            { contactId: 'x', error: '(#100) Template cannot be found.' },
             { contactId: 'b', error: "(#551) This person isn't available right now." },
             { contactId: 'c', error: 'Timeout' },
             { contactId: 'd', error: 'Requires pages_utility_messaging permission to manage the object' }
@@ -63,6 +69,7 @@ describe('mergeSendErrors', () => {
 
         expect(summary).toEqual({
             utilityPermissionMissing: 2,
+            utilityTemplateMissing: 1,
             recipientUnavailable: 1,
             other: 1
         });

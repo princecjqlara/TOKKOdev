@@ -2,6 +2,7 @@ export type SendError = { contactId: string; error: string };
 
 export type SendErrorCategory =
     | 'utility_permission_missing'
+    | 'utility_template_missing'
     | 'recipient_unavailable'
     | 'other';
 
@@ -13,6 +14,14 @@ export function categorizeSendError(error: string): SendErrorCategory {
         normalized.includes('requires pages_utility_messaging permission')
     ) {
         return 'utility_permission_missing';
+    }
+
+    if (
+        normalized.includes('template cannot be found') ||
+        normalized.includes('missing utility template') ||
+        normalized.includes('utility template not found')
+    ) {
+        return 'utility_template_missing';
     }
 
     if (
@@ -33,11 +42,13 @@ export function isRetryableSendError(error: string): boolean {
 
 export function summarizeSendErrors(errors: SendError[]): {
     utilityPermissionMissing: number;
+    utilityTemplateMissing: number;
     recipientUnavailable: number;
     other: number;
 } {
     const summary = {
         utilityPermissionMissing: 0,
+        utilityTemplateMissing: 0,
         recipientUnavailable: 0,
         other: 0
     };
@@ -46,6 +57,8 @@ export function summarizeSendErrors(errors: SendError[]): {
         const category = categorizeSendError(entry.error);
         if (category === 'utility_permission_missing') {
             summary.utilityPermissionMissing += 1;
+        } else if (category === 'utility_template_missing') {
+            summary.utilityTemplateMissing += 1;
         } else if (category === 'recipient_unavailable') {
             summary.recipientUnavailable += 1;
         } else {

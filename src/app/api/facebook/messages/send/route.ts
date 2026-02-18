@@ -38,6 +38,11 @@ function isUtilityPermissionError(errorMessage: string): boolean {
     );
 }
 
+function isUtilityTemplateMissingError(errorMessage: string): boolean {
+    const normalized = errorMessage.toLowerCase();
+    return normalized.includes('template cannot be found');
+}
+
 // Template variable replacements for personalized messages
 function replaceTemplateVariables(template: string, contact: ContactRecord): string {
     let message = template;
@@ -507,6 +512,7 @@ export async function POST(request: NextRequest) {
         };
 
         let utilityPermissionMissing = false;
+        let utilityTemplateMissing = false;
 
         // Process messages in parallel batches to avoid timeout and respect rate limits
         const SEND_BATCH_SIZE = 15; // Send 15 messages in parallel (increased for faster processing)
@@ -574,6 +580,14 @@ export async function POST(request: NextRequest) {
                     };
                 }
 
+                if (msgType === 'UTILITY' && utilityTemplateMissing) {
+                    return {
+                        success: false as const,
+                        contactId: contact.id,
+                        error: 'Skipped: utility template not found for this page'
+                    };
+                }
+
                 try {
                     // Replace template variables with contact data for personalized messages
                     const personalizedMessage = replaceTemplateVariables(messageText, {
@@ -596,6 +610,13 @@ export async function POST(request: NextRequest) {
                             console.warn('⚠️ Missing pages_utility_messaging permission detected. Remaining utility messages will be skipped.');
                         }
                         utilityPermissionMissing = true;
+                    }
+
+                    if (msgType === 'UTILITY' && isUtilityTemplateMissingError(errorMessage)) {
+                        if (!utilityTemplateMissing) {
+                            console.warn('⚠️ Utility template not found. Remaining utility messages will be skipped.');
+                        }
+                        utilityTemplateMissing = true;
                     }
 
                     console.warn(`❌ Failed to send message to contact ${contact.id} (PSID: ${contact.psid}): ${errorMessage}`);

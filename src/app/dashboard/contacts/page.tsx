@@ -789,6 +789,10 @@ export default function ContactsPage() {
                     message += `\n\n⚠️ ${failedErrorSummary.utilityPermissionMissing} failed due to missing pages_utility_messaging permission.`;
                 }
 
+                if (failedErrorSummary.utilityTemplateMissing > 0) {
+                    message += `\n⚠️ ${failedErrorSummary.utilityTemplateMissing} failed because utility template is missing (#100).`;
+                }
+
                 if (failedErrorSummary.recipientUnavailable > 0) {
                     message += `\n⚠️ ${failedErrorSummary.recipientUnavailable} recipients are unavailable right now (#551).`;
                 }
@@ -876,6 +880,10 @@ export default function ContactsPage() {
 
                     if (retryErrorSummary.utilityPermissionMissing > 0) {
                         message += `\n\n⚠️ ${retryErrorSummary.utilityPermissionMissing} failed due to missing pages_utility_messaging permission.`;
+                    }
+
+                    if (retryErrorSummary.utilityTemplateMissing > 0) {
+                        message += `\n⚠️ ${retryErrorSummary.utilityTemplateMissing} failed because utility template is missing (#100).`;
                     }
 
                     if (retryErrorSummary.recipientUnavailable > 0) {
@@ -1448,6 +1456,11 @@ export default function ContactsPage() {
                             {failedErrorSummary.utilityPermissionMissing > 0 && (
                                 <p className="font-mono text-xs text-red-800 mb-1">
                                     {failedErrorSummary.utilityPermissionMissing} failed due to missing pages_utility_messaging permission.
+                                </p>
+                            )}
+                            {failedErrorSummary.utilityTemplateMissing > 0 && (
+                                <p className="font-mono text-xs text-red-800 mb-1">
+                                    {failedErrorSummary.utilityTemplateMissing} failed because utility template is missing (#100).
                                 </p>
                             )}
                             {failedErrorSummary.recipientUnavailable > 0 && (
