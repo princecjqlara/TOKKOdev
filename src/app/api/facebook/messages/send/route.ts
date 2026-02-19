@@ -2,10 +2,8 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getSessionFromRequest } from '@/lib/get-session';
 import { getSupabaseAdmin } from '@/lib/supabase';
 import {
-    createUtilityTemplate,
     getPageTemplates,
-    sendMessage,
-    UTILITY_TEMPLATES
+    sendMessage
 } from '@/lib/facebook';
 import { chunkArray } from '@/lib/chunking';
 import fs from 'fs';
@@ -561,19 +559,13 @@ export async function POST(request: NextRequest) {
         let utilityTemplateName = DEFAULT_UTILITY_TEMPLATE_NAME;
         let utilityTemplateLanguage = DEFAULT_UTILITY_TEMPLATE_LANGUAGE;
         let utilityTemplateLookupPromise: Promise<boolean> | null = null;
-        let utilityTemplateBootstrapPromise: Promise<boolean> | null = null;
         let utilityTemplateBootstrapError: string | null = null;
 
         const resolveExistingUtilityTemplate = async (): Promise<boolean> => {
             if (!utilityTemplateLookupPromise) {
                 utilityTemplateLookupPromise = (async () => {
                     try {
-                        console.log(`🔍 Looking up templates for page ${page.fb_page_id}...`);
                         const templates = await getPageTemplates(page.fb_page_id, page.access_token);
-                        console.log(
-                            `📋 Found ${templates.length} templates on page:`,
-                            templates.map((t: any) => ({ name: t.name, language: t.language, status: t.status }))
-                        );
 
                         const utilityTemplates = templates.filter((template) => {
                             if (!template || typeof template !== 'object') return false;
@@ -605,29 +597,31 @@ export async function POST(request: NextRequest) {
                                     .join(', ');
                                 utilityTemplateBootstrapError =
                                     `Template '${DEFAULT_UTILITY_TEMPLATE_NAME}' exists but status is ${statuses}`;
-                                console.warn(`⚠️ ${utilityTemplateBootstrapError}`);
                                 return false;
                             }
 
                             if (utilityTemplates.length > 0) {
                                 const statuses = utilityTemplates
                                     .map((template) => {
-                                        const name = typeof template.name === 'string' ? template.name : 'unknown_template';
-                                        const status = normalizeTemplateStatus(template.status) || 'UNKNOWN';
+                                        const name =
+                                            typeof template.name === 'string'
+                                                ? template.name
+                                                : 'unknown_template';
+                                        const status =
+                                            normalizeTemplateStatus(template.status) || 'UNKNOWN';
                                         return `${name}:${status}`;
                                     })
                                     .join(', ');
                                 utilityTemplateBootstrapError =
                                     `No approved utility templates found. Existing statuses: ${statuses}`;
-                                console.warn(`⚠️ ${utilityTemplateBootstrapError}`);
                                 return false;
                             }
 
-                            console.log(`❌ No utility templates found on page`);
+                            utilityTemplateBootstrapError =
+                                'No utility templates found on this page. Create and approve one first.';
                             return false;
                         }
 
-                        console.log(`✅ Found existing template:`, selectedTemplate);
                         utilityTemplateName =
                             typeof selectedTemplate.name === 'string'
                                 ? selectedTemplate.name
@@ -636,19 +630,14 @@ export async function POST(request: NextRequest) {
                         const existingLanguage = extractTemplateLanguageCode(selectedTemplate);
                         if (existingLanguage) {
                             utilityTemplateLanguage = existingLanguage;
-                            console.log(
-                                `ℹ️ Found existing utility template '${utilityTemplateName}' with language '${existingLanguage}'`
-                            );
-                        } else {
-                            console.log(
-                                `ℹ️ Found existing utility template '${utilityTemplateName}' with unknown language; using '${utilityTemplateLanguage}'`
-                            );
                         }
 
                         utilityTemplateBootstrapError = null;
                         return true;
                     } catch (lookupError) {
-                        console.warn('⚠️ Failed to check existing utility templates:', lookupError);
+                        utilityTemplateBootstrapError =
+                            (lookupError as Error).message ||
+                            'Failed to fetch utility templates for this page';
                         return false;
                     }
                 })();
@@ -658,130 +647,15 @@ export async function POST(request: NextRequest) {
         };
 
         const ensureUtilityTemplateExists = async (): Promise<boolean> => {
-            console.log(
-                `🔄 ensureUtilityTemplateExists called. utilityTemplateMissing=${utilityTemplateMissing}`
-            );
-
             if (utilityTemplateMissing) {
-                console.log(`⛔ Template already marked as missing, skipping`);
                 return false;
             }
 
-            console.log(`🔍 Checking if template exists...`);
-            if (await resolveExistingUtilityTemplate()) {
-                console.log(`✅ Template found and resolved`);
-                return true;
-            }
-            console.log(`❌ Template not found, will try to create`);
-
-            if (!utilityTemplateBootstrapPromise) {
-                console.log(`🆕 Creating template bootstrap promise`);
-                utilityTemplateBootstrapPromise = (async () => {
-                    const templateDefinitions = [
-                        ...UTILITY_TEMPLATES.filter((template) => template.name === DEFAULT_UTILITY_TEMPLATE_NAME),
-                        ...UTILITY_TEMPLATES.filter((template) => template.name !== DEFAULT_UTILITY_TEMPLATE_NAME)
-                    ];
-
-                    if (templateDefinitions.length === 0) {
-                        utilityTemplateBootstrapError = 'No utility templates configured in UTILITY_TEMPLATES';
-                        console.warn('⚠️ No utility templates configured in UTILITY_TEMPLATES');
-                        return false;
-                    }
-
-                    const candidateLanguages = Array.from(
-                        new Set([
-                            utilityTemplateLanguage,
-                            DEFAULT_UTILITY_TEMPLATE_LANGUAGE,
-                            'en'
-                        ])
-                    );
-
-                    console.log(`🌍 Will try languages: ${candidateLanguages.join(', ')}`);
-
-                    for (const templateDefinition of templateDefinitions) {
-                        console.log(`📋 Template candidate:`, {
-                            name: templateDefinition.name,
-                            category: templateDefinition.category
-                        });
-
-                        for (const candidateLanguage of candidateLanguages) {
-                            const candidateTemplate = {
-                                ...templateDefinition,
-                                language: candidateLanguage
-                            };
-
-                            console.log(
-                                `📝 Trying to create template '${candidateTemplate.name}' with language '${candidateLanguage}'...`
-                            );
-
-                            try {
-                                const createdTemplate = await createUtilityTemplate(
-                                    page.fb_page_id,
-                                    page.access_token,
-                                    candidateTemplate
-                                );
-                                const createdStatus = normalizeTemplateStatus(createdTemplate.status);
-
-                                if (
-                                    createdStatus &&
-                                    !SENDABLE_TEMPLATE_STATUSES.has(createdStatus)
-                                ) {
-                                    utilityTemplateBootstrapError =
-                                        `Template '${candidateTemplate.name}' created but status is '${createdStatus}'`;
-                                    console.warn(`⚠️ ${utilityTemplateBootstrapError}`);
-                                    continue;
-                                }
-
-                                utilityTemplateName = candidateTemplate.name;
-                                utilityTemplateLanguage = candidateLanguage;
-                                utilityTemplateBootstrapError = null;
-                                utilityTemplateLookupPromise = Promise.resolve(true);
-                                console.log(
-                                    `✅ Utility template '${candidateTemplate.name}' created automatically with language '${candidateLanguage}'`
-                                );
-                                return true;
-                            } catch (bootstrapError) {
-                                const errorMsg =
-                                    (bootstrapError as Error).message ||
-                                    'Unknown template creation error';
-                                const bootstrapMessage = errorMsg.toLowerCase();
-
-                                if (
-                                    bootstrapMessage.includes('already exists') ||
-                                    bootstrapMessage.includes('duplicate')
-                                ) {
-                                    utilityTemplateLookupPromise = null;
-                                    if (await resolveExistingUtilityTemplate()) {
-                                        return true;
-                                    }
-
-                                    utilityTemplateBootstrapError = errorMsg;
-                                    continue;
-                                }
-
-                                utilityTemplateBootstrapError = errorMsg;
-                                console.warn(
-                                    `⚠️ Failed to auto-create template '${candidateTemplate.name}' with language '${candidateLanguage}':`,
-                                    bootstrapError
-                                );
-                            }
-                        }
-                    }
-
-                    console.error(`🚫 All language attempts failed. Final error: ${utilityTemplateBootstrapError}`);
-                    return false;
-                })();
-            } else {
-                console.log(`⏳ Waiting for existing bootstrap promise`);
-            }
-
-            const created = await utilityTemplateBootstrapPromise;
-            console.log(`🎯 Template bootstrap result: ${created ? 'SUCCESS' : 'FAILED'}`);
-            if (!created) {
+            const ready = await resolveExistingUtilityTemplate();
+            if (!ready) {
                 utilityTemplateMissing = true;
-                console.error(`🚫 Marking utilityTemplateMissing=true. Error: ${utilityTemplateBootstrapError}`);
             }
-            return created;
+            return ready;
         };
 
         // Process messages in parallel batches to avoid timeout and respect rate limits
@@ -834,6 +708,19 @@ export async function POST(request: NextRequest) {
 
             const batch = allContacts.slice(i, i + SEND_BATCH_SIZE);
 
+            const hasUtilityMessagesInBatch = batch.some(
+                (contact) => getMessagingType(contact.last_interaction_at) === 'UTILITY'
+            );
+            let utilityTemplateReadyInBatch = true;
+
+            if (hasUtilityMessagesInBatch && !utilityPermissionMissing && !utilityTemplateMissing) {
+                utilityTemplateReadyInBatch = await ensureUtilityTemplateExists();
+                if (!utilityTemplateReadyInBatch && !utilityTemplateBootstrapError) {
+                    utilityTemplateBootstrapError =
+                        'No approved utility template is available for this page';
+                }
+            }
+
             // #region agent log
             writeDebugLog('api/facebook/messages/send/route.ts:475', 'Send batch extracted', { sendBatchNumber, batchSize: batch.length, batchStartIndex: i, batchEndIndex: i + batch.length - 1, totalContacts: allContacts.length }, 'B');
             // #endregion
@@ -860,17 +747,14 @@ export async function POST(request: NextRequest) {
                     };
                 }
 
-                if (msgType === 'UTILITY') {
-                    const templateReady = await ensureUtilityTemplateExists();
-                    if (!templateReady) {
-                        return {
-                            success: false as const,
-                            contactId: contact.id,
-                            error: utilityTemplateBootstrapError
-                                ? `Skipped: utility template not ready for this page. ${utilityTemplateBootstrapError}`
-                                : 'Skipped: utility template not ready for this page'
-                        };
-                    }
+                if (msgType === 'UTILITY' && !utilityTemplateReadyInBatch) {
+                    return {
+                        success: false as const,
+                        contactId: contact.id,
+                        error: utilityTemplateBootstrapError
+                            ? `Skipped: utility template not ready for this page. ${utilityTemplateBootstrapError}`
+                            : 'Skipped: utility template not ready for this page'
+                    };
                 }
 
                 // Replace template variables with contact data for personalized messages
@@ -903,32 +787,10 @@ export async function POST(request: NextRequest) {
                     console.error(`❌ Send failed for contact ${contact.id}: ${errorMessage}`);
 
                     if (msgType === 'UTILITY' && isUtilityTemplateMissingError(errorMessage)) {
-                        const templateReady = await ensureUtilityTemplateExists();
-                        if (templateReady) {
-                            try {
-                                await new Promise((resolve) => setTimeout(resolve, 350));
-                                await sendMessage(
-                                    page.fb_page_id,
-                                    page.access_token,
-                                    contact.psid,
-                                    personalizedMessage,
-                                    msgType,
-                                    utilityTemplateName,
-                                    utilityTemplateLanguage
-                                );
-                                console.log(`✅ Retry succeeded after preparing utility template for contact ${contact.id}`);
-                                return { success: true as const, contactId: contact.id, error: undefined };
-                            } catch (retryError) {
-                                errorMessage = (retryError as Error).message || errorMessage;
-                            }
-                        } else {
-                            if (!utilityTemplateMissing) {
-                                utilityTemplateMissing = true;
-                            }
-                            errorMessage = utilityTemplateBootstrapError
-                                ? `Template cannot be found. ${utilityTemplateBootstrapError}`
-                                : 'Template cannot be found.';
-                        }
+                        utilityTemplateMissing = true;
+                        utilityTemplateBootstrapError =
+                            `Template '${utilityTemplateName}' is not sendable. ${errorMessage}`;
+                        errorMessage = utilityTemplateBootstrapError;
                     }
 
                     if (msgType === 'UTILITY' && isUtilityPermissionError(errorMessage)) {
