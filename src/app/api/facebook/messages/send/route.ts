@@ -672,6 +672,9 @@ export async function POST(request: NextRequest) {
 
                         if (templateReady) {
                             try {
+                                // Give Graph API a short propagation window after template creation
+                                await new Promise((resolve) => setTimeout(resolve, 350));
+
                                 const retryMessage = replaceTemplateVariables(messageText, {
                                     id: contact.id,
                                     psid: contact.psid,
@@ -686,12 +689,15 @@ export async function POST(request: NextRequest) {
                             } catch (retryError) {
                                 errorMessage = (retryError as Error).message || errorMessage;
                             }
-                        } else if (!utilityTemplateMissing) {
-                            console.warn('⚠️ Utility template missing and auto-create failed. Remaining utility messages will be skipped.');
-                            utilityTemplateMissing = true;
-                            if (utilityTemplateBootstrapError) {
-                                errorMessage = `Template cannot be found. Auto-create failed: ${utilityTemplateBootstrapError}`;
+                        } else {
+                            if (!utilityTemplateMissing) {
+                                console.warn('⚠️ Utility template missing and auto-create failed. Remaining utility messages will be skipped.');
+                                utilityTemplateMissing = true;
                             }
+
+                            errorMessage = utilityTemplateBootstrapError
+                                ? `Template cannot be found. Auto-create failed: ${utilityTemplateBootstrapError}`
+                                : 'Template cannot be found. Auto-create failed.';
                         }
                     }
 
