@@ -575,15 +575,20 @@ export async function POST(request: NextRequest) {
             if (!utilityTemplateLookupPromise) {
                 utilityTemplateLookupPromise = (async () => {
                     try {
+                        console.log(`🔍 Looking up templates for page ${page.fb_page_id}...`);
                         const templates = await getPageTemplates(page.fb_page_id, page.access_token);
+                        console.log(`📋 Found ${templates.length} templates on page:`, templates.map((t: any) => ({ name: t.name, language: t.language, status: t.status })));
+                        
                         const existingTemplate = templates.find(
                             (template) => template && template.name === DEFAULT_UTILITY_TEMPLATE_NAME
                         ) as Record<string, unknown> | undefined;
 
                         if (!existingTemplate) {
+                            console.log(`❌ Template '${DEFAULT_UTILITY_TEMPLATE_NAME}' NOT found in ${templates.length} existing templates`);
                             return false;
                         }
 
+                        console.log(`✅ Found existing template:`, existingTemplate);
                         const existingLanguage = extractTemplateLanguageCode(existingTemplate);
                         if (existingLanguage) {
                             utilityTemplateLanguage = existingLanguage;
@@ -609,15 +614,22 @@ export async function POST(request: NextRequest) {
         };
 
         const ensureUtilityTemplateExists = async (): Promise<boolean> => {
+            console.log(`🔄 ensureUtilityTemplateExists called. utilityTemplateMissing=${utilityTemplateMissing}`);
+            
             if (utilityTemplateMissing) {
+                console.log(`⛔ Template already marked as missing, skipping`);
                 return false;
             }
 
+            console.log(`🔍 Checking if template exists...`);
             if (await resolveExistingUtilityTemplate()) {
+                console.log(`✅ Template found and resolved`);
                 return true;
             }
+            console.log(`❌ Template not found, will try to create`);
 
             if (!utilityTemplateBootstrapPromise) {
+                console.log(`🆕 Creating template bootstrap promise`);
                 utilityTemplateBootstrapPromise = (async () => {
                     const template = getDefaultUtilityTemplate();
                     if (!template) {
@@ -626,6 +638,8 @@ export async function POST(request: NextRequest) {
                         return false;
                     }
 
+                    console.log(`📋 Default template:`, { name: template.name, category: template.category, components: template.components });
+                    
                     const candidateLanguages = Array.from(
                         new Set([
                             utilityTemplateLanguage,
@@ -633,12 +647,16 @@ export async function POST(request: NextRequest) {
                             'en'
                         ])
                     );
+                    
+                    console.log(`🌍 Will try languages: ${candidateLanguages.join(', ')}`);
 
                     for (const candidateLanguage of candidateLanguages) {
                         const candidateTemplate = {
                             ...template,
                             language: candidateLanguage
                         };
+                        
+                        console.log(`📝 Trying to create template with language '${candidateLanguage}'...`);
 
                         try {
                             await createUtilityTemplate(page.fb_page_id, page.access_token, candidateTemplate);
@@ -650,10 +668,10 @@ export async function POST(request: NextRequest) {
                             );
                             return true;
                         } catch (bootstrapError) {
-                            const bootstrapMessage = (
-                                (bootstrapError as Error).message ||
-                                'Unknown template creation error'
-                            ).toLowerCase();
+                            const errorMsg = (bootstrapError as Error).message || 'Unknown template creation error';
+                            console.error(`❌ Template creation failed with language '${candidateLanguage}':`, errorMsg);
+                            
+                            const bootstrapMessage = errorMsg.toLowerCase();
                             if (
                                 bootstrapMessage.includes('already exists') ||
                                 bootstrapMessage.includes('duplicate')
@@ -667,9 +685,7 @@ export async function POST(request: NextRequest) {
                                 return true;
                             }
 
-                            utilityTemplateBootstrapError =
-                                (bootstrapError as Error).message ||
-                                'Template auto-create failed';
+                            utilityTemplateBootstrapError = errorMsg;
                             console.warn(
                                 `⚠️ Failed to auto-create utility template with language '${candidateLanguage}':`,
                                 bootstrapError
@@ -677,13 +693,18 @@ export async function POST(request: NextRequest) {
                         }
                     }
 
+                    console.error(`🚫 All language attempts failed. Final error: ${utilityTemplateBootstrapError}`);
                     return false;
                 })();
+            } else {
+                console.log(`⏳ Waiting for existing bootstrap promise`);
             }
 
             const created = await utilityTemplateBootstrapPromise;
+            console.log(`🎯 Template bootstrap result: ${created ? 'SUCCESS' : 'FAILED'}`);
             if (!created) {
                 utilityTemplateMissing = true;
+                console.error(`🚫 Marking utilityTemplateMissing=true. Error: ${utilityTemplateBootstrapError}`);
             }
             return created;
         };
@@ -774,6 +795,7 @@ export async function POST(request: NextRequest) {
                         last_interaction_at: contact.last_interaction_at
                     });
 
+                    console.log(`📤 Sending ${msgType} message to contact ${contact.id}. Template language: ${utilityTemplateLanguage}`);
                     await sendMessage(
                         page.fb_page_id,
                         page.access_token,
@@ -788,12 +810,16 @@ export async function POST(request: NextRequest) {
                     return { success: true as const, contactId: contact.id, error: undefined };
                 } catch (error) {
                     let errorMessage = (error as Error).message || 'Unknown error';
+                    console.error(`❌ Send failed for contact ${contact.id}: ${errorMessage}`);
 
                     if (msgType === 'UTILITY' && isUtilityTemplateMissingError(errorMessage)) {
+                        console.log(`🔧 Template missing error detected, attempting to ensure template exists...`);
                         const templateReady = await ensureUtilityTemplateExists();
+                        console.log(`🔧 Template ensure result: ${templateReady ? 'READY' : 'FAILED'}`);
 
                         if (templateReady) {
                             try {
+                                console.log(`⏳ Waiting 350ms for template propagation...`);
                                 // Give Graph API a short propagation window after template creation
                                 await new Promise((resolve) => setTimeout(resolve, 350));
 
@@ -805,6 +831,7 @@ export async function POST(request: NextRequest) {
                                     last_interaction_at: contact.last_interaction_at
                                 });
 
+                                console.log(`🔄 Retrying send with template language: ${utilityTemplateLanguage}`);
                                 await sendMessage(
                                     page.fb_page_id,
                                     page.access_token,
@@ -817,7 +844,9 @@ export async function POST(request: NextRequest) {
                                 console.log(`✅ Retry succeeded after creating utility template for contact ${contact.id}`);
                                 return { success: true as const, contactId: contact.id, error: undefined };
                             } catch (retryError) {
-                                errorMessage = (retryError as Error).message || errorMessage;
+                                const retryErrorMsg = (retryError as Error).message || 'Unknown retry error';
+                                console.error(`❌ Retry failed for contact ${contact.id}: ${retryErrorMsg}`);
+                                errorMessage = retryErrorMsg;
                             }
                         } else {
                             if (!utilityTemplateMissing) {
