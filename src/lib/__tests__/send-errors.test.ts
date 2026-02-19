@@ -43,6 +43,10 @@ describe('mergeSendErrors', () => {
         ).toBe('utility_template_missing');
 
         expect(
+            categorizeSendError("Skipped: utility template not ready for this page. Template 'account_general_notification' exists but status is REJECTED, REJECTED")
+        ).toBe('utility_template_missing');
+
+        expect(
             categorizeSendError("(#551) This person isn't available right now.")
         ).toBe('recipient_unavailable');
 
@@ -55,13 +59,19 @@ describe('mergeSendErrors', () => {
             isRetryableSendError('Requires pages_utility_messaging permission to manage the object')
         ).toBe(false);
         expect(isRetryableSendError('(#100) Template cannot be found.')).toBe(false);
+        expect(
+            isRetryableSendError("Skipped: utility template not ready for this page. Template 'account_general_notification' exists but status is REJECTED, REJECTED")
+        ).toBe(false);
         expect(isRetryableSendError("(#551) This person isn't available right now.")).toBe(false);
     });
 
     it('summarizes send error categories', () => {
         const summary = summarizeSendErrors([
             { contactId: 'a', error: 'Requires pages_utility_messaging permission to manage the object' },
-            { contactId: 'x', error: '(#100) Template cannot be found.' },
+            {
+                contactId: 'x',
+                error: "Skipped: utility template not ready for this page. Template 'account_general_notification' exists but status is REJECTED, REJECTED"
+            },
             { contactId: 'b', error: "(#551) This person isn't available right now." },
             { contactId: 'c', error: 'Timeout' },
             { contactId: 'd', error: 'Requires pages_utility_messaging permission to manage the object' }

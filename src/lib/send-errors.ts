@@ -19,7 +19,12 @@ export function categorizeSendError(error: string): SendErrorCategory {
     if (
         normalized.includes('template cannot be found') ||
         normalized.includes('missing utility template') ||
-        normalized.includes('utility template not found')
+        normalized.includes('utility template not found') ||
+        normalized.includes('utility template not ready') ||
+        normalized.includes('no approved utility templates') ||
+        normalized.includes('template exists but status is') ||
+        normalized.includes('is not sendable') ||
+        normalized.includes('status is rejected')
     ) {
         return 'utility_template_missing';
     }

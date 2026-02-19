@@ -790,7 +790,7 @@ export default function ContactsPage() {
                 }
 
                 if (failedErrorSummary.utilityTemplateMissing > 0) {
-                    message += `\n⚠️ ${failedErrorSummary.utilityTemplateMissing} failed because utility template is missing (#100).`;
+                    message += `\n⚠️ ${failedErrorSummary.utilityTemplateMissing} failed because utility template is not approved/available (#100).`;
                 }
 
                 if (failedErrorSummary.recipientUnavailable > 0) {
@@ -883,7 +883,7 @@ export default function ContactsPage() {
                     }
 
                     if (retryErrorSummary.utilityTemplateMissing > 0) {
-                        message += `\n⚠️ ${retryErrorSummary.utilityTemplateMissing} failed because utility template is missing (#100).`;
+                        message += `\n⚠️ ${retryErrorSummary.utilityTemplateMissing} failed because utility template is not approved/available (#100).`;
                     }
 
                     if (retryErrorSummary.recipientUnavailable > 0) {
@@ -1460,7 +1460,7 @@ export default function ContactsPage() {
                             )}
                             {failedErrorSummary.utilityTemplateMissing > 0 && (
                                 <p className="font-mono text-xs text-red-800 mb-1">
-                                    {failedErrorSummary.utilityTemplateMissing} failed because utility template is missing (#100).
+                                    {failedErrorSummary.utilityTemplateMissing} failed because utility template is not approved/available (#100).
                                 </p>
                             )}
                             {failedErrorSummary.recipientUnavailable > 0 && (
