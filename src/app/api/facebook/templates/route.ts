@@ -4,7 +4,11 @@ import { authOptions } from '@/lib/auth';
 import { getSupabaseAdmin } from '@/lib/supabase';
 import { createUtilityTemplate, getPageTemplates, UTILITY_TEMPLATES, UtilityTemplate } from '@/lib/facebook';
 
-type BodyOnlyTemplateInput = string | { name?: string; text: string };
+type BodyOnlyTemplateInput = string | { name?: string; text: string; headline?: string };
+
+function sanitizeFooterText(rawText: string): string {
+    return rawText.trim().slice(0, 60);
+}
 
 function sanitizeTemplateName(rawName: string): string {
     const normalized = rawName
@@ -18,49 +22,67 @@ function sanitizeTemplateName(rawName: string): string {
 
 function buildBodyOnlyTemplates(
     templateInputs: BodyOnlyTemplateInput[],
-    namePrefix: string
+    namePrefix: string,
+    defaultHeadlineBelow?: string
 ): Omit<UtilityTemplate, 'language'>[] {
     const usedNames = new Set<string>();
 
     const templates: Omit<UtilityTemplate, 'language'>[] = [];
 
     templateInputs.forEach((entry, index) => {
-            const text = typeof entry === 'string' ? entry.trim() : entry?.text?.trim() || '';
-            if (!text) {
-                return;
+        const text = typeof entry === 'string' ? entry.trim() : entry?.text?.trim() || '';
+        if (!text) {
+            return;
+        }
+
+        const preferredName =
+            typeof entry === 'string'
+                ? `${namePrefix}_${index + 1}`
+                : entry.name || `${namePrefix}_${index + 1}`;
+
+        const baseName = sanitizeTemplateName(preferredName);
+        let finalName = baseName;
+        let suffix = 2;
+
+        while (usedNames.has(finalName)) {
+            const candidate = `${baseName}_${suffix}`;
+            finalName = sanitizeTemplateName(candidate);
+            suffix += 1;
+        }
+
+        usedNames.add(finalName);
+
+        const entryHeadline =
+            typeof entry === 'string'
+                ? defaultHeadlineBelow
+                : entry.headline?.trim() || defaultHeadlineBelow;
+
+        const components: UtilityTemplate['components'] = [
+            {
+                type: 'BODY' as const,
+                text: '{{1}}',
+                example: {
+                    body_text: [[text]]
+                }
             }
+        ];
 
-            const preferredName =
-                typeof entry === 'string'
-                    ? `${namePrefix}_${index + 1}`
-                    : entry.name || `${namePrefix}_${index + 1}`;
-
-            const baseName = sanitizeTemplateName(preferredName);
-            let finalName = baseName;
-            let suffix = 2;
-
-            while (usedNames.has(finalName)) {
-                const candidate = `${baseName}_${suffix}`;
-                finalName = sanitizeTemplateName(candidate);
-                suffix += 1;
+        if (entryHeadline) {
+            const footerText = sanitizeFooterText(entryHeadline);
+            if (footerText) {
+                components.push({
+                    type: 'FOOTER' as const,
+                    text: footerText
+                });
             }
+        }
 
-            usedNames.add(finalName);
-
-            templates.push({
-                name: finalName,
-                category: 'UTILITY' as const,
-                components: [
-                    {
-                        type: 'BODY' as const,
-                        text: '{{1}}',
-                        example: {
-                            body_text: [[text]]
-                        }
-                    }
-                ]
-            });
+        templates.push({
+            name: finalName,
+            category: 'UTILITY' as const,
+            components
         });
+    });
 
     return templates;
 }
@@ -145,8 +167,13 @@ export async function POST(request: NextRequest) {
             templates: customTemplates,
             bodyTemplates,
             customTexts,
-            namePrefix = 'account_custom_notice'
+            namePrefix = 'account_custom_notice',
+            headlineText
         } = body;
+
+        const normalizedHeadlineText =
+            typeof headlineText === 'string' ? headlineText.trim() : '';
+        const headlineBelowText = normalizedHeadlineText || undefined;
 
         if (!pageId) {
             return NextResponse.json(
@@ -187,9 +214,17 @@ export async function POST(request: NextRequest) {
         let templatesToCreate: Omit<UtilityTemplate, 'language'>[] = [];
 
         if (Array.isArray(bodyTemplates) && bodyTemplates.length > 0) {
-            templatesToCreate = buildBodyOnlyTemplates(bodyTemplates as BodyOnlyTemplateInput[], namePrefix);
+            templatesToCreate = buildBodyOnlyTemplates(
+                bodyTemplates as BodyOnlyTemplateInput[],
+                namePrefix,
+                headlineBelowText
+            );
         } else if (Array.isArray(customTexts) && customTexts.length > 0) {
-            templatesToCreate = buildBodyOnlyTemplates(customTexts as BodyOnlyTemplateInput[], namePrefix);
+            templatesToCreate = buildBodyOnlyTemplates(
+                customTexts as BodyOnlyTemplateInput[],
+                namePrefix,
+                headlineBelowText
+            );
         } else if (Array.isArray(customTemplates) && customTemplates.length > 0) {
             templatesToCreate = customTemplates;
         } else {

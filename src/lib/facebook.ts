@@ -353,7 +353,7 @@ export interface UtilityTemplate {
 }
 
 export interface TemplateComponent {
-    type: 'BODY' | 'HEADER' | 'BUTTONS';
+    type: 'BODY' | 'HEADER' | 'FOOTER' | 'BUTTONS';
     text?: string;
     format?: 'TEXT' | 'IMAGE';
     example?: {
