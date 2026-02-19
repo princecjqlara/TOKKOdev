@@ -56,6 +56,30 @@ describe('sendMessage', () => {
         expect(payload.message.template.language.code).toBe('es_ES');
     });
 
+    it('supports utility templates without body parameters', async () => {
+        const fetchMock = vi
+            .fn()
+            .mockResolvedValue(createJsonResponse(true, { message_id: 'mid.no-params' }));
+        vi.stubGlobal('fetch', fetchMock);
+
+        await sendMessage(
+            'page_1',
+            'token_1',
+            'psid_1',
+            'ignored',
+            'UTILITY',
+            'active_chatbot_auto',
+            'en_US',
+            []
+        );
+
+        const [, requestInit] = fetchMock.mock.calls[0];
+        const payload = JSON.parse((requestInit as RequestInit).body as string);
+        expect(payload.message.template.name).toBe('active_chatbot_auto');
+        expect(payload.message.template.language.code).toBe('en_US');
+        expect(payload.message.template.components).toBeUndefined();
+    });
+
     it('throws facebook api error message when send fails', async () => {
         const fetchMock = vi
             .fn()

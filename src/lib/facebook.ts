@@ -159,7 +159,8 @@ export async function sendMessage(
     messageText: string,
     messagingType: 'RESPONSE' | 'HUMAN_AGENT' | 'UTILITY' = 'HUMAN_AGENT',
     templateName?: string,
-    templateLanguage: string = DEFAULT_UTILITY_LANGUAGE
+    templateLanguage: string = DEFAULT_UTILITY_LANGUAGE,
+    templateBodyParameters?: string[]
 ): Promise<{ message_id: string }> {
     // Build the request payload based on messaging type
     let bodyPayload: Record<string, unknown>;
@@ -167,22 +168,39 @@ export async function sendMessage(
     if (messagingType === 'UTILITY') {
         // Utility message with template - no time window restrictions
         const template = templateName || DEFAULT_UTILITY_TEMPLATE;
+        const templatePayload: Record<string, unknown> = {
+            name: template,
+            language: { code: templateLanguage }
+        };
+
+        if (Array.isArray(templateBodyParameters)) {
+            if (templateBodyParameters.length > 0) {
+                templatePayload.components = [
+                    {
+                        type: 'body',
+                        parameters: templateBodyParameters.map((text) => ({
+                            type: 'text',
+                            text
+                        }))
+                    }
+                ];
+            }
+        } else {
+            templatePayload.components = [
+                {
+                    type: 'body',
+                    parameters: [
+                        { type: 'text', text: messageText }
+                    ]
+                }
+            ];
+        }
+
         bodyPayload = {
             recipient: { id: recipientPsid },
             messaging_type: 'UTILITY',
             message: {
-                template: {
-                    name: template,
-                    language: { code: templateLanguage },
-                    components: [
-                        {
-                            type: 'body',
-                            parameters: [
-                                { type: 'text', text: messageText }
-                            ]
-                        }
-                    ]
-                }
+                template: templatePayload
             }
         };
     } else if (messagingType === 'HUMAN_AGENT') {

@@ -49,6 +49,12 @@ function isUtilityTemplateMissingError(errorMessage: string): boolean {
 const DEFAULT_UTILITY_TEMPLATE_NAME = 'account_general_notification';
 const DEFAULT_UTILITY_TEMPLATE_LANGUAGE = 'en_US';
 const SENDABLE_TEMPLATE_STATUSES = new Set(['APPROVED', 'ACTIVE']);
+const PREFERRED_UTILITY_TEMPLATE_NAMES = [
+    'Active Chatbot AUTO',
+    'active_chatbot_auto',
+    'order_delivery_update_1',
+    DEFAULT_UTILITY_TEMPLATE_NAME
+];
 
 function normalizeTemplateStatus(status: unknown): string | null {
     if (typeof status !== 'string') return null;
@@ -60,6 +66,82 @@ function normalizeLanguageCode(language: string | null | undefined): string | nu
     if (!language) return null;
     const normalized = language.trim().replace('-', '_');
     return normalized || null;
+}
+
+function normalizeTemplateNameForMatch(name: string): string {
+    return name.trim().toLowerCase().replace(/[^a-z0-9]/g, '');
+}
+
+function extractBodyPlaceholderCount(template: Record<string, unknown>): number {
+    const components = template.components;
+    if (!Array.isArray(components)) {
+        return 1;
+    }
+
+    const bodyComponent = components.find((component) => {
+        if (!component || typeof component !== 'object') return false;
+        const type = (component as Record<string, unknown>).type;
+        return typeof type === 'string' && type.toUpperCase() === 'BODY';
+    }) as Record<string, unknown> | undefined;
+
+    if (!bodyComponent) {
+        return 0;
+    }
+
+    const text = typeof bodyComponent.text === 'string' ? bodyComponent.text : '';
+    if (!text) {
+        return 0;
+    }
+
+    const placeholderMatches = text.match(/\{\{\d+\}\}/g);
+    return placeholderMatches ? placeholderMatches.length : 0;
+}
+
+function extractBodyTemplateText(template: Record<string, unknown>): string {
+    const components = template.components;
+    if (!Array.isArray(components)) {
+        return '';
+    }
+
+    const bodyComponent = components.find((component) => {
+        if (!component || typeof component !== 'object') return false;
+        const type = (component as Record<string, unknown>).type;
+        return typeof type === 'string' && type.toUpperCase() === 'BODY';
+    }) as Record<string, unknown> | undefined;
+
+    return typeof bodyComponent?.text === 'string' ? bodyComponent.text : '';
+}
+
+function buildUtilityBodyParameters(
+    placeholderCount: number,
+    message: string,
+    contact: Pick<ContactRecord, 'id' | 'name'>,
+    templateBodyText: string
+): string[] {
+    if (placeholderCount <= 0) {
+        return [];
+    }
+
+    if (placeholderCount === 1) {
+        return [message];
+    }
+
+    const firstName = contact.name?.trim().split(/\s+/)[0] || 'there';
+    const contactReference = contact.id.replace(/-/g, '').slice(0, 8) || '00000000';
+    const normalizedBodyText = templateBodyText.toLowerCase();
+    const looksLikeOrderTemplate =
+        normalizedBodyText.includes('order') ||
+        normalizedBodyText.includes('delivery') ||
+        normalizedBodyText.includes('tracking');
+
+    const parameters = [firstName];
+    parameters.push(looksLikeOrderTemplate ? contactReference : message);
+
+    for (let i = 2; i < placeholderCount; i += 1) {
+        parameters.push(message);
+    }
+
+    return parameters;
 }
 
 function extractTemplateLanguageCode(template: Record<string, unknown>): string | null {
@@ -558,6 +640,8 @@ export async function POST(request: NextRequest) {
         let utilityTemplateMissing = false;
         let utilityTemplateName = DEFAULT_UTILITY_TEMPLATE_NAME;
         let utilityTemplateLanguage = DEFAULT_UTILITY_TEMPLATE_LANGUAGE;
+        let utilityTemplateBodyPlaceholderCount = 1;
+        let utilityTemplateBodyText = '';
         let utilityTemplateLookupPromise: Promise<boolean> | null = null;
         let utilityTemplateBootstrapError: string | null = null;
 
@@ -574,9 +658,16 @@ export async function POST(request: NextRequest) {
                             return category.toUpperCase() === 'UTILITY';
                         }) as Record<string, unknown>[];
 
-                        const preferredTemplates = utilityTemplates.filter(
-                            (template) => template.name === DEFAULT_UTILITY_TEMPLATE_NAME
+                        const preferredNameSet = new Set(
+                            PREFERRED_UTILITY_TEMPLATE_NAMES.map(normalizeTemplateNameForMatch)
                         );
+
+                        const preferredTemplates = utilityTemplates.filter((template) => {
+                            if (typeof template.name !== 'string') return false;
+                            return preferredNameSet.has(
+                                normalizeTemplateNameForMatch(template.name)
+                            );
+                        });
 
                         const sendablePreferredTemplate = preferredTemplates.find((template) => {
                             const status = normalizeTemplateStatus(template.status);
@@ -593,10 +684,18 @@ export async function POST(request: NextRequest) {
                         if (!selectedTemplate) {
                             if (preferredTemplates.length > 0) {
                                 const statuses = preferredTemplates
-                                    .map((template) => normalizeTemplateStatus(template.status) || 'UNKNOWN')
+                                    .map((template) => {
+                                        const name =
+                                            typeof template.name === 'string'
+                                                ? template.name
+                                                : 'unknown_template';
+                                        const status =
+                                            normalizeTemplateStatus(template.status) || 'UNKNOWN';
+                                        return `${name}:${status}`;
+                                    })
                                     .join(', ');
                                 utilityTemplateBootstrapError =
-                                    `Template '${DEFAULT_UTILITY_TEMPLATE_NAME}' exists but status is ${statuses}`;
+                                    `Preferred utility templates are not approved. Current statuses: ${statuses}`;
                                 return false;
                             }
 
@@ -631,6 +730,10 @@ export async function POST(request: NextRequest) {
                         if (existingLanguage) {
                             utilityTemplateLanguage = existingLanguage;
                         }
+
+                        utilityTemplateBodyPlaceholderCount =
+                            extractBodyPlaceholderCount(selectedTemplate);
+                        utilityTemplateBodyText = extractBodyTemplateText(selectedTemplate);
 
                         utilityTemplateBootstrapError = null;
                         return true;
@@ -767,8 +870,18 @@ export async function POST(request: NextRequest) {
                 });
 
                 try {
+                    const utilityBodyParameters =
+                        msgType === 'UTILITY'
+                            ? buildUtilityBodyParameters(
+                                utilityTemplateBodyPlaceholderCount,
+                                personalizedMessage,
+                                contact,
+                                utilityTemplateBodyText
+                            )
+                            : undefined;
+
                     console.log(
-                        `📤 Sending ${msgType} message to contact ${contact.id}. Template: ${utilityTemplateName} (${utilityTemplateLanguage})`
+                        `📤 Sending ${msgType} message to contact ${contact.id}. Template: ${utilityTemplateName} (${utilityTemplateLanguage}) params=${utilityBodyParameters?.length ?? 0}`
                     );
                     await sendMessage(
                         page.fb_page_id,
@@ -777,7 +890,8 @@ export async function POST(request: NextRequest) {
                         personalizedMessage,
                         msgType,
                         msgType === 'UTILITY' ? utilityTemplateName : undefined,
-                        utilityTemplateLanguage
+                        utilityTemplateLanguage,
+                        utilityBodyParameters
                     );
                     console.log(`✅ Successfully sent message to contact ${contact.id} (PSID: ${contact.psid})`);
 
