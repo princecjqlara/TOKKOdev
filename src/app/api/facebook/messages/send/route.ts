@@ -1,7 +1,12 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getSessionFromRequest } from '@/lib/get-session';
 import { getSupabaseAdmin } from '@/lib/supabase';
-import { createUtilityTemplate, sendMessage, UTILITY_TEMPLATES } from '@/lib/facebook';
+import {
+    createUtilityTemplate,
+    getPageTemplates,
+    sendMessage,
+    UTILITY_TEMPLATES
+} from '@/lib/facebook';
 import { chunkArray } from '@/lib/chunking';
 import fs from 'fs';
 import path from 'path';
@@ -59,6 +64,36 @@ function getDefaultUtilityTemplate() {
         ...baseTemplate,
         language: DEFAULT_UTILITY_TEMPLATE_LANGUAGE
     };
+}
+
+function normalizeLanguageCode(language: string | null | undefined): string | null {
+    if (!language) return null;
+    const normalized = language.trim().replace('-', '_');
+    return normalized || null;
+}
+
+function extractTemplateLanguageCode(template: Record<string, unknown>): string | null {
+    const directLanguage = template.language;
+    if (typeof directLanguage === 'string') {
+        return normalizeLanguageCode(directLanguage);
+    }
+
+    if (directLanguage && typeof directLanguage === 'object') {
+        const languageObject = directLanguage as Record<string, unknown>;
+        const nestedCode =
+            (typeof languageObject.code === 'string' && languageObject.code) ||
+            (typeof languageObject.locale === 'string' && languageObject.locale) ||
+            (typeof languageObject.name === 'string' && languageObject.name) ||
+            null;
+        return normalizeLanguageCode(nestedCode);
+    }
+
+    const locale = template.locale;
+    if (typeof locale === 'string') {
+        return normalizeLanguageCode(locale);
+    }
+
+    return null;
 }
 
 // Template variable replacements for personalized messages
@@ -531,12 +566,55 @@ export async function POST(request: NextRequest) {
 
         let utilityPermissionMissing = false;
         let utilityTemplateMissing = false;
+        let utilityTemplateLanguage = DEFAULT_UTILITY_TEMPLATE_LANGUAGE;
+        let utilityTemplateLookupPromise: Promise<boolean> | null = null;
         let utilityTemplateBootstrapPromise: Promise<boolean> | null = null;
         let utilityTemplateBootstrapError: string | null = null;
+
+        const resolveExistingUtilityTemplate = async (): Promise<boolean> => {
+            if (!utilityTemplateLookupPromise) {
+                utilityTemplateLookupPromise = (async () => {
+                    try {
+                        const templates = await getPageTemplates(page.fb_page_id, page.access_token);
+                        const existingTemplate = templates.find(
+                            (template) => template && template.name === DEFAULT_UTILITY_TEMPLATE_NAME
+                        ) as Record<string, unknown> | undefined;
+
+                        if (!existingTemplate) {
+                            return false;
+                        }
+
+                        const existingLanguage = extractTemplateLanguageCode(existingTemplate);
+                        if (existingLanguage) {
+                            utilityTemplateLanguage = existingLanguage;
+                            console.log(
+                                `ℹ️ Found existing utility template '${DEFAULT_UTILITY_TEMPLATE_NAME}' with language '${existingLanguage}'`
+                            );
+                        } else {
+                            console.log(
+                                `ℹ️ Found existing utility template '${DEFAULT_UTILITY_TEMPLATE_NAME}' with unknown language; using '${utilityTemplateLanguage}'`
+                            );
+                        }
+
+                        utilityTemplateBootstrapError = null;
+                        return true;
+                    } catch (lookupError) {
+                        console.warn('⚠️ Failed to check existing utility templates:', lookupError);
+                        return false;
+                    }
+                })();
+            }
+
+            return utilityTemplateLookupPromise;
+        };
 
         const ensureUtilityTemplateExists = async (): Promise<boolean> => {
             if (utilityTemplateMissing) {
                 return false;
+            }
+
+            if (await resolveExistingUtilityTemplate()) {
+                return true;
             }
 
             if (!utilityTemplateBootstrapPromise) {
@@ -548,22 +626,58 @@ export async function POST(request: NextRequest) {
                         return false;
                     }
 
-                    try {
-                        await createUtilityTemplate(page.fb_page_id, page.access_token, template);
-                        console.log(`✅ Utility template '${template.name}' created automatically`);
-                        return true;
-                    } catch (bootstrapError) {
-                        const bootstrapMessage = ((bootstrapError as Error).message || 'Unknown template creation error').toLowerCase();
-                        if (bootstrapMessage.includes('already exists') || bootstrapMessage.includes('duplicate')) {
-                            console.log(`ℹ️ Utility template '${template.name}' already exists`);
-                            utilityTemplateBootstrapError = null;
-                            return true;
-                        }
+                    const candidateLanguages = Array.from(
+                        new Set([
+                            utilityTemplateLanguage,
+                            DEFAULT_UTILITY_TEMPLATE_LANGUAGE,
+                            'en'
+                        ])
+                    );
 
-                        utilityTemplateBootstrapError = (bootstrapError as Error).message || 'Template auto-create failed';
-                        console.warn('⚠️ Failed to auto-create utility template:', bootstrapError);
-                        return false;
+                    for (const candidateLanguage of candidateLanguages) {
+                        const candidateTemplate = {
+                            ...template,
+                            language: candidateLanguage
+                        };
+
+                        try {
+                            await createUtilityTemplate(page.fb_page_id, page.access_token, candidateTemplate);
+                            utilityTemplateLanguage = candidateLanguage;
+                            utilityTemplateBootstrapError = null;
+                            utilityTemplateLookupPromise = Promise.resolve(true);
+                            console.log(
+                                `✅ Utility template '${candidateTemplate.name}' created automatically with language '${candidateLanguage}'`
+                            );
+                            return true;
+                        } catch (bootstrapError) {
+                            const bootstrapMessage = (
+                                (bootstrapError as Error).message ||
+                                'Unknown template creation error'
+                            ).toLowerCase();
+                            if (
+                                bootstrapMessage.includes('already exists') ||
+                                bootstrapMessage.includes('duplicate')
+                            ) {
+                                utilityTemplateLanguage = candidateLanguage;
+                                utilityTemplateBootstrapError = null;
+                                utilityTemplateLookupPromise = Promise.resolve(true);
+                                console.log(
+                                    `ℹ️ Utility template '${candidateTemplate.name}' already exists (language '${candidateLanguage}')`
+                                );
+                                return true;
+                            }
+
+                            utilityTemplateBootstrapError =
+                                (bootstrapError as Error).message ||
+                                'Template auto-create failed';
+                            console.warn(
+                                `⚠️ Failed to auto-create utility template with language '${candidateLanguage}':`,
+                                bootstrapError
+                            );
+                        }
                     }
+
+                    return false;
                 })();
             }
 
@@ -660,7 +774,15 @@ export async function POST(request: NextRequest) {
                         last_interaction_at: contact.last_interaction_at
                     });
 
-                    await sendMessage(page.fb_page_id, page.access_token, contact.psid, personalizedMessage, msgType);
+                    await sendMessage(
+                        page.fb_page_id,
+                        page.access_token,
+                        contact.psid,
+                        personalizedMessage,
+                        msgType,
+                        undefined,
+                        utilityTemplateLanguage
+                    );
                     console.log(`✅ Successfully sent message to contact ${contact.id} (PSID: ${contact.psid})`);
 
                     return { success: true as const, contactId: contact.id, error: undefined };
@@ -683,7 +805,15 @@ export async function POST(request: NextRequest) {
                                     last_interaction_at: contact.last_interaction_at
                                 });
 
-                                await sendMessage(page.fb_page_id, page.access_token, contact.psid, retryMessage, msgType);
+                                await sendMessage(
+                                    page.fb_page_id,
+                                    page.access_token,
+                                    contact.psid,
+                                    retryMessage,
+                                    msgType,
+                                    undefined,
+                                    utilityTemplateLanguage
+                                );
                                 console.log(`✅ Retry succeeded after creating utility template for contact ${contact.id}`);
                                 return { success: true as const, contactId: contact.id, error: undefined };
                             } catch (retryError) {

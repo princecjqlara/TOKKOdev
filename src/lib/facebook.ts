@@ -393,14 +393,28 @@ export async function createUtilityTemplate(
     if (!response.ok) {
         const errorData = await response.json().catch(() => ({ error: { message: 'Unknown error' } }));
         const errorMessage = errorData.error?.message || `HTTP ${response.status}: ${response.statusText}`;
+        const errorCode = errorData.error?.code;
+        const errorSubcode = errorData.error?.error_subcode;
+        const errorDetails =
+            errorData.error?.error_data?.details ||
+            errorData.error?.error_user_msg ||
+            null;
+        const diagnosticParts = [
+            errorMessage,
+            typeof errorCode !== 'undefined' ? `code=${errorCode}` : null,
+            typeof errorSubcode !== 'undefined' ? `subcode=${errorSubcode}` : null,
+            errorDetails ? `details=${errorDetails}` : null
+        ].filter(Boolean);
+        const diagnosticMessage = diagnosticParts.join(' | ');
+
         console.error('🔴 Facebook create template error:', {
             pageId,
             templateName: template.name,
             status: response.status,
-            error: errorMessage,
+            error: diagnosticMessage,
             fullError: errorData
         });
-        throw new Error(errorMessage);
+        throw new Error(diagnosticMessage);
     }
 
     const result = await response.json();
