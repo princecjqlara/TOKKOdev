@@ -105,9 +105,23 @@ function isExactOfferBodyTemplate(template: Record<string, unknown>): boolean {
     return /\{\{1\}\}\n.+\sstatus update$/.test(bodyText);
 }
 
+function isSupportTeamTemplate(template: Record<string, unknown>): boolean {
+    const bodyText = extractBodyTemplateText(template)
+        .replace(/\r\n/g, '\n')
+        .trim()
+        .toLowerCase();
+    return /\{\{1\}\}.+support team.*\{\{2\}\}/.test(bodyText);
+}
+
 function hasEditablePlaceholder(template: Record<string, unknown>): boolean {
     const bodyText = extractBodyTemplateText(template);
     return /\{\{1\}\}/.test(bodyText);
+}
+
+function countPlaceholders(template: Record<string, unknown>): number {
+    const bodyText = extractBodyTemplateText(template);
+    const matches = bodyText.match(/\{\{\d+\}\}/g);
+    return matches ? matches.length : 0;
 }
 
 function buildPageStatusHeadline(pageName?: string | null): string {
@@ -750,15 +764,19 @@ export async function POST(request: NextRequest) {
                             return status && SENDABLE_TEMPLATE_STATUSES.has(status);
                         });
 
-                        const exactMatch = sendableTemplates.find((template) => {
-                            return isExactOfferBodyTemplate(template);
+                        const supportTeamTemplate = sendableTemplates.find((template) => {
+                            return isSupportTeamTemplate(template) && countPlaceholders(template) === 2;
+                        });
+
+                        const twoPlaceholderTemplate = sendableTemplates.find((template) => {
+                            return countPlaceholders(template) === 2;
                         });
 
                         const anyApprovedWithPlaceholder = sendableTemplates.find((template) => {
                             return hasEditablePlaceholder(template);
                         });
 
-                        const selectedTemplate = exactMatch || anyApprovedWithPlaceholder;
+                        const selectedTemplate = supportTeamTemplate || twoPlaceholderTemplate || anyApprovedWithPlaceholder;
 
                         if (!selectedTemplate) {
                             if (utilityTemplates.length > 0) {
