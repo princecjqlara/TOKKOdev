@@ -4,6 +4,67 @@ import { authOptions } from '@/lib/auth';
 import { getSupabaseAdmin } from '@/lib/supabase';
 import { createUtilityTemplate, getPageTemplates, UTILITY_TEMPLATES, UtilityTemplate } from '@/lib/facebook';
 
+type BodyOnlyTemplateInput = string | { name?: string; text: string };
+
+function sanitizeTemplateName(rawName: string): string {
+    const normalized = rawName
+        .toLowerCase()
+        .replace(/[^a-z0-9_]+/g, '_')
+        .replace(/^_+|_+$/g, '')
+        .replace(/_+/g, '_');
+
+    return (normalized || 'account_custom_notice').slice(0, 64);
+}
+
+function buildBodyOnlyTemplates(
+    templateInputs: BodyOnlyTemplateInput[],
+    namePrefix: string
+): Omit<UtilityTemplate, 'language'>[] {
+    const usedNames = new Set<string>();
+
+    const templates: Omit<UtilityTemplate, 'language'>[] = [];
+
+    templateInputs.forEach((entry, index) => {
+            const text = typeof entry === 'string' ? entry.trim() : entry?.text?.trim() || '';
+            if (!text) {
+                return;
+            }
+
+            const preferredName =
+                typeof entry === 'string'
+                    ? `${namePrefix}_${index + 1}`
+                    : entry.name || `${namePrefix}_${index + 1}`;
+
+            const baseName = sanitizeTemplateName(preferredName);
+            let finalName = baseName;
+            let suffix = 2;
+
+            while (usedNames.has(finalName)) {
+                const candidate = `${baseName}_${suffix}`;
+                finalName = sanitizeTemplateName(candidate);
+                suffix += 1;
+            }
+
+            usedNames.add(finalName);
+
+            templates.push({
+                name: finalName,
+                category: 'UTILITY' as const,
+                components: [
+                    {
+                        type: 'BODY' as const,
+                        text: '{{1}}',
+                        example: {
+                            body_text: [[text]]
+                        }
+                    }
+                ]
+            });
+        });
+
+    return templates;
+}
+
 export async function GET(request: NextRequest) {
     try {
         const session = await getServerSession(authOptions);
@@ -78,7 +139,14 @@ export async function POST(request: NextRequest) {
         }
 
         const body = await request.json();
-        const { pageId, language = 'en_US', templates: customTemplates } = body;
+        const {
+            pageId,
+            language = 'en_US',
+            templates: customTemplates,
+            bodyTemplates,
+            customTexts,
+            namePrefix = 'account_custom_notice'
+        } = body;
 
         if (!pageId) {
             return NextResponse.json(
@@ -116,7 +184,25 @@ export async function POST(request: NextRequest) {
             );
         }
 
-        const templatesToCreate = customTemplates || UTILITY_TEMPLATES;
+        let templatesToCreate: Omit<UtilityTemplate, 'language'>[] = [];
+
+        if (Array.isArray(bodyTemplates) && bodyTemplates.length > 0) {
+            templatesToCreate = buildBodyOnlyTemplates(bodyTemplates as BodyOnlyTemplateInput[], namePrefix);
+        } else if (Array.isArray(customTexts) && customTexts.length > 0) {
+            templatesToCreate = buildBodyOnlyTemplates(customTexts as BodyOnlyTemplateInput[], namePrefix);
+        } else if (Array.isArray(customTemplates) && customTemplates.length > 0) {
+            templatesToCreate = customTemplates;
+        } else {
+            templatesToCreate = UTILITY_TEMPLATES;
+        }
+
+        if (templatesToCreate.length === 0) {
+            return NextResponse.json(
+                { error: 'Bad Request', message: 'No valid templates to create' },
+                { status: 400 }
+            );
+        }
+
         const results: Array<{ name: string; success: boolean; id?: string; status?: string; error?: string }> = [];
 
         for (const template of templatesToCreate) {

@@ -83,4 +83,5 @@ describe('sendMessage', () => {
         expect(payload.tag).toBe('HUMAN_AGENT');
         expect(payload.message.text).toBe('hello');
     });
+
 });

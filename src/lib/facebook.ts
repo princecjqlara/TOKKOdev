@@ -498,6 +498,84 @@ export const UTILITY_TEMPLATES: Omit<UtilityTemplate, 'language'>[] = [
                 }
             }
         ]
+    },
+    {
+        name: 'account_billing_notice',
+        category: 'UTILITY',
+        components: [
+            {
+                type: 'BODY',
+                text: '{{1}}',
+                example: {
+                    body_text: [['Your billing statement is ready. Please review the details in your account.']]
+                }
+            }
+        ]
+    },
+    {
+        name: 'account_payment_confirmation',
+        category: 'UTILITY',
+        components: [
+            {
+                type: 'BODY',
+                text: '{{1}}',
+                example: {
+                    body_text: [['Your payment was received successfully. Thank you.']]
+                }
+            }
+        ]
+    },
+    {
+        name: 'account_subscription_reminder',
+        category: 'UTILITY',
+        components: [
+            {
+                type: 'BODY',
+                text: '{{1}}',
+                example: {
+                    body_text: [['Your subscription renews soon. Please verify your payment method.']]
+                }
+            }
+        ]
+    },
+    {
+        name: 'account_service_announcement',
+        category: 'UTILITY',
+        components: [
+            {
+                type: 'BODY',
+                text: '{{1}}',
+                example: {
+                    body_text: [['We have an important service update related to your account.']]
+                }
+            }
+        ]
+    },
+    {
+        name: 'account_action_required_notice',
+        category: 'UTILITY',
+        components: [
+            {
+                type: 'BODY',
+                text: '{{1}}',
+                example: {
+                    body_text: [['Action is required to keep your account settings up to date.']]
+                }
+            }
+        ]
+    },
+    {
+        name: 'account_policy_update_notice',
+        category: 'UTILITY',
+        components: [
+            {
+                type: 'BODY',
+                text: '{{1}}',
+                example: {
+                    body_text: [['We updated account terms and policies. Please review the latest information.']]
+                }
+            }
+        ]
     }
 ];
 

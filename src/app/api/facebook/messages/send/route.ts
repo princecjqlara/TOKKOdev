@@ -50,20 +50,12 @@ function isUtilityTemplateMissingError(errorMessage: string): boolean {
 
 const DEFAULT_UTILITY_TEMPLATE_NAME = 'account_general_notification';
 const DEFAULT_UTILITY_TEMPLATE_LANGUAGE = 'en_US';
+const SENDABLE_TEMPLATE_STATUSES = new Set(['APPROVED', 'ACTIVE']);
 
-function getDefaultUtilityTemplate() {
-    const baseTemplate =
-        UTILITY_TEMPLATES.find((template) => template.name === DEFAULT_UTILITY_TEMPLATE_NAME) ||
-        UTILITY_TEMPLATES[0];
-
-    if (!baseTemplate) {
-        return null;
-    }
-
-    return {
-        ...baseTemplate,
-        language: DEFAULT_UTILITY_TEMPLATE_LANGUAGE
-    };
+function normalizeTemplateStatus(status: unknown): string | null {
+    if (typeof status !== 'string') return null;
+    const normalized = status.trim().toUpperCase();
+    return normalized || null;
 }
 
 function normalizeLanguageCode(language: string | null | undefined): string | null {
@@ -566,6 +558,7 @@ export async function POST(request: NextRequest) {
 
         let utilityPermissionMissing = false;
         let utilityTemplateMissing = false;
+        let utilityTemplateName = DEFAULT_UTILITY_TEMPLATE_NAME;
         let utilityTemplateLanguage = DEFAULT_UTILITY_TEMPLATE_LANGUAGE;
         let utilityTemplateLookupPromise: Promise<boolean> | null = null;
         let utilityTemplateBootstrapPromise: Promise<boolean> | null = null;
@@ -577,27 +570,78 @@ export async function POST(request: NextRequest) {
                     try {
                         console.log(`🔍 Looking up templates for page ${page.fb_page_id}...`);
                         const templates = await getPageTemplates(page.fb_page_id, page.access_token);
-                        console.log(`📋 Found ${templates.length} templates on page:`, templates.map((t: any) => ({ name: t.name, language: t.language, status: t.status })));
-                        
-                        const existingTemplate = templates.find(
-                            (template) => template && template.name === DEFAULT_UTILITY_TEMPLATE_NAME
-                        ) as Record<string, unknown> | undefined;
+                        console.log(
+                            `📋 Found ${templates.length} templates on page:`,
+                            templates.map((t: any) => ({ name: t.name, language: t.language, status: t.status }))
+                        );
 
-                        if (!existingTemplate) {
-                            console.log(`❌ Template '${DEFAULT_UTILITY_TEMPLATE_NAME}' NOT found in ${templates.length} existing templates`);
+                        const utilityTemplates = templates.filter((template) => {
+                            if (!template || typeof template !== 'object') return false;
+                            const category = (template as Record<string, unknown>).category;
+                            if (typeof category !== 'string') return true;
+                            return category.toUpperCase() === 'UTILITY';
+                        }) as Record<string, unknown>[];
+
+                        const preferredTemplates = utilityTemplates.filter(
+                            (template) => template.name === DEFAULT_UTILITY_TEMPLATE_NAME
+                        );
+
+                        const sendablePreferredTemplate = preferredTemplates.find((template) => {
+                            const status = normalizeTemplateStatus(template.status);
+                            return status ? SENDABLE_TEMPLATE_STATUSES.has(status) : true;
+                        });
+
+                        const sendableAnyTemplate = utilityTemplates.find((template) => {
+                            const status = normalizeTemplateStatus(template.status);
+                            return status ? SENDABLE_TEMPLATE_STATUSES.has(status) : true;
+                        });
+
+                        const selectedTemplate = sendablePreferredTemplate || sendableAnyTemplate;
+
+                        if (!selectedTemplate) {
+                            if (preferredTemplates.length > 0) {
+                                const statuses = preferredTemplates
+                                    .map((template) => normalizeTemplateStatus(template.status) || 'UNKNOWN')
+                                    .join(', ');
+                                utilityTemplateBootstrapError =
+                                    `Template '${DEFAULT_UTILITY_TEMPLATE_NAME}' exists but status is ${statuses}`;
+                                console.warn(`⚠️ ${utilityTemplateBootstrapError}`);
+                                return false;
+                            }
+
+                            if (utilityTemplates.length > 0) {
+                                const statuses = utilityTemplates
+                                    .map((template) => {
+                                        const name = typeof template.name === 'string' ? template.name : 'unknown_template';
+                                        const status = normalizeTemplateStatus(template.status) || 'UNKNOWN';
+                                        return `${name}:${status}`;
+                                    })
+                                    .join(', ');
+                                utilityTemplateBootstrapError =
+                                    `No approved utility templates found. Existing statuses: ${statuses}`;
+                                console.warn(`⚠️ ${utilityTemplateBootstrapError}`);
+                                return false;
+                            }
+
+                            console.log(`❌ No utility templates found on page`);
                             return false;
                         }
 
-                        console.log(`✅ Found existing template:`, existingTemplate);
-                        const existingLanguage = extractTemplateLanguageCode(existingTemplate);
+                        console.log(`✅ Found existing template:`, selectedTemplate);
+                        utilityTemplateName =
+                            typeof selectedTemplate.name === 'string'
+                                ? selectedTemplate.name
+                                : DEFAULT_UTILITY_TEMPLATE_NAME;
+
+                        const existingLanguage = extractTemplateLanguageCode(selectedTemplate);
                         if (existingLanguage) {
                             utilityTemplateLanguage = existingLanguage;
                             console.log(
-                                `ℹ️ Found existing utility template '${DEFAULT_UTILITY_TEMPLATE_NAME}' with language '${existingLanguage}'`
+                                `ℹ️ Found existing utility template '${utilityTemplateName}' with language '${existingLanguage}'`
                             );
                         } else {
                             console.log(
-                                `ℹ️ Found existing utility template '${DEFAULT_UTILITY_TEMPLATE_NAME}' with unknown language; using '${utilityTemplateLanguage}'`
+                                `ℹ️ Found existing utility template '${utilityTemplateName}' with unknown language; using '${utilityTemplateLanguage}'`
                             );
                         }
 
@@ -614,8 +658,10 @@ export async function POST(request: NextRequest) {
         };
 
         const ensureUtilityTemplateExists = async (): Promise<boolean> => {
-            console.log(`🔄 ensureUtilityTemplateExists called. utilityTemplateMissing=${utilityTemplateMissing}`);
-            
+            console.log(
+                `🔄 ensureUtilityTemplateExists called. utilityTemplateMissing=${utilityTemplateMissing}`
+            );
+
             if (utilityTemplateMissing) {
                 console.log(`⛔ Template already marked as missing, skipping`);
                 return false;
@@ -631,15 +677,17 @@ export async function POST(request: NextRequest) {
             if (!utilityTemplateBootstrapPromise) {
                 console.log(`🆕 Creating template bootstrap promise`);
                 utilityTemplateBootstrapPromise = (async () => {
-                    const template = getDefaultUtilityTemplate();
-                    if (!template) {
+                    const templateDefinitions = [
+                        ...UTILITY_TEMPLATES.filter((template) => template.name === DEFAULT_UTILITY_TEMPLATE_NAME),
+                        ...UTILITY_TEMPLATES.filter((template) => template.name !== DEFAULT_UTILITY_TEMPLATE_NAME)
+                    ];
+
+                    if (templateDefinitions.length === 0) {
                         utilityTemplateBootstrapError = 'No utility templates configured in UTILITY_TEMPLATES';
                         console.warn('⚠️ No utility templates configured in UTILITY_TEMPLATES');
                         return false;
                     }
 
-                    console.log(`📋 Default template:`, { name: template.name, category: template.category, components: template.components });
-                    
                     const candidateLanguages = Array.from(
                         new Set([
                             utilityTemplateLanguage,
@@ -647,49 +695,76 @@ export async function POST(request: NextRequest) {
                             'en'
                         ])
                     );
-                    
+
                     console.log(`🌍 Will try languages: ${candidateLanguages.join(', ')}`);
 
-                    for (const candidateLanguage of candidateLanguages) {
-                        const candidateTemplate = {
-                            ...template,
-                            language: candidateLanguage
-                        };
-                        
-                        console.log(`📝 Trying to create template with language '${candidateLanguage}'...`);
+                    for (const templateDefinition of templateDefinitions) {
+                        console.log(`📋 Template candidate:`, {
+                            name: templateDefinition.name,
+                            category: templateDefinition.category
+                        });
 
-                        try {
-                            await createUtilityTemplate(page.fb_page_id, page.access_token, candidateTemplate);
-                            utilityTemplateLanguage = candidateLanguage;
-                            utilityTemplateBootstrapError = null;
-                            utilityTemplateLookupPromise = Promise.resolve(true);
+                        for (const candidateLanguage of candidateLanguages) {
+                            const candidateTemplate = {
+                                ...templateDefinition,
+                                language: candidateLanguage
+                            };
+
                             console.log(
-                                `✅ Utility template '${candidateTemplate.name}' created automatically with language '${candidateLanguage}'`
+                                `📝 Trying to create template '${candidateTemplate.name}' with language '${candidateLanguage}'...`
                             );
-                            return true;
-                        } catch (bootstrapError) {
-                            const errorMsg = (bootstrapError as Error).message || 'Unknown template creation error';
-                            console.error(`❌ Template creation failed with language '${candidateLanguage}':`, errorMsg);
-                            
-                            const bootstrapMessage = errorMsg.toLowerCase();
-                            if (
-                                bootstrapMessage.includes('already exists') ||
-                                bootstrapMessage.includes('duplicate')
-                            ) {
+
+                            try {
+                                const createdTemplate = await createUtilityTemplate(
+                                    page.fb_page_id,
+                                    page.access_token,
+                                    candidateTemplate
+                                );
+                                const createdStatus = normalizeTemplateStatus(createdTemplate.status);
+
+                                if (
+                                    createdStatus &&
+                                    !SENDABLE_TEMPLATE_STATUSES.has(createdStatus)
+                                ) {
+                                    utilityTemplateBootstrapError =
+                                        `Template '${candidateTemplate.name}' created but status is '${createdStatus}'`;
+                                    console.warn(`⚠️ ${utilityTemplateBootstrapError}`);
+                                    continue;
+                                }
+
+                                utilityTemplateName = candidateTemplate.name;
                                 utilityTemplateLanguage = candidateLanguage;
                                 utilityTemplateBootstrapError = null;
                                 utilityTemplateLookupPromise = Promise.resolve(true);
                                 console.log(
-                                    `ℹ️ Utility template '${candidateTemplate.name}' already exists (language '${candidateLanguage}')`
+                                    `✅ Utility template '${candidateTemplate.name}' created automatically with language '${candidateLanguage}'`
                                 );
                                 return true;
-                            }
+                            } catch (bootstrapError) {
+                                const errorMsg =
+                                    (bootstrapError as Error).message ||
+                                    'Unknown template creation error';
+                                const bootstrapMessage = errorMsg.toLowerCase();
 
-                            utilityTemplateBootstrapError = errorMsg;
-                            console.warn(
-                                `⚠️ Failed to auto-create utility template with language '${candidateLanguage}':`,
-                                bootstrapError
-                            );
+                                if (
+                                    bootstrapMessage.includes('already exists') ||
+                                    bootstrapMessage.includes('duplicate')
+                                ) {
+                                    utilityTemplateLookupPromise = null;
+                                    if (await resolveExistingUtilityTemplate()) {
+                                        return true;
+                                    }
+
+                                    utilityTemplateBootstrapError = errorMsg;
+                                    continue;
+                                }
+
+                                utilityTemplateBootstrapError = errorMsg;
+                                console.warn(
+                                    `⚠️ Failed to auto-create template '${candidateTemplate.name}' with language '${candidateLanguage}':`,
+                                    bootstrapError
+                                );
+                            }
                         }
                     }
 
@@ -780,29 +855,44 @@ export async function POST(request: NextRequest) {
                         success: false as const,
                         contactId: contact.id,
                         error: utilityTemplateBootstrapError
-                            ? `Skipped: utility template not found for this page. Auto-create failed: ${utilityTemplateBootstrapError}`
-                            : 'Skipped: utility template not found for this page'
+                            ? `Skipped: utility template not ready for this page. ${utilityTemplateBootstrapError}`
+                            : 'Skipped: utility template not ready for this page'
                     };
                 }
 
-                try {
-                    // Replace template variables with contact data for personalized messages
-                    const personalizedMessage = replaceTemplateVariables(messageText, {
-                        id: contact.id,
-                        psid: contact.psid,
-                        page_id: pageId,
-                        name: contact.name,
-                        last_interaction_at: contact.last_interaction_at
-                    });
+                if (msgType === 'UTILITY') {
+                    const templateReady = await ensureUtilityTemplateExists();
+                    if (!templateReady) {
+                        return {
+                            success: false as const,
+                            contactId: contact.id,
+                            error: utilityTemplateBootstrapError
+                                ? `Skipped: utility template not ready for this page. ${utilityTemplateBootstrapError}`
+                                : 'Skipped: utility template not ready for this page'
+                        };
+                    }
+                }
 
-                    console.log(`📤 Sending ${msgType} message to contact ${contact.id}. Template language: ${utilityTemplateLanguage}`);
+                // Replace template variables with contact data for personalized messages
+                const personalizedMessage = replaceTemplateVariables(messageText, {
+                    id: contact.id,
+                    psid: contact.psid,
+                    page_id: pageId,
+                    name: contact.name,
+                    last_interaction_at: contact.last_interaction_at
+                });
+
+                try {
+                    console.log(
+                        `📤 Sending ${msgType} message to contact ${contact.id}. Template: ${utilityTemplateName} (${utilityTemplateLanguage})`
+                    );
                     await sendMessage(
                         page.fb_page_id,
                         page.access_token,
                         contact.psid,
                         personalizedMessage,
                         msgType,
-                        undefined,
+                        msgType === 'UTILITY' ? utilityTemplateName : undefined,
                         utilityTemplateLanguage
                     );
                     console.log(`✅ Successfully sent message to contact ${contact.id} (PSID: ${contact.psid})`);
@@ -813,64 +903,39 @@ export async function POST(request: NextRequest) {
                     console.error(`❌ Send failed for contact ${contact.id}: ${errorMessage}`);
 
                     if (msgType === 'UTILITY' && isUtilityTemplateMissingError(errorMessage)) {
-                        console.log(`🔧 Template missing error detected, attempting to ensure template exists...`);
                         const templateReady = await ensureUtilityTemplateExists();
-                        console.log(`🔧 Template ensure result: ${templateReady ? 'READY' : 'FAILED'}`);
-
                         if (templateReady) {
                             try {
-                                console.log(`⏳ Waiting 350ms for template propagation...`);
-                                // Give Graph API a short propagation window after template creation
                                 await new Promise((resolve) => setTimeout(resolve, 350));
-
-                                const retryMessage = replaceTemplateVariables(messageText, {
-                                    id: contact.id,
-                                    psid: contact.psid,
-                                    page_id: pageId,
-                                    name: contact.name,
-                                    last_interaction_at: contact.last_interaction_at
-                                });
-
-                                console.log(`🔄 Retrying send with template language: ${utilityTemplateLanguage}`);
                                 await sendMessage(
                                     page.fb_page_id,
                                     page.access_token,
                                     contact.psid,
-                                    retryMessage,
+                                    personalizedMessage,
                                     msgType,
-                                    undefined,
+                                    utilityTemplateName,
                                     utilityTemplateLanguage
                                 );
-                                console.log(`✅ Retry succeeded after creating utility template for contact ${contact.id}`);
+                                console.log(`✅ Retry succeeded after preparing utility template for contact ${contact.id}`);
                                 return { success: true as const, contactId: contact.id, error: undefined };
                             } catch (retryError) {
-                                const retryErrorMsg = (retryError as Error).message || 'Unknown retry error';
-                                console.error(`❌ Retry failed for contact ${contact.id}: ${retryErrorMsg}`);
-                                errorMessage = retryErrorMsg;
+                                errorMessage = (retryError as Error).message || errorMessage;
                             }
                         } else {
                             if (!utilityTemplateMissing) {
-                                console.warn('⚠️ Utility template missing and auto-create failed. Remaining utility messages will be skipped.');
                                 utilityTemplateMissing = true;
                             }
-
                             errorMessage = utilityTemplateBootstrapError
-                                ? `Template cannot be found. Auto-create failed: ${utilityTemplateBootstrapError}`
-                                : 'Template cannot be found. Auto-create failed.';
+                                ? `Template cannot be found. ${utilityTemplateBootstrapError}`
+                                : 'Template cannot be found.';
                         }
                     }
 
                     if (msgType === 'UTILITY' && isUtilityPermissionError(errorMessage)) {
-                        if (!utilityPermissionMissing) {
-                            console.warn('⚠️ Missing pages_utility_messaging permission detected. Remaining utility messages will be skipped.');
-                        }
                         utilityPermissionMissing = true;
                     }
 
                     if (msgType === 'UTILITY' && isUtilityTemplateMissingError(errorMessage)) {
-                        if (!utilityTemplateMissing) {
-                            console.warn('⚠️ Utility template not found. Remaining utility messages will be skipped.');
-                        }
                         utilityTemplateMissing = true;
                     }
 
