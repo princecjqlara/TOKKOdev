@@ -19,19 +19,7 @@ interface ContactRecord {
     last_interaction_at: string | null;
 }
 
-// Determine the correct messaging type based on last interaction time
-// HUMAN_AGENT: within 7-day window
-// UTILITY: outside 7-day window (requires template)
-function getMessagingType(lastInteractionAt: string | null): 'RESPONSE' | 'HUMAN_AGENT' | 'UTILITY' {
-    if (!lastInteractionAt) return 'UTILITY';
-    const lastInteraction = new Date(lastInteractionAt);
-    const twentyFourHoursAgo = new Date();
-    twentyFourHoursAgo.setHours(twentyFourHoursAgo.getHours() - 24);
-    const sevenDaysAgo = new Date();
-    sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
-    
-    if (lastInteraction >= twentyFourHoursAgo) return 'RESPONSE';
-    if (lastInteraction >= sevenDaysAgo) return 'HUMAN_AGENT';
+function getMessagingType(): 'UTILITY' {
     return 'UTILITY';
 }
 
@@ -145,12 +133,16 @@ function buildUtilityBodyParameters(
         return [];
     }
 
+    const parts = message.split('|||');
+    const part1 = parts[0] || '';
+    const part2 = parts[1] || '';
+
     if (placeholderCount === 1) {
-        return [message];
+        return [part1];
     }
 
     if (placeholderCount === 2) {
-        return [message, ''];
+        return [part1, part2];
     }
 
     const firstName = contact.name?.trim().split(/\s+/)[0] || 'there';
@@ -162,10 +154,10 @@ function buildUtilityBodyParameters(
         normalizedBodyText.includes('tracking');
 
     const parameters = [firstName];
-    parameters.push(looksLikeOrderTemplate ? contactReference : message);
+    parameters.push(looksLikeOrderTemplate ? contactReference : part1);
 
     for (let i = 2; i < placeholderCount; i += 1) {
-        parameters.push(message);
+        parameters.push(part1);
     }
 
     return parameters;
@@ -232,7 +224,6 @@ function replaceTemplateVariables(template: string, contact: ContactRecord): str
     const firstName = nameParts[0] || 'there';
     const lastName = nameParts.length > 1 ? nameParts.slice(1).join(' ') : '';
 
-    // Replace all template variables (case-insensitive)
     message = message.replace(/\{name\}/gi, name);
     message = message.replace(/\{first_name\}/gi, firstName);
     message = message.replace(/\{firstname\}/gi, firstName);
@@ -240,6 +231,15 @@ function replaceTemplateVariables(template: string, contact: ContactRecord): str
     message = message.replace(/\{lastname\}/gi, lastName);
 
     return message;
+}
+
+function replaceTemplateVariablesForParts(
+    messageWithSeparator: string,
+    contact: ContactRecord
+): string {
+    const parts = messageWithSeparator.split('|||');
+    const personalizedParts = parts.map(part => replaceTemplateVariables(part, contact));
+    return personalizedParts.join('|||');
 }
 
 // Increase timeout for sending messages (up to 5 minutes)
@@ -948,13 +948,8 @@ export async function POST(request: NextRequest) {
 
             const batch = allContacts.slice(i, i + SEND_BATCH_SIZE);
 
-            const hasUtilityMessagesInBatch = batch.some(
-                (contact) => getMessagingType(contact.last_interaction_at) === 'UTILITY'
-            );
-            let utilityTemplateReadyInBatch = true;
-
-            if (hasUtilityMessagesInBatch && !utilityPermissionMissing && !utilityTemplateMissing) {
-                utilityTemplateReadyInBatch = await ensureUtilityTemplateExists();
+            if (!utilityPermissionMissing && !utilityTemplateMissing) {
+                const utilityTemplateReadyInBatch = await ensureUtilityTemplateExists();
                 if (!utilityTemplateReadyInBatch && !utilityTemplateBootstrapError) {
                     utilityTemplateBootstrapError =
                         'No approved utility template is available for this page';
@@ -967,7 +962,7 @@ export async function POST(request: NextRequest) {
 
             // Process batch in parallel - use allSettled to continue even if some fail
             const batchPromises = batch.map(async (contact) => {
-                const msgType = getMessagingType(contact.last_interaction_at);
+                const msgType = getMessagingType();
 
                 if (msgType === 'UTILITY' && utilityPermissionMissing) {
                     return {
@@ -987,18 +982,8 @@ export async function POST(request: NextRequest) {
                     };
                 }
 
-                if (msgType === 'UTILITY' && !utilityTemplateReadyInBatch) {
-                    return {
-                        success: false as const,
-                        contactId: contact.id,
-                        error: utilityTemplateBootstrapError
-                            ? `Skipped: utility template not ready for this page. ${utilityTemplateBootstrapError}`
-                            : 'Skipped: utility template not ready for this page'
-                    };
-                }
-
                 // Replace template variables with contact data for personalized messages
-                const personalizedMessage = replaceTemplateVariables(messageText, {
+                const personalizedMessage = replaceTemplateVariablesForParts(messageText, {
                     id: contact.id,
                     psid: contact.psid,
                     page_id: pageId,
@@ -1020,11 +1005,14 @@ export async function POST(request: NextRequest) {
                     console.log(
                         `📤 Sending ${msgType} message to contact ${contact.id}. Template: ${utilityTemplateName} (${utilityTemplateLanguage}) params=${utilityBodyParameters?.length ?? 0}`
                     );
+                    const messageToSend = msgType === 'UTILITY'
+                        ? personalizedMessage.split('|||')[0] || personalizedMessage
+                        : personalizedMessage.split('|||')[0] || personalizedMessage;
                     await sendMessage(
                         page.fb_page_id,
                         page.access_token,
                         contact.psid,
-                        personalizedMessage,
+                        messageToSend,
                         msgType,
                         msgType === 'UTILITY' ? utilityTemplateName : undefined,
                         utilityTemplateLanguage,

@@ -56,8 +56,11 @@ export default function ContactsPage() {
 
     // Action states
     const [selectedTagIds, setSelectedTagIds] = useState<Set<string>>(new Set());
-    const [messageText, setMessageText] = useState('');
+    const [messagePart1, setMessagePart1] = useState('');
+    const [messagePart2, setMessagePart2] = useState('');
     const [actionLoading, setActionLoading] = useState(false);
+
+    const messageText = `${messagePart1}|||${messagePart2}`;
     const [failedContactIds, setFailedContactIds] = useState<string[]>([]);
     const [failedContactErrors, setFailedContactErrors] = useState<SendError[]>([]);
     const [lastSendResults, setLastSendResults] = useState<{ sent: number; failed: number } | null>(null);
@@ -755,7 +758,8 @@ export default function ContactsPage() {
                 setFailedContactErrors([]);
                 setLastSendResults(null);
                 setShowMessageModal(false);
-                setMessageText('');
+                setMessagePart1('');
+                setMessagePart2('');
                 clearSelection();
             } else {
                 // Partial success or issues
@@ -900,7 +904,8 @@ export default function ContactsPage() {
                     setFailedContactErrors([]);
                     setLastSendResults(null);
                     setShowMessageModal(false);
-                    setMessageText('');
+                    setMessagePart1('');
+                    setMessagePart2('');
                 }
                 await fetchContacts();
             } else {
@@ -1487,13 +1492,31 @@ export default function ContactsPage() {
                             )}
                         </div>
                     )}
-                    <textarea
-                        value={messageText}
-                        onChange={(e) => setMessageText(e.target.value)}
-                        placeholder="Hi {name}, TYPE YOUR MESSAGE HERE..."
-                        rows={5}
-                        className="input-wireframe w-full h-auto p-3 resize-none"
-                    />
+                    <div className="space-y-3">
+                        <div>
+                            <label className="block text-xs font-bold uppercase mb-1">Message (Part 1)</label>
+                            <textarea
+                                value={messagePart1}
+                                onChange={(e) => setMessagePart1(e.target.value)}
+                                placeholder="Hi {name}, your message starts here..."
+                                rows={3}
+                                className="input-wireframe w-full h-auto p-3 resize-none"
+                            />
+                        </div>
+                        <div className="text-center text-xs text-gray-400 font-mono">
+                            — Message from {pages.find(p => p.id === selectedPageId)?.name || 'Page'} support team —
+                        </div>
+                        <div>
+                            <label className="block text-xs font-bold uppercase mb-1">Message (Part 2)</label>
+                            <textarea
+                                value={messagePart2}
+                                onChange={(e) => setMessagePart2(e.target.value)}
+                                placeholder="Optional closing message..."
+                                rows={2}
+                                className="input-wireframe w-full h-auto p-3 resize-none"
+                            />
+                        </div>
+                    </div>
                     <div className="bg-gray-50 border border-gray-200 p-3 rounded text-xs">
                         <p className="font-bold text-gray-700 mb-1">💡 Personalize your message:</p>
                         <div className="flex flex-wrap gap-2 font-mono">
@@ -1519,7 +1542,7 @@ export default function ContactsPage() {
                         {failedContactIds.length > 0 && (
                             <button
                                 onClick={handleResendToFailed}
-                                disabled={!messageText.trim() || actionLoading}
+                                disabled={!messagePart1.trim() || actionLoading}
                                 className="btn-wireframe bg-yellow-600 text-white hover:bg-yellow-700"
                             >
                                 {actionLoading ? 'Resending...' : `Resend to ${failedContactIds.length} Failed`}
@@ -1527,7 +1550,7 @@ export default function ContactsPage() {
                         )}
                         <button
                             onClick={handleBulkMessage}
-                            disabled={!messageText.trim() || actionLoading}
+                            disabled={!messagePart1.trim() || actionLoading}
                             className="btn-wireframe bg-black text-white hover:bg-gray-800"
                         >
                             {actionLoading ? 'Sending...' : failedContactIds.length > 0 ? 'Send to New Selection' : 'Send Now'}
