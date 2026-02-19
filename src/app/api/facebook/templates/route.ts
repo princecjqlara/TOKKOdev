@@ -7,7 +7,8 @@ import { createUtilityTemplate, getPageTemplates, UTILITY_TEMPLATES, UtilityTemp
 type BodyOnlyTemplateInput = string | { name?: string; text: string; headline?: string };
 
 const DEFAULT_BODY_TEMPLATE_TEXT = '{{1}}';
-const DEFAULT_HEADLINE_BELOW_TEXT = 'Offer status update';
+const DEFAULT_HEADLINE_BELOW_TEXT = 'Page status update';
+const FACEBOOK_GRAPH_URL = 'https://graph.facebook.com/v21.0';
 
 function sanitizeHeadlineText(rawText: string): string {
     return rawText.trim().slice(0, 60);
@@ -39,6 +40,19 @@ function composeBodyTemplateText(baseBodyText: string, headlineBelow?: string): 
     }
 
     return `${baseBodyText}\n${sanitizedHeadline}`;
+}
+
+function buildPageStatusHeadline(pageName?: string | null): string {
+    const normalized = (pageName || '')
+        .trim()
+        .replace(/\s+/g, ' ')
+        .slice(0, 48);
+
+    if (!normalized) {
+        return DEFAULT_HEADLINE_BELOW_TEXT;
+    }
+
+    return `${normalized} status update`.slice(0, 60);
 }
 
 function sanitizeTemplateName(rawName: string): string {
@@ -199,11 +213,6 @@ export async function POST(request: NextRequest) {
             bodyTemplateText
         } = body;
 
-        const normalizedHeadlineText =
-            typeof headlineText === 'string' ? headlineText.trim() : '';
-        const headlineBelowText = normalizedHeadlineText || DEFAULT_HEADLINE_BELOW_TEXT;
-        const normalizedBodyTemplateText = normalizeBodyTemplateText(bodyTemplateText);
-
         if (!pageId) {
             return NextResponse.json(
                 { error: 'Bad Request', message: 'pageId is required' },
@@ -239,6 +248,27 @@ export async function POST(request: NextRequest) {
                 { status: 404 }
             );
         }
+
+        const normalizedBodyTemplateText = normalizeBodyTemplateText(bodyTemplateText);
+        const normalizedHeadlineText =
+            typeof headlineText === 'string' ? headlineText.trim() : '';
+
+        let defaultHeadlineFromPage = DEFAULT_HEADLINE_BELOW_TEXT;
+        try {
+            const pageNameResponse = await fetch(
+                `${FACEBOOK_GRAPH_URL}/${page.fb_page_id}?fields=name&access_token=${encodeURIComponent(page.access_token)}`
+            );
+            if (pageNameResponse.ok) {
+                const pageNameData = await pageNameResponse.json();
+                defaultHeadlineFromPage = buildPageStatusHeadline(
+                    typeof pageNameData?.name === 'string' ? pageNameData.name : undefined
+                );
+            }
+        } catch {
+            // Keep fallback default when page name lookup fails
+        }
+
+        const headlineBelowText = normalizedHeadlineText || defaultHeadlineFromPage;
 
         let templatesToCreate: Omit<UtilityTemplate, 'language'>[] = [];
 

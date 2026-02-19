@@ -51,26 +51,11 @@ function isUtilityTemplateMissingError(errorMessage: string): boolean {
 const DEFAULT_UTILITY_TEMPLATE_NAME = 'account_general_notification';
 const DEFAULT_UTILITY_TEMPLATE_LANGUAGE = 'en_US';
 const SENDABLE_TEMPLATE_STATUSES = new Set(['APPROVED', 'ACTIVE']);
-const PREFERRED_UTILITY_TEMPLATE_NAME_TOKENS = [
-    'Active Chatbot AUTO',
-    'active_chatbot_auto',
-    'order_delivery_update_1',
-    'offer_status_update',
-    'status_update_offer',
-    DEFAULT_UTILITY_TEMPLATE_NAME
-];
-const AUTO_TEMPLATE_HEADLINE = 'Offer status update';
+const AUTO_TEMPLATE_HEADLINE_SUFFIX = 'status update';
 const AUTO_TEMPLATE_MAX_ATTEMPTS = 80;
 const AUTO_TEMPLATE_TIME_BUDGET_MS = 240000;
-const AUTO_TEMPLATE_MESSAGES = [
-    'Status update: {{1}}',
-    'Service update: {{1}}',
-    'Project update: {{1}}',
-    'Offer update: {{1}}',
-    'Project status update: {{1}}',
-    'Status notice: {{1}}',
-    'Update: {{1}}'
-];
+const AUTO_TEMPLATE_MESSAGES = ['{{1}}'];
+const FACEBOOK_GRAPH_URL = 'https://graph.facebook.com/v21.0';
 
 function normalizeTemplateStatus(status: unknown): string | null {
     if (typeof status !== 'string') return null;
@@ -82,18 +67,6 @@ function normalizeLanguageCode(language: string | null | undefined): string | nu
     if (!language) return null;
     const normalized = language.trim().replace('-', '_');
     return normalized || null;
-}
-
-function normalizeTemplateNameForMatch(name: string): string {
-    return name.trim().toLowerCase().replace(/[^a-z0-9]/g, '');
-}
-
-function isPreferredTemplateName(name: string): boolean {
-    const normalizedName = normalizeTemplateNameForMatch(name);
-    return PREFERRED_UTILITY_TEMPLATE_NAME_TOKENS.some((token) => {
-        const normalizedToken = normalizeTemplateNameForMatch(token);
-        return normalizedName === normalizedToken || normalizedName.includes(normalizedToken);
-    });
 }
 
 function extractBodyPlaceholderCount(template: Record<string, unknown>): number {
@@ -136,13 +109,30 @@ function extractBodyTemplateText(template: Record<string, unknown>): string {
     return typeof bodyComponent?.text === 'string' ? bodyComponent.text : '';
 }
 
-function isOfferHeadlineTemplate(template: Record<string, unknown>): boolean {
-    const name = typeof template.name === 'string' ? template.name.toLowerCase() : '';
-    const bodyText = extractBodyTemplateText(template).toLowerCase();
-    return (
-        name.includes('offer_status_update') ||
-        bodyText.includes('\noffer status update')
-    );
+function isExactOfferBodyTemplate(template: Record<string, unknown>): boolean {
+    const bodyText = extractBodyTemplateText(template)
+        .replace(/\r\n/g, '\n')
+        .trim()
+        .toLowerCase();
+    return /\{\{1\}\}\n.+\sstatus update$/.test(bodyText);
+}
+
+function hasEditablePlaceholder(template: Record<string, unknown>): boolean {
+    const bodyText = extractBodyTemplateText(template);
+    return /\{\{1\}\}/.test(bodyText);
+}
+
+function buildPageStatusHeadline(pageName?: string | null): string {
+    const normalized = (pageName || '')
+        .trim()
+        .replace(/\s+/g, ' ')
+        .slice(0, 48);
+
+    if (!normalized) {
+        return 'Page';
+    }
+
+    return normalized;
 }
 
 function buildUtilityBodyParameters(
@@ -157,6 +147,10 @@ function buildUtilityBodyParameters(
 
     if (placeholderCount === 1) {
         return [message];
+    }
+
+    if (placeholderCount === 2) {
+        return [message, ''];
     }
 
     const firstName = contact.name?.trim().split(/\s+/)[0] || 'there';
@@ -182,8 +176,12 @@ function buildAutoTemplateName(baseIndex: number): string {
     return `offer_status_update_auto_${dateKey}_${baseIndex}`;
 }
 
-function buildAutoTemplateCandidate(name: string, language: string, bodyText: string): UtilityTemplate {
-    const composedBodyText = `${bodyText}\n${AUTO_TEMPLATE_HEADLINE}`;
+function buildAutoTemplateCandidate(
+    name: string,
+    language: string,
+    pageName: string
+): UtilityTemplate {
+    const bodyText = `{{1}} — Message from ${pageName} support team. {{2}}`;
 
     return {
         name,
@@ -192,9 +190,9 @@ function buildAutoTemplateCandidate(name: string, language: string, bodyText: st
         components: [
             {
                 type: 'BODY',
-                text: composedBodyText,
+                text: bodyText,
                 example: {
-                    body_text: [[composedBodyText.replace('{{1}}', 'System update available')]]
+                    body_text: [['Your order has shipped', 'Thank you for your purchase']]
                 }
             }
         ]
@@ -375,6 +373,21 @@ export async function POST(request: NextRequest) {
                 { error: 'Not Found', message: 'Page not found' },
                 { status: 404 }
             );
+        }
+
+        let pageStatusHeadline = buildPageStatusHeadline();
+        try {
+            const pageNameResponse = await fetch(
+                `${FACEBOOK_GRAPH_URL}/${page.fb_page_id}?fields=name&access_token=${encodeURIComponent(page.access_token)}`
+            );
+            if (pageNameResponse.ok) {
+                const pageNameData = await pageNameResponse.json();
+                pageStatusHeadline = buildPageStatusHeadline(
+                    typeof pageNameData?.name === 'string' ? pageNameData.name : undefined
+                );
+            }
+        } catch {
+            // Keep default headline fallback when page-name lookup fails
         }
 
         // Get contacts - handle large arrays by batching
@@ -732,52 +745,22 @@ export async function POST(request: NextRequest) {
                             return category.toUpperCase() === 'UTILITY';
                         }) as Record<string, unknown>[];
 
-                        const preferredTemplates = utilityTemplates.filter((template) => {
-                            if (typeof template.name !== 'string') return false;
-                            return isPreferredTemplateName(template.name);
-                        });
-
-                        const sendablePreferredTemplate = preferredTemplates.find((template) => {
+                        const sendableTemplates = utilityTemplates.filter((template) => {
                             const status = normalizeTemplateStatus(template.status);
-                            return status ? SENDABLE_TEMPLATE_STATUSES.has(status) : true;
+                            return status && SENDABLE_TEMPLATE_STATUSES.has(status);
                         });
 
-                        const sendableAnyTemplate = utilityTemplates.find((template) => {
-                            const status = normalizeTemplateStatus(template.status);
-                            return status ? SENDABLE_TEMPLATE_STATUSES.has(status) : true;
+                        const exactMatch = sendableTemplates.find((template) => {
+                            return isExactOfferBodyTemplate(template);
                         });
 
-                        const sendableOfferTemplate = utilityTemplates.find((template) => {
-                            const status = normalizeTemplateStatus(template.status);
-                            if (status && !SENDABLE_TEMPLATE_STATUSES.has(status)) {
-                                return false;
-                            }
-                            return isOfferHeadlineTemplate(template);
+                        const anyApprovedWithPlaceholder = sendableTemplates.find((template) => {
+                            return hasEditablePlaceholder(template);
                         });
 
-                        const selectedTemplate =
-                            sendablePreferredTemplate ||
-                            sendableOfferTemplate ||
-                            sendableAnyTemplate;
+                        const selectedTemplate = exactMatch || anyApprovedWithPlaceholder;
 
                         if (!selectedTemplate) {
-                            if (preferredTemplates.length > 0) {
-                                const statuses = preferredTemplates
-                                    .map((template) => {
-                                        const name =
-                                            typeof template.name === 'string'
-                                                ? template.name
-                                                : 'unknown_template';
-                                        const status =
-                                            normalizeTemplateStatus(template.status) || 'UNKNOWN';
-                                        return `${name}:${status}`;
-                                    })
-                                    .join(', ');
-                                utilityTemplateBootstrapError =
-                                    `Preferred utility templates are not approved. Current statuses: ${statuses}`;
-                                return false;
-                            }
-
                             if (utilityTemplates.length > 0) {
                                 const statuses = utilityTemplates
                                     .map((template) => {
@@ -791,7 +774,7 @@ export async function POST(request: NextRequest) {
                                     })
                                     .join(', ');
                                 utilityTemplateBootstrapError =
-                                    `No approved utility templates found. Existing statuses: ${statuses}`;
+                                    `No approved utility template with {{1}} placeholder found. Existing statuses: ${statuses}`;
                                 return false;
                             }
 
@@ -827,17 +810,13 @@ export async function POST(request: NextRequest) {
                 attempt < AUTO_TEMPLATE_MAX_ATTEMPTS &&
                 Date.now() - startedAt < AUTO_TEMPLATE_TIME_BUDGET_MS
             ) {
-                const bodyText =
-                    AUTO_TEMPLATE_MESSAGES[
-                    attempt % AUTO_TEMPLATE_MESSAGES.length
-                    ];
                 const templateName = buildAutoTemplateName(attempt + 1);
 
                 for (const languageCandidate of languageCandidates) {
                     const templateCandidate = buildAutoTemplateCandidate(
                         templateName,
                         languageCandidate,
-                        bodyText
+                        pageStatusHeadline
                     );
 
                     try {
