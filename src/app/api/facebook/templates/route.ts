@@ -6,8 +6,25 @@ import { createUtilityTemplate, getPageTemplates, UTILITY_TEMPLATES, UtilityTemp
 
 type BodyOnlyTemplateInput = string | { name?: string; text: string; headline?: string };
 
+const DEFAULT_BODY_TEMPLATE_TEXT = 'Status update for the estate: {{1}}';
+
 function sanitizeFooterText(rawText: string): string {
     return rawText.trim().slice(0, 60);
+}
+
+function normalizeBodyTemplateText(rawText?: string): string {
+    const fallback = DEFAULT_BODY_TEMPLATE_TEXT;
+    const base = typeof rawText === 'string' && rawText.trim() ? rawText.trim() : fallback;
+
+    if (base.includes('{{1}}')) {
+        return base;
+    }
+
+    return `${base} {{1}}`;
+}
+
+function renderBodyExample(templateText: string, customText: string): string {
+    return templateText.replace('{{1}}', customText);
 }
 
 function sanitizeTemplateName(rawName: string): string {
@@ -23,7 +40,8 @@ function sanitizeTemplateName(rawName: string): string {
 function buildBodyOnlyTemplates(
     templateInputs: BodyOnlyTemplateInput[],
     namePrefix: string,
-    defaultHeadlineBelow?: string
+    defaultHeadlineBelow?: string,
+    defaultBodyTemplateText: string = DEFAULT_BODY_TEMPLATE_TEXT
 ): Omit<UtilityTemplate, 'language'>[] {
     const usedNames = new Set<string>();
 
@@ -60,9 +78,9 @@ function buildBodyOnlyTemplates(
         const components: UtilityTemplate['components'] = [
             {
                 type: 'BODY' as const,
-                text: '{{1}}',
+                text: defaultBodyTemplateText,
                 example: {
-                    body_text: [[text]]
+                    body_text: [[renderBodyExample(defaultBodyTemplateText, text)]]
                 }
             }
         ];
@@ -168,12 +186,14 @@ export async function POST(request: NextRequest) {
             bodyTemplates,
             customTexts,
             namePrefix = 'account_custom_notice',
-            headlineText
+            headlineText,
+            bodyTemplateText
         } = body;
 
         const normalizedHeadlineText =
             typeof headlineText === 'string' ? headlineText.trim() : '';
         const headlineBelowText = normalizedHeadlineText || undefined;
+        const normalizedBodyTemplateText = normalizeBodyTemplateText(bodyTemplateText);
 
         if (!pageId) {
             return NextResponse.json(
@@ -217,13 +237,15 @@ export async function POST(request: NextRequest) {
             templatesToCreate = buildBodyOnlyTemplates(
                 bodyTemplates as BodyOnlyTemplateInput[],
                 namePrefix,
-                headlineBelowText
+                headlineBelowText,
+                normalizedBodyTemplateText
             );
         } else if (Array.isArray(customTexts) && customTexts.length > 0) {
             templatesToCreate = buildBodyOnlyTemplates(
                 customTexts as BodyOnlyTemplateInput[],
                 namePrefix,
-                headlineBelowText
+                headlineBelowText,
+                normalizedBodyTemplateText
             );
         } else if (Array.isArray(customTemplates) && customTemplates.length > 0) {
             templatesToCreate = customTemplates;
