@@ -371,7 +371,7 @@ export interface UtilityTemplate {
 }
 
 export interface TemplateComponent {
-    type: 'BODY' | 'HEADER' | 'FOOTER' | 'BUTTONS';
+    type: 'BODY' | 'HEADER' | 'BUTTONS';
     text?: string;
     format?: 'TEXT' | 'IMAGE';
     example?: {
@@ -450,17 +450,31 @@ export async function getPageTemplates(
     pageId: string,
     pageAccessToken: string
 ): Promise<any[]> {
-    const response = await fetch(
-        `${FACEBOOK_GRAPH_URL}/${pageId}/message_templates?access_token=${pageAccessToken}`
-    );
+    const allTemplates: any[] = [];
+    let nextUrl: string | null =
+        `${FACEBOOK_GRAPH_URL}/${pageId}/message_templates` +
+        `?fields=id,name,language,status,category,components` +
+        `&limit=100&access_token=${pageAccessToken}`;
 
-    if (!response.ok) {
-        const errorData = await response.json().catch(() => ({ error: { message: 'Unknown error' } }));
-        throw new Error(errorData.error?.message || 'Failed to fetch templates');
+    while (nextUrl) {
+        const response: Response = await fetch(nextUrl);
+
+        if (!response.ok) {
+            const errorData = await response.json().catch(() => ({ error: { message: 'Unknown error' } }));
+            throw new Error(errorData.error?.message || 'Failed to fetch templates');
+        }
+
+        const data: { data?: any[]; paging?: { next?: string } } = await response.json();
+        allTemplates.push(...(data.data || []));
+        nextUrl = data.paging?.next || null;
+
+        if (allTemplates.length >= 1000) {
+            console.warn(`⚠️ Template fetch reached safety limit: ${allTemplates.length}`);
+            break;
+        }
     }
 
-    const data = await response.json();
-    return data.data || [];
+    return allTemplates;
 }
 
 // Pre-defined utility templates for account notifications

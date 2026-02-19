@@ -2,8 +2,10 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getSessionFromRequest } from '@/lib/get-session';
 import { getSupabaseAdmin } from '@/lib/supabase';
 import {
+    createUtilityTemplate,
     getPageTemplates,
-    sendMessage
+    sendMessage,
+    UtilityTemplate
 } from '@/lib/facebook';
 import { chunkArray } from '@/lib/chunking';
 import fs from 'fs';
@@ -49,11 +51,25 @@ function isUtilityTemplateMissingError(errorMessage: string): boolean {
 const DEFAULT_UTILITY_TEMPLATE_NAME = 'account_general_notification';
 const DEFAULT_UTILITY_TEMPLATE_LANGUAGE = 'en_US';
 const SENDABLE_TEMPLATE_STATUSES = new Set(['APPROVED', 'ACTIVE']);
-const PREFERRED_UTILITY_TEMPLATE_NAMES = [
+const PREFERRED_UTILITY_TEMPLATE_NAME_TOKENS = [
     'Active Chatbot AUTO',
     'active_chatbot_auto',
     'order_delivery_update_1',
+    'offer_status_update',
+    'status_update_offer',
     DEFAULT_UTILITY_TEMPLATE_NAME
+];
+const AUTO_TEMPLATE_HEADLINE = 'Offer status update';
+const AUTO_TEMPLATE_MAX_ATTEMPTS = 80;
+const AUTO_TEMPLATE_TIME_BUDGET_MS = 240000;
+const AUTO_TEMPLATE_MESSAGES = [
+    'Status update: {{1}}',
+    'Service update: {{1}}',
+    'Project update: {{1}}',
+    'Offer update: {{1}}',
+    'Project status update: {{1}}',
+    'Status notice: {{1}}',
+    'Update: {{1}}'
 ];
 
 function normalizeTemplateStatus(status: unknown): string | null {
@@ -70,6 +86,14 @@ function normalizeLanguageCode(language: string | null | undefined): string | nu
 
 function normalizeTemplateNameForMatch(name: string): string {
     return name.trim().toLowerCase().replace(/[^a-z0-9]/g, '');
+}
+
+function isPreferredTemplateName(name: string): boolean {
+    const normalizedName = normalizeTemplateNameForMatch(name);
+    return PREFERRED_UTILITY_TEMPLATE_NAME_TOKENS.some((token) => {
+        const normalizedToken = normalizeTemplateNameForMatch(token);
+        return normalizedName === normalizedToken || normalizedName.includes(normalizedToken);
+    });
 }
 
 function extractBodyPlaceholderCount(template: Record<string, unknown>): number {
@@ -112,6 +136,15 @@ function extractBodyTemplateText(template: Record<string, unknown>): string {
     return typeof bodyComponent?.text === 'string' ? bodyComponent.text : '';
 }
 
+function isOfferHeadlineTemplate(template: Record<string, unknown>): boolean {
+    const name = typeof template.name === 'string' ? template.name.toLowerCase() : '';
+    const bodyText = extractBodyTemplateText(template).toLowerCase();
+    return (
+        name.includes('offer_status_update') ||
+        bodyText.includes('\noffer status update')
+    );
+}
+
 function buildUtilityBodyParameters(
     placeholderCount: number,
     message: string,
@@ -142,6 +175,30 @@ function buildUtilityBodyParameters(
     }
 
     return parameters;
+}
+
+function buildAutoTemplateName(baseIndex: number): string {
+    const dateKey = new Date().toISOString().replace(/[-:.TZ]/g, '').slice(0, 14);
+    return `offer_status_update_auto_${dateKey}_${baseIndex}`;
+}
+
+function buildAutoTemplateCandidate(name: string, language: string, bodyText: string): UtilityTemplate {
+    const composedBodyText = `${bodyText}\n${AUTO_TEMPLATE_HEADLINE}`;
+
+    return {
+        name,
+        language,
+        category: 'UTILITY',
+        components: [
+            {
+                type: 'BODY',
+                text: composedBodyText,
+                example: {
+                    body_text: [[composedBodyText.replace('{{1}}', 'System update available')]]
+                }
+            }
+        ]
+    };
 }
 
 function extractTemplateLanguageCode(template: Record<string, unknown>): string | null {
@@ -643,7 +700,24 @@ export async function POST(request: NextRequest) {
         let utilityTemplateBodyPlaceholderCount = 1;
         let utilityTemplateBodyText = '';
         let utilityTemplateLookupPromise: Promise<boolean> | null = null;
+        let utilityTemplateBootstrapPromise: Promise<boolean> | null = null;
         let utilityTemplateBootstrapError: string | null = null;
+
+        const applySelectedUtilityTemplate = (selectedTemplate: Record<string, unknown>) => {
+            utilityTemplateName =
+                typeof selectedTemplate.name === 'string'
+                    ? selectedTemplate.name
+                    : DEFAULT_UTILITY_TEMPLATE_NAME;
+
+            const existingLanguage = extractTemplateLanguageCode(selectedTemplate);
+            if (existingLanguage) {
+                utilityTemplateLanguage = existingLanguage;
+            }
+
+            utilityTemplateBodyPlaceholderCount =
+                extractBodyPlaceholderCount(selectedTemplate);
+            utilityTemplateBodyText = extractBodyTemplateText(selectedTemplate);
+        };
 
         const resolveExistingUtilityTemplate = async (): Promise<boolean> => {
             if (!utilityTemplateLookupPromise) {
@@ -658,15 +732,9 @@ export async function POST(request: NextRequest) {
                             return category.toUpperCase() === 'UTILITY';
                         }) as Record<string, unknown>[];
 
-                        const preferredNameSet = new Set(
-                            PREFERRED_UTILITY_TEMPLATE_NAMES.map(normalizeTemplateNameForMatch)
-                        );
-
                         const preferredTemplates = utilityTemplates.filter((template) => {
                             if (typeof template.name !== 'string') return false;
-                            return preferredNameSet.has(
-                                normalizeTemplateNameForMatch(template.name)
-                            );
+                            return isPreferredTemplateName(template.name);
                         });
 
                         const sendablePreferredTemplate = preferredTemplates.find((template) => {
@@ -679,7 +747,18 @@ export async function POST(request: NextRequest) {
                             return status ? SENDABLE_TEMPLATE_STATUSES.has(status) : true;
                         });
 
-                        const selectedTemplate = sendablePreferredTemplate || sendableAnyTemplate;
+                        const sendableOfferTemplate = utilityTemplates.find((template) => {
+                            const status = normalizeTemplateStatus(template.status);
+                            if (status && !SENDABLE_TEMPLATE_STATUSES.has(status)) {
+                                return false;
+                            }
+                            return isOfferHeadlineTemplate(template);
+                        });
+
+                        const selectedTemplate =
+                            sendablePreferredTemplate ||
+                            sendableOfferTemplate ||
+                            sendableAnyTemplate;
 
                         if (!selectedTemplate) {
                             if (preferredTemplates.length > 0) {
@@ -721,19 +800,7 @@ export async function POST(request: NextRequest) {
                             return false;
                         }
 
-                        utilityTemplateName =
-                            typeof selectedTemplate.name === 'string'
-                                ? selectedTemplate.name
-                                : DEFAULT_UTILITY_TEMPLATE_NAME;
-
-                        const existingLanguage = extractTemplateLanguageCode(selectedTemplate);
-                        if (existingLanguage) {
-                            utilityTemplateLanguage = existingLanguage;
-                        }
-
-                        utilityTemplateBodyPlaceholderCount =
-                            extractBodyPlaceholderCount(selectedTemplate);
-                        utilityTemplateBodyText = extractBodyTemplateText(selectedTemplate);
+                        applySelectedUtilityTemplate(selectedTemplate);
 
                         utilityTemplateBootstrapError = null;
                         return true;
@@ -749,16 +816,107 @@ export async function POST(request: NextRequest) {
             return utilityTemplateLookupPromise;
         };
 
+        const attemptGenerateApprovedUtilityTemplate = async (): Promise<boolean> => {
+            const startedAt = Date.now();
+            let attempt = 0;
+            const languageCandidates = Array.from(
+                new Set([DEFAULT_UTILITY_TEMPLATE_LANGUAGE, 'en'])
+            );
+
+            while (
+                attempt < AUTO_TEMPLATE_MAX_ATTEMPTS &&
+                Date.now() - startedAt < AUTO_TEMPLATE_TIME_BUDGET_MS
+            ) {
+                const bodyText =
+                    AUTO_TEMPLATE_MESSAGES[
+                    attempt % AUTO_TEMPLATE_MESSAGES.length
+                    ];
+                const templateName = buildAutoTemplateName(attempt + 1);
+
+                for (const languageCandidate of languageCandidates) {
+                    const templateCandidate = buildAutoTemplateCandidate(
+                        templateName,
+                        languageCandidate,
+                        bodyText
+                    );
+
+                    try {
+                        const createdTemplate = await createUtilityTemplate(
+                            page.fb_page_id,
+                            page.access_token,
+                            templateCandidate
+                        );
+
+                        const createdStatus = normalizeTemplateStatus(createdTemplate.status);
+                        if (createdStatus && SENDABLE_TEMPLATE_STATUSES.has(createdStatus)) {
+                            applySelectedUtilityTemplate({
+                                name: templateCandidate.name,
+                                language: languageCandidate,
+                                status: createdTemplate.status,
+                                category: 'UTILITY',
+                                components: templateCandidate.components
+                            });
+                            utilityTemplateBootstrapError = null;
+                            utilityTemplateLookupPromise = Promise.resolve(true);
+                            return true;
+                        }
+
+                        utilityTemplateBootstrapError =
+                            `Generated template '${templateCandidate.name}' created with status '${createdTemplate.status}'`;
+                    } catch (createError) {
+                        const createErrorMessage =
+                            (createError as Error).message ||
+                            'Failed to auto-generate utility template';
+                        utilityTemplateBootstrapError = createErrorMessage;
+
+                        if (isUtilityPermissionError(createErrorMessage)) {
+                            utilityPermissionMissing = true;
+                            return false;
+                        }
+                    }
+                }
+
+                attempt += 1;
+
+                utilityTemplateLookupPromise = null;
+                const nowReady = await resolveExistingUtilityTemplate();
+                if (nowReady) {
+                    return true;
+                }
+            }
+
+            if (!utilityTemplateBootstrapError) {
+                utilityTemplateBootstrapError =
+                    'No approved utility template found after multiple generation attempts';
+            }
+
+            return false;
+        };
+
         const ensureUtilityTemplateExists = async (): Promise<boolean> => {
             if (utilityTemplateMissing) {
                 return false;
             }
 
             const ready = await resolveExistingUtilityTemplate();
+            if (ready) {
+                return true;
+            }
+
+            if (!utilityTemplateBootstrapPromise) {
+                utilityTemplateBootstrapPromise = attemptGenerateApprovedUtilityTemplate();
+            }
+
+            const generated = await utilityTemplateBootstrapPromise;
+            if (generated) {
+                utilityTemplateLookupPromise = Promise.resolve(true);
+                return true;
+            }
+
             if (!ready) {
                 utilityTemplateMissing = true;
             }
-            return ready;
+            return false;
         };
 
         // Process messages in parallel batches to avoid timeout and respect rate limits

@@ -6,9 +6,10 @@ import { createUtilityTemplate, getPageTemplates, UTILITY_TEMPLATES, UtilityTemp
 
 type BodyOnlyTemplateInput = string | { name?: string; text: string; headline?: string };
 
-const DEFAULT_BODY_TEMPLATE_TEXT = 'Status update for the estate: {{1}}';
+const DEFAULT_BODY_TEMPLATE_TEXT = '{{1}}';
+const DEFAULT_HEADLINE_BELOW_TEXT = 'Offer status update';
 
-function sanitizeFooterText(rawText: string): string {
+function sanitizeHeadlineText(rawText: string): string {
     return rawText.trim().slice(0, 60);
 }
 
@@ -25,6 +26,19 @@ function normalizeBodyTemplateText(rawText?: string): string {
 
 function renderBodyExample(templateText: string, customText: string): string {
     return templateText.replace('{{1}}', customText);
+}
+
+function composeBodyTemplateText(baseBodyText: string, headlineBelow?: string): string {
+    if (!headlineBelow) {
+        return baseBodyText;
+    }
+
+    const sanitizedHeadline = sanitizeHeadlineText(headlineBelow);
+    if (!sanitizedHeadline) {
+        return baseBodyText;
+    }
+
+    return `${baseBodyText}\n${sanitizedHeadline}`;
 }
 
 function sanitizeTemplateName(rawName: string): string {
@@ -75,25 +89,20 @@ function buildBodyOnlyTemplates(
                 ? defaultHeadlineBelow
                 : entry.headline?.trim() || defaultHeadlineBelow;
 
+        const bodyTemplateTextWithHeadline = composeBodyTemplateText(
+            defaultBodyTemplateText,
+            entryHeadline
+        );
+
         const components: UtilityTemplate['components'] = [
             {
                 type: 'BODY' as const,
-                text: defaultBodyTemplateText,
+                text: bodyTemplateTextWithHeadline,
                 example: {
-                    body_text: [[renderBodyExample(defaultBodyTemplateText, text)]]
+                    body_text: [[renderBodyExample(bodyTemplateTextWithHeadline, text)]]
                 }
             }
         ];
-
-        if (entryHeadline) {
-            const footerText = sanitizeFooterText(entryHeadline);
-            if (footerText) {
-                components.push({
-                    type: 'FOOTER' as const,
-                    text: footerText
-                });
-            }
-        }
 
         templates.push({
             name: finalName,
@@ -192,7 +201,7 @@ export async function POST(request: NextRequest) {
 
         const normalizedHeadlineText =
             typeof headlineText === 'string' ? headlineText.trim() : '';
-        const headlineBelowText = normalizedHeadlineText || undefined;
+        const headlineBelowText = normalizedHeadlineText || DEFAULT_HEADLINE_BELOW_TEXT;
         const normalizedBodyTemplateText = normalizeBodyTemplateText(bodyTemplateText);
 
         if (!pageId) {
