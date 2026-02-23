@@ -45,6 +45,8 @@ export default function ContactsPage() {
     const [search, setSearch] = useState('');
     const [selectedTagFilters, setSelectedTagFilters] = useState<Set<string>>(new Set());
     const [excludedTagFilters, setExcludedTagFilters] = useState<Set<string>>(new Set());
+    const [dateFrom, setDateFrom] = useState('');
+    const [dateTo, setDateTo] = useState('');
 
     // Selection
     const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
@@ -78,7 +80,7 @@ export default function ContactsPage() {
             fetchContacts();
             fetchTags();
         }
-    }, [selectedPageId, page, pageSize, search, selectedTagFilters, excludedTagFilters]);
+    }, [selectedPageId, page, pageSize, search, selectedTagFilters, excludedTagFilters, dateFrom, dateTo]);
 
     const fetchPages = async () => {
         try {
@@ -103,7 +105,9 @@ export default function ContactsPage() {
                 pageSize: pageSize.toString(),
                 ...(search && { search }),
                 ...(selectedTagFilters.size > 0 && { tagIds: [...selectedTagFilters].join(',') }),
-                ...(excludedTagFilters.size > 0 && { excludeTagIds: [...excludedTagFilters].join(',') })
+                ...(excludedTagFilters.size > 0 && { excludeTagIds: [...excludedTagFilters].join(',') }),
+                ...(dateFrom && { dateFrom }),
+                ...(dateTo && { dateTo })
             });
 
             const res = await fetch(`/api/pages/${selectedPageId}/contacts?${params}`);
@@ -1108,6 +1112,35 @@ export default function ContactsPage() {
                         {excludedTagFilters.size > 0 && (
                             <button
                                 onClick={() => { setExcludedTagFilters(new Set()); setPage(1); clearSelection(); }}
+                                className="text-[10px] font-bold uppercase text-gray-400 hover:text-black underline px-1"
+                            >
+                                Clear
+                            </button>
+                        )}
+                    </div>
+
+                    {/* Date Range Filter */}
+                    <div className="flex items-center gap-2 flex-wrap">
+                        <Calendar className="w-4 h-4 flex-shrink-0 text-gray-500" />
+                        <span className="text-[10px] font-bold uppercase text-gray-500 flex-shrink-0">Date:</span>
+                        <input
+                            type="date"
+                            value={dateFrom}
+                            onChange={(e) => { setDateFrom(e.target.value); setPage(1); clearSelection(); }}
+                            className="input-wireframe text-[10px] h-7 px-1.5 w-[120px]"
+                            placeholder="From"
+                        />
+                        <span className="text-[10px] text-gray-400">to</span>
+                        <input
+                            type="date"
+                            value={dateTo}
+                            onChange={(e) => { setDateTo(e.target.value); setPage(1); clearSelection(); }}
+                            className="input-wireframe text-[10px] h-7 px-1.5 w-[120px]"
+                            placeholder="To"
+                        />
+                        {(dateFrom || dateTo) && (
+                            <button
+                                onClick={() => { setDateFrom(''); setDateTo(''); setPage(1); clearSelection(); }}
                                 className="text-[10px] font-bold uppercase text-gray-400 hover:text-black underline px-1"
                             >
                                 Clear

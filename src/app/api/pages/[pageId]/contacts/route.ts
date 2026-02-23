@@ -31,6 +31,8 @@ export async function GET(
         const tagIds = tagIdsRaw ? tagIdsRaw.split(',').filter(Boolean) : [];
         const excludeTagIds = excludeTagIdsRaw ? excludeTagIdsRaw.split(',').filter(Boolean) : [];
         const sendableOnly = searchParams.get('sendable') === 'true'; // Only return contacts with valid PSIDs
+        const dateFrom = searchParams.get('dateFrom') || '';
+        const dateTo = searchParams.get('dateTo') || '';
 
         const supabase = getSupabaseAdmin();
 
@@ -64,6 +66,18 @@ export async function GET(
         // Apply search filter
         if (search) {
             query = query.ilike('name', `%${search}%`);
+        }
+
+        // Apply date range filter on first_interaction_at (falls back to created_at)
+        if (dateFrom) {
+            query = query.or(`first_interaction_at.gte.${dateFrom},and(first_interaction_at.is.null,created_at.gte.${dateFrom})`);
+        }
+        if (dateTo) {
+            // Add one day to dateTo to include the entire day
+            const dateToEnd = new Date(dateTo);
+            dateToEnd.setDate(dateToEnd.getDate() + 1);
+            const dateToEndStr = dateToEnd.toISOString().split('T')[0];
+            query = query.or(`first_interaction_at.lt.${dateToEndStr},and(first_interaction_at.is.null,created_at.lt.${dateToEndStr})`);
         }
 
         // Apply include tag filter (OR logic — contacts with ANY of the selected tags)

@@ -123,7 +123,9 @@ export async function POST(request: NextRequest) {
                                 page_id: page.id,
                                 psid: senderId,
                                 last_interaction_at: interactionAt,
-                                updated_at: new Date().toISOString()
+                                updated_at: new Date().toISOString(),
+                                // Set first_interaction_at only for brand-new contacts
+                                ...(isNewContact ? { first_interaction_at: interactionAt } : {})
                             }, {
                                 onConflict: 'page_id,psid'
                             })
