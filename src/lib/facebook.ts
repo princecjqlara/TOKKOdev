@@ -161,7 +161,7 @@ export async function sendMessage(
     templateName?: string,
     templateLanguage: string = DEFAULT_UTILITY_LANGUAGE,
     templateBodyParameters?: string[],
-    templateButtons?: Array<{ type: 'URL'; text: string; url: string }>
+    templateButtons?: Array<{ type: 'URL'; text: string; url: string } | { type: 'POSTBACK'; text: string; payload: string }>
 ): Promise<{ message_id: string }> {
     // Build the request payload based on messaging type
     let bodyPayload: Record<string, unknown>;

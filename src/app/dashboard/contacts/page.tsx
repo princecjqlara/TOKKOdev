@@ -61,7 +61,7 @@ export default function ContactsPage() {
     const [selectedTagIds, setSelectedTagIds] = useState<Set<string>>(new Set());
     const [messagePart1, setMessagePart1] = useState('');
     const [messagePart2, setMessagePart2] = useState('');
-    const [messageButtons, setMessageButtons] = useState<Array<{ text: string; url: string }>>([]);
+    const [messageButtons, setMessageButtons] = useState<Array<{ type: 'URL' | 'QUICK_REPLY'; text: string; url: string; payload: string }>>([]);
     const [actionLoading, setActionLoading] = useState(false);
 
     const messageText = `${messagePart1}|||${messagePart2}`;
@@ -1288,7 +1288,6 @@ export default function ContactsPage() {
                                         {contact.best_contact_hour !== null && contact.best_contact_hour !== undefined ? (
                                             <div className="flex flex-col gap-1">
                                                 <div className="flex items-center gap-2 flex-wrap">
-                                                    {/* Show top 3 best hours */}
                                                     {(() => {
                                                         // @ts-expect-error - best_contact_hours added by migration
                                                         const hours = contact.best_contact_hours as { hour: number; count: number }[] || [];
@@ -1581,29 +1580,63 @@ export default function ContactsPage() {
                     </div>
                     {/* Button Card Section */}
                     <div className="border border-gray-300 p-3 rounded">
-                        <div className="flex items-center justify-between mb-2">
-                            <label className="flex items-center gap-1.5 text-xs font-bold uppercase">
+                        <div className="flex items-center justify-between">
+                            <label className="font-mono text-xs font-bold uppercase text-gray-500 flex items-center gap-1.5">
                                 <Link2 className="w-3.5 h-3.5" />
-                                Buttons (Links)
+                                Buttons
                             </label>
                             {messageButtons.length < 3 && (
-                                <button
-                                    type="button"
-                                    onClick={() => setMessageButtons([...messageButtons, { text: '', url: '' }])}
-                                    className="btn-ghost-wireframe text-xs uppercase font-bold px-2 py-1 flex items-center gap-1"
-                                >
-                                    <Plus className="w-3 h-3" />
-                                    Add Button
-                                </button>
+                                <div className="flex gap-1">
+                                    <button
+                                        type="button"
+                                        onClick={() => setMessageButtons([...messageButtons, { type: 'URL', text: '', url: '', payload: '' }])}
+                                        className="btn-ghost-wireframe text-[10px] uppercase font-bold px-2 py-1 flex items-center gap-1"
+                                    >
+                                        <Link2 className="w-3 h-3" />
+                                        + Link
+                                    </button>
+                                    <button
+                                        type="button"
+                                        onClick={() => setMessageButtons([...messageButtons, { type: 'QUICK_REPLY', text: '', url: '', payload: '' }])}
+                                        className="btn-ghost-wireframe text-[10px] uppercase font-bold px-2 py-1 flex items-center gap-1"
+                                    >
+                                        <MessageSquare className="w-3 h-3" />
+                                        + Quick Reply
+                                    </button>
+                                </div>
                             )}
                         </div>
                         {messageButtons.length === 0 && (
-                            <p className="text-xs text-gray-400 font-mono">No buttons added. Add up to 3 link buttons.</p>
+                            <p className="text-xs text-gray-400 font-mono">No buttons added. Add up to 3 link or quick reply buttons.</p>
                         )}
                         <div className="space-y-2">
                             {messageButtons.map((btn, idx) => (
                                 <div key={idx} className="flex items-start gap-2 p-2 border border-gray-200 bg-gray-50">
                                     <div className="flex-1 space-y-1">
+                                        <div className="flex items-center gap-2">
+                                            <span className={`text-[10px] font-bold uppercase px-1.5 py-0.5 rounded ${btn.type === 'URL'
+                                                ? 'bg-blue-100 text-blue-700'
+                                                : 'bg-green-100 text-green-700'
+                                                }`}>
+                                                {btn.type === 'URL' ? '🔗 Link' : '💬 Reply'}
+                                            </span>
+                                            <button
+                                                type="button"
+                                                onClick={() => {
+                                                    const updated = [...messageButtons];
+                                                    updated[idx] = {
+                                                        ...updated[idx],
+                                                        type: btn.type === 'URL' ? 'QUICK_REPLY' : 'URL',
+                                                        url: '',
+                                                        payload: ''
+                                                    };
+                                                    setMessageButtons(updated);
+                                                }}
+                                                className="text-[10px] text-gray-400 hover:text-black underline cursor-pointer"
+                                            >
+                                                Switch to {btn.type === 'URL' ? 'Quick Reply' : 'Link'}
+                                            </button>
+                                        </div>
                                         <input
                                             type="text"
                                             value={btn.text}
@@ -1615,17 +1648,31 @@ export default function ContactsPage() {
                                             placeholder="Button text (e.g. View Details)"
                                             className="input-wireframe w-full text-xs h-8"
                                         />
-                                        <input
-                                            type="url"
-                                            value={btn.url}
-                                            onChange={(e) => {
-                                                const updated = [...messageButtons];
-                                                updated[idx] = { ...updated[idx], url: e.target.value };
-                                                setMessageButtons(updated);
-                                            }}
-                                            placeholder="https://example.com"
-                                            className="input-wireframe w-full text-xs h-8"
-                                        />
+                                        {btn.type === 'URL' ? (
+                                            <input
+                                                type="url"
+                                                value={btn.url}
+                                                onChange={(e) => {
+                                                    const updated = [...messageButtons];
+                                                    updated[idx] = { ...updated[idx], url: e.target.value };
+                                                    setMessageButtons(updated);
+                                                }}
+                                                placeholder="https://example.com"
+                                                className="input-wireframe w-full text-xs h-8"
+                                            />
+                                        ) : (
+                                            <input
+                                                type="text"
+                                                value={btn.payload}
+                                                onChange={(e) => {
+                                                    const updated = [...messageButtons];
+                                                    updated[idx] = { ...updated[idx], payload: e.target.value };
+                                                    setMessageButtons(updated);
+                                                }}
+                                                placeholder="Message contact will send (e.g. I'm interested!)"
+                                                className="input-wireframe w-full text-xs h-8"
+                                            />
+                                        )}
                                     </div>
                                     <button
                                         type="button"

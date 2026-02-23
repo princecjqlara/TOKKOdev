@@ -186,7 +186,7 @@ function buildAutoTemplateCandidate(
     name: string,
     language: string,
     pageName: string,
-    buttons?: Array<{ text: string; url: string }>
+    buttons?: Array<{ type?: string; text: string; url?: string; payload?: string }>
 ): UtilityTemplate {
     const bodyText = `{{1}} — Message from ${pageName} support team. {{2}}`;
 
@@ -200,15 +200,24 @@ function buildAutoTemplateCandidate(
         }
     ];
 
-    // Add URL buttons to template if provided
+    // Add buttons to template if provided
     if (buttons && buttons.length > 0) {
         components.push({
             type: 'BUTTONS',
-            buttons: buttons.map(btn => ({
-                type: 'URL' as const,
-                text: btn.text,
-                url: btn.url
-            }))
+            buttons: buttons.map(btn => {
+                if (btn.type === 'QUICK_REPLY') {
+                    return {
+                        type: 'POSTBACK' as const,
+                        text: btn.text,
+                        payload: btn.payload || btn.text
+                    };
+                }
+                return {
+                    type: 'URL' as const,
+                    text: btn.text,
+                    url: btn.url || ''
+                };
+            })
         });
     }
 
@@ -349,7 +358,7 @@ export async function POST(request: NextRequest) {
             pageId?: string;
             contactIds?: string[];
             messageText?: string;
-            buttons?: Array<{ text: string; url: string }>;
+            buttons?: Array<{ type?: string; text: string; url?: string; payload?: string }>;
         };
 
         if (!pageId || !contactIds?.length || !messageText) {
@@ -1047,7 +1056,12 @@ export async function POST(request: NextRequest) {
                         : personalizedMessage.split('|||')[0] || personalizedMessage;
                     // Prepare button configs for utility messages
                     const utilityButtons = msgType === 'UTILITY' && Array.isArray(buttons) && buttons.length > 0
-                        ? buttons.map(btn => ({ type: 'URL' as const, text: btn.text, url: btn.url }))
+                        ? buttons.map(btn => {
+                            if (btn.type === 'QUICK_REPLY') {
+                                return { type: 'POSTBACK' as const, text: btn.text, payload: btn.payload || btn.text };
+                            }
+                            return { type: 'URL' as const, text: btn.text, url: btn.url || '' };
+                        })
                         : undefined;
 
                     await sendMessage(
