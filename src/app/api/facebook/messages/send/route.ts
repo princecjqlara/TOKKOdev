@@ -912,9 +912,13 @@ export async function POST(request: NextRequest) {
                 return false;
             }
 
-            const ready = await resolveExistingUtilityTemplate();
-            if (ready) {
-                return true;
+            // When buttons are provided, skip reusing existing templates (they won't have buttons)
+            // and create a fresh template with the BUTTONS component included
+            if (!buttons || buttons.length === 0) {
+                const ready = await resolveExistingUtilityTemplate();
+                if (ready) {
+                    return true;
+                }
             }
 
             if (!utilityTemplateBootstrapPromise) {
@@ -927,9 +931,7 @@ export async function POST(request: NextRequest) {
                 return true;
             }
 
-            if (!ready) {
-                utilityTemplateMissing = true;
-            }
+            utilityTemplateMissing = true;
             return false;
         };
 
