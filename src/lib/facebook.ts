@@ -186,17 +186,8 @@ export async function sendMessage(
                     }
                 ];
 
-                // Add button components if provided
-                if (Array.isArray(templateButtons) && templateButtons.length > 0) {
-                    templateButtons.forEach((btn, index) => {
-                        components.push({
-                            type: 'button',
-                            sub_type: 'url',
-                            index,
-                            parameters: [{ type: 'text', text: btn.url }]
-                        });
-                    });
-                }
+                // Note: buttons with static URLs are defined in the template itself
+                // and don't need runtime parameters in the send call.
 
                 templatePayload.components = components;
             }
@@ -210,17 +201,6 @@ export async function sendMessage(
                 }
             ];
 
-            // Add button components if provided
-            if (Array.isArray(templateButtons) && templateButtons.length > 0) {
-                templateButtons.forEach((btn, index) => {
-                    components.push({
-                        type: 'button',
-                        sub_type: 'url',
-                        index,
-                        parameters: [{ type: 'text', text: btn.url }]
-                    });
-                });
-            }
 
             templatePayload.components = components;
         }

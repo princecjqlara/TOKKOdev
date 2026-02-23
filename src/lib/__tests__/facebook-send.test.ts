@@ -108,7 +108,7 @@ describe('sendMessage', () => {
         expect(payload.message.text).toBe('hello');
     });
 
-    it('sends UTILITY message with button components', async () => {
+    it('sends UTILITY message with buttons (buttons are in template, not payload)', async () => {
         const fetchMock = vi
             .fn()
             .mockResolvedValue(createJsonResponse(true, { message_id: 'mid.btn' }));
@@ -137,22 +137,10 @@ describe('sendMessage', () => {
         expect(payload.message.template.name).toBe('order_notification');
 
         const components = payload.message.template.components;
-        expect(components).toHaveLength(3); // 1 body + 2 buttons
-
-        // Body component
+        // Only body component — buttons are static in the template definition
+        expect(components).toHaveLength(1);
         expect(components[0].type).toBe('body');
         expect(components[0].parameters[0].text).toBe('Your order is ready');
-
-        // Button components
-        expect(components[1].type).toBe('button');
-        expect(components[1].sub_type).toBe('url');
-        expect(components[1].index).toBe(0);
-        expect(components[1].parameters[0].text).toBe('https://example.com/details');
-
-        expect(components[2].type).toBe('button');
-        expect(components[2].sub_type).toBe('url');
-        expect(components[2].index).toBe(1);
-        expect(components[2].parameters[0].text).toBe('https://example.com/contact');
     });
 
     it('does not include buttons for HUMAN_AGENT messages', async () => {
