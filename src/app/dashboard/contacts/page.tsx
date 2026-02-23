@@ -1208,7 +1208,7 @@ export default function ContactsPage() {
                             <th>Tags</th>
                             <th>Best Time</th>
                             <th>Last Active</th>
-                            <th>Created</th>
+                            <th>First Message</th>
                         </tr>
                     </thead>
                     <tbody className="bg-white">
@@ -1347,7 +1347,11 @@ export default function ContactsPage() {
                                     <td className="font-mono text-xs text-gray-500">
                                         <div className="flex items-center gap-1">
                                             <Calendar className="w-3 h-3 text-gray-400" />
-                                            {new Date(contact.created_at).toLocaleDateString()}
+                                            {contact.first_interaction_at
+                                                ? new Date(contact.first_interaction_at).toLocaleDateString()
+                                                : contact.created_at
+                                                    ? new Date(contact.created_at).toLocaleDateString()
+                                                    : '—'}
                                         </div>
                                     </td>
                                 </tr>

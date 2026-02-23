@@ -251,6 +251,7 @@ export async function POST(
                     let bestContactConfidence: string = 'none';
                     let bestContactHours: { hour: number; count: number }[] = [];
                     let interactionCount = 0;
+                    let firstInteractionAt: string | null = null;
 
                     try {
                         // Fetch ALL messages from this conversation for analysis
@@ -285,6 +286,12 @@ export async function POST(
                                 .slice(0, 5); // Keep top 5 hours
 
                             interactionCount = contactMessages.length;
+
+                            // Find the earliest message — this is when the contact first interacted
+                            const sortedByTime = [...contactMessages].sort((a, b) =>
+                                new Date(a.created_time).getTime() - new Date(b.created_time).getTime()
+                            );
+                            firstInteractionAt = sortedByTime[0].created_time;
 
                             // Set primary best hour (most common)
                             if (bestContactHours.length > 0) {
@@ -328,6 +335,7 @@ export async function POST(
                             best_contact_confidence: bestContactConfidence,
                             best_contact_hours: bestContactHours,
                             interaction_count: interactionCount,
+                            ...(firstInteractionAt && { first_interaction_at: firstInteractionAt }),
                             updated_at: new Date().toISOString()
                         }, {
                             onConflict: 'page_id,psid',

@@ -48,6 +48,7 @@ export interface Contact {
   name: string | null;
   profile_pic: string | null;
   last_interaction_at: string | null;
+  first_interaction_at: string | null;
   created_at: string;
   updated_at: string;
   tags?: Tag[];
