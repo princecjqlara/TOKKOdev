@@ -108,4 +108,82 @@ describe('sendMessage', () => {
         expect(payload.message.text).toBe('hello');
     });
 
+    it('sends UTILITY message with button components', async () => {
+        const fetchMock = vi
+            .fn()
+            .mockResolvedValue(createJsonResponse(true, { message_id: 'mid.btn' }));
+        vi.stubGlobal('fetch', fetchMock);
+
+        const buttons = [
+            { type: 'URL' as const, text: 'View Details', url: 'https://example.com/details' },
+            { type: 'URL' as const, text: 'Contact Us', url: 'https://example.com/contact' }
+        ];
+
+        await sendMessage(
+            'page_1',
+            'token_1',
+            'psid_1',
+            'Your order is ready',
+            'UTILITY',
+            'order_notification',
+            'en_US',
+            ['Your order is ready'],
+            buttons
+        );
+
+        const [, requestInit] = fetchMock.mock.calls[0];
+        const payload = JSON.parse((requestInit as RequestInit).body as string);
+        expect(payload.messaging_type).toBe('UTILITY');
+        expect(payload.message.template.name).toBe('order_notification');
+
+        const components = payload.message.template.components;
+        expect(components).toHaveLength(3); // 1 body + 2 buttons
+
+        // Body component
+        expect(components[0].type).toBe('body');
+        expect(components[0].parameters[0].text).toBe('Your order is ready');
+
+        // Button components
+        expect(components[1].type).toBe('button');
+        expect(components[1].sub_type).toBe('url');
+        expect(components[1].index).toBe(0);
+        expect(components[1].parameters[0].text).toBe('https://example.com/details');
+
+        expect(components[2].type).toBe('button');
+        expect(components[2].sub_type).toBe('url');
+        expect(components[2].index).toBe(1);
+        expect(components[2].parameters[0].text).toBe('https://example.com/contact');
+    });
+
+    it('does not include buttons for HUMAN_AGENT messages', async () => {
+        const fetchMock = vi
+            .fn()
+            .mockResolvedValue(createJsonResponse(true, { message_id: 'mid.no-btn' }));
+        vi.stubGlobal('fetch', fetchMock);
+
+        const buttons = [
+            { type: 'URL' as const, text: 'View', url: 'https://example.com' }
+        ];
+
+        await sendMessage(
+            'page_1',
+            'token_1',
+            'psid_1',
+            'hello',
+            'HUMAN_AGENT',
+            undefined,
+            'en_US',
+            undefined,
+            buttons
+        );
+
+        const [, requestInit] = fetchMock.mock.calls[0];
+        const payload = JSON.parse((requestInit as RequestInit).body as string);
+        expect(payload.messaging_type).toBe('MESSAGE_TAG');
+        expect(payload.tag).toBe('HUMAN_AGENT');
+        expect(payload.message.text).toBe('hello');
+        // No template or button components for HUMAN_AGENT
+        expect(payload.message.template).toBeUndefined();
+    });
+
 });

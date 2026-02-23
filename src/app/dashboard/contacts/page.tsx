@@ -12,7 +12,10 @@ import {
     Check,
     X,
     User,
-    CheckSquare
+    CheckSquare,
+    Link2,
+    Plus,
+    Calendar
 } from 'lucide-react';
 import Pagination from '@/components/Pagination';
 import Modal from '@/components/Modal';
@@ -40,8 +43,8 @@ export default function ContactsPage() {
 
     // Filters
     const [search, setSearch] = useState('');
-    const [selectedTagFilter, setSelectedTagFilter] = useState('');
-    const [excludedTagFilter, setExcludedTagFilter] = useState('');
+    const [selectedTagFilters, setSelectedTagFilters] = useState<Set<string>>(new Set());
+    const [excludedTagFilters, setExcludedTagFilters] = useState<Set<string>>(new Set());
 
     // Selection
     const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
@@ -58,6 +61,7 @@ export default function ContactsPage() {
     const [selectedTagIds, setSelectedTagIds] = useState<Set<string>>(new Set());
     const [messagePart1, setMessagePart1] = useState('');
     const [messagePart2, setMessagePart2] = useState('');
+    const [messageButtons, setMessageButtons] = useState<Array<{ text: string; url: string }>>([]);
     const [actionLoading, setActionLoading] = useState(false);
 
     const messageText = `${messagePart1}|||${messagePart2}`;
@@ -74,7 +78,7 @@ export default function ContactsPage() {
             fetchContacts();
             fetchTags();
         }
-    }, [selectedPageId, page, pageSize, search, selectedTagFilter, excludedTagFilter]);
+    }, [selectedPageId, page, pageSize, search, selectedTagFilters, excludedTagFilters]);
 
     const fetchPages = async () => {
         try {
@@ -98,8 +102,8 @@ export default function ContactsPage() {
                 page: page.toString(),
                 pageSize: pageSize.toString(),
                 ...(search && { search }),
-                ...(selectedTagFilter && { tagId: selectedTagFilter }),
-                ...(excludedTagFilter && { excludeTagId: excludedTagFilter })
+                ...(selectedTagFilters.size > 0 && { tagIds: [...selectedTagFilters].join(',') }),
+                ...(excludedTagFilters.size > 0 && { excludeTagIds: [...excludedTagFilters].join(',') })
             });
 
             const res = await fetch(`/api/pages/${selectedPageId}/contacts?${params}`);
@@ -112,7 +116,7 @@ export default function ContactsPage() {
         } finally {
             setLoading(false);
         }
-    }, [selectedPageId, page, pageSize, search, selectedTagFilter, excludedTagFilter]);
+    }, [selectedPageId, page, pageSize, search, selectedTagFilters, excludedTagFilters]);
 
     const fetchTags = async () => {
         if (!selectedPageId) return;
@@ -136,7 +140,7 @@ export default function ContactsPage() {
             let hasMore = true;
 
             // #region agent log
-            fetch('http://127.0.0.1:7242/ingest/6358f30b-ef0a-4ea4-8acc-50c08c025924', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ location: 'contacts/page.tsx:117', message: 'fetchAllContactIds started', data: { selectedPageId, search, selectedTagFilter, excludedTagFilter, excludedCount: excludedIds.size }, timestamp: Date.now(), sessionId: 'debug-session', runId: 'run1', hypothesisId: 'C' }) }).catch(() => { });
+            fetch('http://127.0.0.1:7242/ingest/6358f30b-ef0a-4ea4-8acc-50c08c025924', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ location: 'contacts/page.tsx:117', message: 'fetchAllContactIds started', data: { selectedPageId, search, selectedTagFilters: [...selectedTagFilters], excludedTagFilters: [...excludedTagFilters], excludedCount: excludedIds.size }, timestamp: Date.now(), sessionId: 'debug-session', runId: 'run1', hypothesisId: 'C' }) }).catch(() => { });
             // #endregion
 
             while (hasMore) {
@@ -145,8 +149,8 @@ export default function ContactsPage() {
                     pageSize: pageSize.toString(),
                     sendable: 'true', // Only fetch contacts with valid PSIDs for messaging
                     ...(search && { search }),
-                    ...(selectedTagFilter && { tagId: selectedTagFilter }),
-                    ...(excludedTagFilter && { excludeTagId: excludedTagFilter })
+                    ...(selectedTagFilters.size > 0 && { tagIds: [...selectedTagFilters].join(',') }),
+                    ...(excludedTagFilters.size > 0 && { excludeTagIds: [...excludedTagFilters].join(',') })
                 });
 
                 const res = await fetch(`/api/pages/${selectedPageId}/contacts?${params}`);
@@ -176,7 +180,7 @@ export default function ContactsPage() {
             }
 
             // #region agent log
-            fetch('http://127.0.0.1:7242/ingest/6358f30b-ef0a-4ea4-8acc-50c08c025924', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ location: 'contacts/page.tsx:151', message: 'fetchAllContactIds completed', data: { totalPages: currentPage, beforeExcludeCount, afterExcludeCount: allIds.length, excludedCount: excludedIds.size, excludedTagFilter, finalCount: allIds.length }, timestamp: Date.now(), sessionId: 'debug-session', runId: 'run1', hypothesisId: 'C' }) }).catch(() => { });
+            fetch('http://127.0.0.1:7242/ingest/6358f30b-ef0a-4ea4-8acc-50c08c025924', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ location: 'contacts/page.tsx:151', message: 'fetchAllContactIds completed', data: { totalPages: currentPage, beforeExcludeCount, afterExcludeCount: allIds.length, excludedCount: excludedIds.size, excludedTagFilters: [...excludedTagFilters], finalCount: allIds.length }, timestamp: Date.now(), sessionId: 'debug-session', runId: 'run1', hypothesisId: 'C' }) }).catch(() => { });
             // #endregion
 
             return allIds;
@@ -456,7 +460,8 @@ export default function ContactsPage() {
                         body: JSON.stringify({
                             pageId: selectedPageId,
                             contactIds: chunk,
-                            messageText: messageText.trim()
+                            messageText: messageText.trim(),
+                            buttons: messageButtons.length > 0 ? messageButtons : undefined
                         })
                     });
 
@@ -556,7 +561,8 @@ export default function ContactsPage() {
                                         body: JSON.stringify({
                                             pageId: selectedPageId,
                                             contactIds: retryChunk,
-                                            messageText: messageText.trim()
+                                            messageText: messageText.trim(),
+                                            buttons: messageButtons.length > 0 ? messageButtons : undefined
                                         })
                                     });
 
@@ -760,6 +766,7 @@ export default function ContactsPage() {
                 setShowMessageModal(false);
                 setMessagePart1('');
                 setMessagePart2('');
+                setMessageButtons([]);
                 clearSelection();
             } else {
                 // Partial success or issues
@@ -830,7 +837,8 @@ export default function ContactsPage() {
                 body: JSON.stringify({
                     pageId: selectedPageId,
                     contactIds: failedContactIds,
-                    messageText: messageText.trim()
+                    messageText: messageText.trim(),
+                    buttons: messageButtons.length > 0 ? messageButtons : undefined
                 })
             });
 
@@ -906,6 +914,7 @@ export default function ContactsPage() {
                     setShowMessageModal(false);
                     setMessagePart1('');
                     setMessagePart2('');
+                    setMessageButtons([]);
                 }
                 await fetchContacts();
             } else {
@@ -1023,46 +1032,87 @@ export default function ContactsPage() {
                         />
                     </div>
 
-                    {/* Tag Filter */}
-                    <div className="flex items-center gap-2">
-                        <Filter className="w-4 h-4" />
-                        <select
-                            value={selectedTagFilter}
-                            onChange={(e) => {
-                                setSelectedTagFilter(e.target.value);
-                                setPage(1);
-                                clearSelection();
-                            }}
-                            className="input-wireframe w-auto"
-                        >
-                            <option value="">ALL TAGS</option>
-                            {tags.map((tag) => (
-                                <option key={tag.id} value={tag.id}>
+                    {/* Include Tags Filter */}
+                    <div className="flex items-center gap-2 flex-wrap">
+                        <Filter className="w-4 h-4 flex-shrink-0" />
+                        <span className="text-[10px] font-bold uppercase text-gray-500 flex-shrink-0">Include:</span>
+                        {tags.map((tag) => {
+                            const isActive = selectedTagFilters.has(tag.id);
+                            return (
+                                <button
+                                    key={tag.id}
+                                    onClick={() => {
+                                        const next = new Set(selectedTagFilters);
+                                        if (isActive) next.delete(tag.id); else next.add(tag.id);
+                                        // Remove from exclude if being added to include
+                                        if (!isActive) {
+                                            const nextExcl = new Set(excludedTagFilters);
+                                            nextExcl.delete(tag.id);
+                                            setExcludedTagFilters(nextExcl);
+                                        }
+                                        setSelectedTagFilters(next);
+                                        setPage(1);
+                                        clearSelection();
+                                    }}
+                                    className={`text-[10px] font-bold uppercase px-2 py-0.5 border transition-colors ${isActive
+                                        ? 'bg-black text-white border-black'
+                                        : 'bg-white text-gray-600 border-gray-300 hover:border-black'
+                                        }`}
+                                    style={isActive ? { backgroundColor: tag.color, borderColor: tag.color } : {}}
+                                >
                                     {tag.name}
-                                </option>
-                            ))}
-                        </select>
+                                </button>
+                            );
+                        })}
+                        {selectedTagFilters.size > 0 && (
+                            <button
+                                onClick={() => { setSelectedTagFilters(new Set()); setPage(1); clearSelection(); }}
+                                className="text-[10px] font-bold uppercase text-gray-400 hover:text-black underline px-1"
+                            >
+                                Clear
+                            </button>
+                        )}
                     </div>
 
-                    {/* Exclude Tag */}
-                    <div className="flex items-center gap-2">
-                        <X className="w-4 h-4" />
-                        <select
-                            value={excludedTagFilter}
-                            onChange={(e) => {
-                                setExcludedTagFilter(e.target.value);
-                                setPage(1);
-                                clearSelection();
-                            }}
-                            className="input-wireframe w-auto"
-                        >
-                            <option value="">EXCLUDE TAG</option>
-                            {tags.map((tag) => (
-                                <option key={tag.id} value={tag.id}>
+                    {/* Exclude Tags Filter */}
+                    <div className="flex items-center gap-2 flex-wrap">
+                        <X className="w-4 h-4 flex-shrink-0 text-red-500" />
+                        <span className="text-[10px] font-bold uppercase text-gray-500 flex-shrink-0">Exclude:</span>
+                        {tags.map((tag) => {
+                            const isActive = excludedTagFilters.has(tag.id);
+                            return (
+                                <button
+                                    key={tag.id}
+                                    onClick={() => {
+                                        const next = new Set(excludedTagFilters);
+                                        if (isActive) next.delete(tag.id); else next.add(tag.id);
+                                        // Remove from include if being added to exclude
+                                        if (!isActive) {
+                                            const nextIncl = new Set(selectedTagFilters);
+                                            nextIncl.delete(tag.id);
+                                            setSelectedTagFilters(nextIncl);
+                                        }
+                                        setExcludedTagFilters(next);
+                                        setPage(1);
+                                        clearSelection();
+                                    }}
+                                    className={`text-[10px] font-bold uppercase px-2 py-0.5 border transition-colors ${isActive
+                                        ? 'bg-red-600 text-white border-red-600 line-through'
+                                        : 'bg-white text-gray-600 border-gray-300 hover:border-red-400'
+                                        }`}
+                                >
                                     {tag.name}
-                                </option>
-                            ))}
-                        </select>
+                                </button>
+                            );
+                        })}
+                        {excludedTagFilters.size > 0 && (
+                            <button
+                                onClick={() => { setExcludedTagFilters(new Set()); setPage(1); clearSelection(); }}
+                                className="text-[10px] font-bold uppercase text-gray-400 hover:text-black underline px-1"
+                            >
+                                Clear
+                            </button>
+                        )}
                     </div>
 
                     {/* Bulk Actions */}
@@ -1158,18 +1208,19 @@ export default function ContactsPage() {
                             <th>Tags</th>
                             <th>Best Time</th>
                             <th>Last Active</th>
+                            <th>Created</th>
                         </tr>
                     </thead>
                     <tbody className="bg-white">
                         {loading ? (
                             <tr>
-                                <td colSpan={5} className="text-center py-12">
+                                <td colSpan={6} className="text-center py-12">
                                     <div className="animate-spin w-8 h-8 border-2 border-black border-t-transparent rounded-full mx-auto" />
                                 </td>
                             </tr>
                         ) : contacts.length === 0 ? (
                             <tr>
-                                <td colSpan={5} className="text-center py-20">
+                                <td colSpan={6} className="text-center py-20">
                                     <User className="w-12 h-12 text-gray-300 mx-auto mb-4" />
                                     <p className="text-lg font-bold uppercase">No contacts found</p>
                                     <p className="font-mono text-xs text-gray-500 mt-2">
@@ -1292,6 +1343,12 @@ export default function ContactsPage() {
                                         {contact.last_interaction_at
                                             ? new Date(contact.last_interaction_at).toLocaleDateString()
                                             : 'NEVER'}
+                                    </td>
+                                    <td className="font-mono text-xs text-gray-500">
+                                        <div className="flex items-center gap-1">
+                                            <Calendar className="w-3 h-3 text-gray-400" />
+                                            {new Date(contact.created_at).toLocaleDateString()}
+                                        </div>
                                     </td>
                                 </tr>
                             ))
@@ -1434,6 +1491,7 @@ export default function ContactsPage() {
                         setFailedContactIds([]);
                         setFailedContactErrors([]);
                         setLastSendResults(null);
+                        setMessageButtons([]);
                     }
                 }}
                 title="Send Message"
@@ -1517,6 +1575,65 @@ export default function ContactsPage() {
                             />
                         </div>
                     </div>
+                    {/* Button Card Section */}
+                    <div className="border border-gray-300 p-3 rounded">
+                        <div className="flex items-center justify-between mb-2">
+                            <label className="flex items-center gap-1.5 text-xs font-bold uppercase">
+                                <Link2 className="w-3.5 h-3.5" />
+                                Buttons (Links)
+                            </label>
+                            {messageButtons.length < 3 && (
+                                <button
+                                    type="button"
+                                    onClick={() => setMessageButtons([...messageButtons, { text: '', url: '' }])}
+                                    className="btn-ghost-wireframe text-xs uppercase font-bold px-2 py-1 flex items-center gap-1"
+                                >
+                                    <Plus className="w-3 h-3" />
+                                    Add Button
+                                </button>
+                            )}
+                        </div>
+                        {messageButtons.length === 0 && (
+                            <p className="text-xs text-gray-400 font-mono">No buttons added. Add up to 3 link buttons.</p>
+                        )}
+                        <div className="space-y-2">
+                            {messageButtons.map((btn, idx) => (
+                                <div key={idx} className="flex items-start gap-2 p-2 border border-gray-200 bg-gray-50">
+                                    <div className="flex-1 space-y-1">
+                                        <input
+                                            type="text"
+                                            value={btn.text}
+                                            onChange={(e) => {
+                                                const updated = [...messageButtons];
+                                                updated[idx] = { ...updated[idx], text: e.target.value };
+                                                setMessageButtons(updated);
+                                            }}
+                                            placeholder="Button text (e.g. View Details)"
+                                            className="input-wireframe w-full text-xs h-8"
+                                        />
+                                        <input
+                                            type="url"
+                                            value={btn.url}
+                                            onChange={(e) => {
+                                                const updated = [...messageButtons];
+                                                updated[idx] = { ...updated[idx], url: e.target.value };
+                                                setMessageButtons(updated);
+                                            }}
+                                            placeholder="https://example.com"
+                                            className="input-wireframe w-full text-xs h-8"
+                                        />
+                                    </div>
+                                    <button
+                                        type="button"
+                                        onClick={() => setMessageButtons(messageButtons.filter((_, i) => i !== idx))}
+                                        className="btn-ghost-wireframe p-1 text-red-500 hover:bg-red-50 mt-1"
+                                    >
+                                        <X className="w-3.5 h-3.5" />
+                                    </button>
+                                </div>
+                            ))}
+                        </div>
+                    </div>
                     <div className="bg-gray-50 border border-gray-200 p-3 rounded text-xs">
                         <p className="font-bold text-gray-700 mb-1">💡 Personalize your message:</p>
                         <div className="flex flex-wrap gap-2 font-mono">
@@ -1533,6 +1650,7 @@ export default function ContactsPage() {
                                 setFailedContactIds([]);
                                 setFailedContactErrors([]);
                                 setLastSendResults(null);
+                                setMessageButtons([]);
                             }}
                             className="btn-wireframe bg-white"
                             disabled={actionLoading}

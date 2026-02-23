@@ -25,8 +25,11 @@ export async function GET(
         const page = parseInt(searchParams.get('page') || '1');
         const pageSize = parseInt(searchParams.get('pageSize') || '25');
         const search = searchParams.get('search') || '';
-        const tagId = searchParams.get('tagId') || '';
-        const excludeTagId = searchParams.get('excludeTagId') || '';
+        // Support both multi-tag (comma-separated) and legacy single-tag params
+        const tagIdsRaw = searchParams.get('tagIds') || searchParams.get('tagId') || '';
+        const excludeTagIdsRaw = searchParams.get('excludeTagIds') || searchParams.get('excludeTagId') || '';
+        const tagIds = tagIdsRaw ? tagIdsRaw.split(',').filter(Boolean) : [];
+        const excludeTagIds = excludeTagIdsRaw ? excludeTagIdsRaw.split(',').filter(Boolean) : [];
         const sendableOnly = searchParams.get('sendable') === 'true'; // Only return contacts with valid PSIDs
 
         const supabase = getSupabaseAdmin();
@@ -63,20 +66,20 @@ export async function GET(
             query = query.ilike('name', `%${search}%`);
         }
 
-        // Apply tag filter
-        if (tagId) {
-            // Get contact IDs with this tag
+        // Apply include tag filter (OR logic — contacts with ANY of the selected tags)
+        if (tagIds.length > 0) {
             const { data: taggedContacts } = await supabase
                 .from('contact_tags')
                 .select('contact_id')
-                .eq('tag_id', tagId);
+                .in('tag_id', tagIds);
 
-            const contactIds = taggedContacts?.map(tc => tc.contact_id) || [];
+            // Deduplicate contact IDs (a contact may have multiple matching tags)
+            const contactIds = [...new Set(taggedContacts?.map(tc => tc.contact_id) || [])];
 
             if (contactIds.length > 0) {
                 query = query.in('id', contactIds);
             } else {
-                // No contacts with this tag
+                // No contacts with any of these tags
                 return NextResponse.json({
                     items: [],
                     page,
@@ -86,15 +89,16 @@ export async function GET(
             }
         }
 
-        if (excludeTagId) {
+        // Apply exclude tag filter (OR logic — exclude contacts with ANY of the excluded tags)
+        if (excludeTagIds.length > 0) {
             const { data: excludedContacts, error: excludedError } = await supabase
                 .from('contact_tags')
                 .select('contact_id')
-                .eq('tag_id', excludeTagId);
+                .in('tag_id', excludeTagIds);
 
             if (excludedError) throw excludedError;
 
-            const excludedIds = excludedContacts?.map(tc => tc.contact_id) || [];
+            const excludedIds = [...new Set(excludedContacts?.map(tc => tc.contact_id) || [])];
             const notInFilter = buildNotInFilter(excludedIds);
             if (notInFilter) {
                 query = query.not('id', 'in', notInFilter);

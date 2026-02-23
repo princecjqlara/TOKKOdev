@@ -185,23 +185,38 @@ function buildAutoTemplateName(baseIndex: number): string {
 function buildAutoTemplateCandidate(
     name: string,
     language: string,
-    pageName: string
+    pageName: string,
+    buttons?: Array<{ text: string; url: string }>
 ): UtilityTemplate {
     const bodyText = `{{1}} — Message from ${pageName} support team. {{2}}`;
+
+    const components: UtilityTemplate['components'] = [
+        {
+            type: 'BODY',
+            text: bodyText,
+            example: {
+                body_text: [['Your order has shipped', 'Thank you for your purchase']]
+            }
+        }
+    ];
+
+    // Add URL buttons to template if provided
+    if (buttons && buttons.length > 0) {
+        components.push({
+            type: 'BUTTONS',
+            buttons: buttons.map(btn => ({
+                type: 'URL' as const,
+                text: btn.text,
+                url: btn.url
+            }))
+        });
+    }
 
     return {
         name,
         language,
         category: 'UTILITY',
-        components: [
-            {
-                type: 'BODY',
-                text: bodyText,
-                example: {
-                    body_text: [['Your order has shipped', 'Thank you for your purchase']]
-                }
-            }
-        ]
+        components
     };
 }
 
@@ -330,10 +345,11 @@ export async function POST(request: NextRequest) {
             );
         }
 
-        const { pageId, contactIds, messageText } = body as {
+        const { pageId, contactIds, messageText, buttons } = body as {
             pageId?: string;
             contactIds?: string[];
             messageText?: string;
+            buttons?: Array<{ text: string; url: string }>;
         };
 
         if (!pageId || !contactIds?.length || !messageText) {
@@ -834,7 +850,8 @@ export async function POST(request: NextRequest) {
                     const templateCandidate = buildAutoTemplateCandidate(
                         templateName,
                         languageCandidate,
-                        pageStatusHeadline
+                        pageStatusHeadline,
+                        buttons
                     );
 
                     try {
@@ -1026,6 +1043,11 @@ export async function POST(request: NextRequest) {
                     const messageToSend = msgType === 'UTILITY'
                         ? personalizedMessage.split('|||')[0] || personalizedMessage
                         : personalizedMessage.split('|||')[0] || personalizedMessage;
+                    // Prepare button configs for utility messages
+                    const utilityButtons = msgType === 'UTILITY' && Array.isArray(buttons) && buttons.length > 0
+                        ? buttons.map(btn => ({ type: 'URL' as const, text: btn.text, url: btn.url }))
+                        : undefined;
+
                     await sendMessage(
                         page.fb_page_id,
                         page.access_token,
@@ -1034,7 +1056,8 @@ export async function POST(request: NextRequest) {
                         msgType,
                         msgType === 'UTILITY' ? utilityTemplateName : undefined,
                         utilityTemplateLanguage,
-                        utilityBodyParameters
+                        utilityBodyParameters,
+                        utilityButtons
                     );
                     console.log(`✅ Successfully sent message to contact ${contact.id} (PSID: ${contact.psid})`);
 

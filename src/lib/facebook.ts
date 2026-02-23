@@ -160,7 +160,8 @@ export async function sendMessage(
     messagingType: 'RESPONSE' | 'HUMAN_AGENT' | 'UTILITY' = 'HUMAN_AGENT',
     templateName?: string,
     templateLanguage: string = DEFAULT_UTILITY_LANGUAGE,
-    templateBodyParameters?: string[]
+    templateBodyParameters?: string[],
+    templateButtons?: Array<{ type: 'URL'; text: string; url: string }>
 ): Promise<{ message_id: string }> {
     // Build the request payload based on messaging type
     let bodyPayload: Record<string, unknown>;
@@ -175,7 +176,7 @@ export async function sendMessage(
 
         if (Array.isArray(templateBodyParameters)) {
             if (templateBodyParameters.length > 0) {
-                templatePayload.components = [
+                const components: Record<string, unknown>[] = [
                     {
                         type: 'body',
                         parameters: templateBodyParameters.map((text) => ({
@@ -184,9 +185,23 @@ export async function sendMessage(
                         }))
                     }
                 ];
+
+                // Add button components if provided
+                if (Array.isArray(templateButtons) && templateButtons.length > 0) {
+                    templateButtons.forEach((btn, index) => {
+                        components.push({
+                            type: 'button',
+                            sub_type: 'url',
+                            index,
+                            parameters: [{ type: 'text', text: btn.url }]
+                        });
+                    });
+                }
+
+                templatePayload.components = components;
             }
         } else {
-            templatePayload.components = [
+            const components: Record<string, unknown>[] = [
                 {
                     type: 'body',
                     parameters: [
@@ -194,6 +209,20 @@ export async function sendMessage(
                     ]
                 }
             ];
+
+            // Add button components if provided
+            if (Array.isArray(templateButtons) && templateButtons.length > 0) {
+                templateButtons.forEach((btn, index) => {
+                    components.push({
+                        type: 'button',
+                        sub_type: 'url',
+                        index,
+                        parameters: [{ type: 'text', text: btn.url }]
+                    });
+                });
+            }
+
+            templatePayload.components = components;
         }
 
         bodyPayload = {
