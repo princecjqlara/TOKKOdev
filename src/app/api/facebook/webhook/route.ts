@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getSupabaseAdmin } from '@/lib/supabase';
-import { verifyWebhookSignature, generateVerifyToken } from '@/lib/facebook';
+import { verifyWebhookSignature, generateVerifyToken, sendMessage } from '@/lib/facebook';
 
 // GET /api/facebook/webhook - Verify webhook
 export async function GET(request: NextRequest) {
@@ -90,6 +90,10 @@ export async function POST(request: NextRequest) {
 
                 if (!page) continue;
 
+                // Fetch welcome message config for this page (cached per webhook batch)
+                let welcomeConfig: { enabled: boolean; message_text: string; buttons: Array<{ type: string; text: string; url?: string; payload?: string }> } | null = null;
+                let welcomeConfigFetched = false;
+
                 // Process messaging events
                 if (entry.messaging) {
                     for (const event of entry.messaging) {
@@ -102,6 +106,16 @@ export async function POST(request: NextRequest) {
                         const interactionTime = new Date(event.timestamp);
                         const interactionAt = interactionTime.toISOString();
 
+                        // Check if contact exists BEFORE upsert (to detect new contacts)
+                        const { data: existingContact } = await supabase
+                            .from('contacts')
+                            .select('id')
+                            .eq('page_id', page.id)
+                            .eq('psid', senderId)
+                            .maybeSingle();
+
+                        const isNewContact = !existingContact;
+
                         // Upsert contact
                         const { data: contact } = await supabase
                             .from('contacts')
@@ -113,8 +127,51 @@ export async function POST(request: NextRequest) {
                             }, {
                                 onConflict: 'page_id,psid'
                             })
-                            .select('id')
+                            .select('id, name')
                             .single();
+
+                        // Send welcome message to new contacts
+                        if (isNewContact && contact) {
+                            // Lazy-load welcome config once per page per webhook batch
+                            if (!welcomeConfigFetched) {
+                                const { data: wc } = await supabase
+                                    .from('welcome_messages')
+                                    .select('enabled, message_text, buttons')
+                                    .eq('page_id', page.id)
+                                    .single();
+                                welcomeConfig = wc;
+                                welcomeConfigFetched = true;
+                            }
+
+                            if (welcomeConfig?.enabled && welcomeConfig.message_text?.trim()) {
+                                // Personalize the message
+                                const contactName = (contact as { id: string; name?: string }).name || '';
+                                const nameParts = contactName.split(' ');
+                                const firstName = nameParts[0] || '';
+                                const lastName = nameParts.slice(1).join(' ') || '';
+
+                                let welcomeText = welcomeConfig.message_text
+                                    .replace(/\{name\}/g, contactName || 'there')
+                                    .replace(/\{first_name\}/g, firstName || 'there')
+                                    .replace(/\{last_name\}/g, lastName);
+
+                                // Fire-and-forget: send welcome message after a short delay
+                                setTimeout(async () => {
+                                    try {
+                                        await sendMessage(
+                                            pageId,
+                                            page.access_token,
+                                            senderId,
+                                            welcomeText,
+                                            'HUMAN_AGENT'
+                                        );
+                                        console.log(`👋 Welcome message sent to new contact ${senderId} on page ${pageId}`);
+                                    } catch (err) {
+                                        console.error(`❌ Failed to send welcome message to ${senderId}:`, err);
+                                    }
+                                }, 1000);
+                            }
+                        }
 
                         // Record interaction for best time to contact analysis
                         if (contact) {
