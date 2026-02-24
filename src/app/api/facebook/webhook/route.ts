@@ -157,21 +157,19 @@ export async function POST(request: NextRequest) {
                                     .replace(/\{first_name\}/g, firstName || 'there')
                                     .replace(/\{last_name\}/g, lastName);
 
-                                // Fire-and-forget: send welcome message after a short delay
-                                setTimeout(async () => {
-                                    try {
-                                        await sendMessage(
-                                            pageId,
-                                            page.access_token,
-                                            senderId,
-                                            welcomeText,
-                                            'HUMAN_AGENT'
-                                        );
-                                        console.log(`👋 Welcome message sent to new contact ${senderId} on page ${pageId}`);
-                                    } catch (err) {
-                                        console.error(`❌ Failed to send welcome message to ${senderId}:`, err);
-                                    }
-                                }, 1000);
+                                // Send welcome message (must await in serverless environment)
+                                try {
+                                    await sendMessage(
+                                        pageId,
+                                        page.access_token,
+                                        senderId,
+                                        welcomeText,
+                                        'HUMAN_AGENT'
+                                    );
+                                    console.log(`👋 Welcome message sent to new contact ${senderId} on page ${pageId}`);
+                                } catch (err) {
+                                    console.error(`❌ Failed to send welcome message to ${senderId}:`, err);
+                                }
                             }
                         }
 
