@@ -8,16 +8,18 @@ import {
     UtilityTemplate
 } from '@/lib/facebook';
 import { chunkArray } from '@/lib/chunking';
+import { replaceTemplateVariablesForParts, ContactRecord } from '@/lib/placeholders';
 import fs from 'fs';
 import path from 'path';
 
-interface ContactRecord {
-    id: string;
-    psid: string;
-    page_id: string;
-    name: string | null;
-    last_interaction_at: string | null;
-}
+// Redefine locally if needed by other logic, but usually we can just use the import
+// interface ContactRecord {
+//     id: string;
+//     psid: string;
+//     page_id: string;
+//     name: string | null;
+//     last_interaction_at: string | null;
+// }
 
 function getMessagingType(): 'UTILITY' {
     return 'UTILITY';
@@ -151,14 +153,6 @@ function buildUtilityBodyParameters(
     const part1 = parts[0] || '';
     const part2 = parts[1] || '';
 
-    if (placeholderCount === 1) {
-        return [part1];
-    }
-
-    if (placeholderCount === 2) {
-        return [part1, part2];
-    }
-
     const firstName = contact.name?.trim().split(/\s+/)[0] || 'there';
     const contactReference = contact.id.replace(/-/g, '').slice(0, 8) || '00000000';
     const normalizedBodyText = templateBodyText.toLowerCase();
@@ -166,6 +160,20 @@ function buildUtilityBodyParameters(
         normalizedBodyText.includes('order') ||
         normalizedBodyText.includes('delivery') ||
         normalizedBodyText.includes('tracking');
+
+    if (placeholderCount === 1) {
+        // If it's a 1-placeholder template, check if the placeholder is likely for the name or message
+        // Usually it's better to send the message if there's only one.
+        return [part1];
+    }
+
+    if (placeholderCount === 2) {
+        // For 2 placeholders, {{1}} is usually name and {{2}} is content in our "auto" templates
+        if (templateBodyText.includes('{{1}}') && templateBodyText.includes('{{2}}')) {
+            return [firstName, part1];
+        }
+        return [part1, part2];
+    }
 
     const parameters = [firstName];
     parameters.push(looksLikeOrderTemplate ? contactReference : part1);
@@ -254,31 +262,7 @@ function extractTemplateLanguageCode(template: Record<string, unknown>): string 
 }
 
 // Template variable replacements for personalized messages
-function replaceTemplateVariables(template: string, contact: ContactRecord): string {
-    let message = template;
-
-    const name = contact.name || 'there';
-    const nameParts = name.split(' ');
-    const firstName = nameParts[0] || 'there';
-    const lastName = nameParts.length > 1 ? nameParts.slice(1).join(' ') : '';
-
-    message = message.replace(/\{name\}/gi, name);
-    message = message.replace(/\{first_name\}/gi, firstName);
-    message = message.replace(/\{firstname\}/gi, firstName);
-    message = message.replace(/\{last_name\}/gi, lastName);
-    message = message.replace(/\{lastname\}/gi, lastName);
-
-    return message;
-}
-
-function replaceTemplateVariablesForParts(
-    messageWithSeparator: string,
-    contact: ContactRecord
-): string {
-    const parts = messageWithSeparator.split('|||');
-    const personalizedParts = parts.map(part => replaceTemplateVariables(part, contact));
-    return personalizedParts.join('|||');
-}
+// Removed local replaceTemplateVariables and replaceTemplateVariablesForParts as they are now in @/lib/placeholders
 
 // Increase timeout for sending messages (up to 5 minutes)
 export const maxDuration = 300;

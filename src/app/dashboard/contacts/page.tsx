@@ -154,7 +154,9 @@ export default function ContactsPage() {
                     sendable: 'true', // Only fetch contacts with valid PSIDs for messaging
                     ...(search && { search }),
                     ...(selectedTagFilters.size > 0 && { tagIds: [...selectedTagFilters].join(',') }),
-                    ...(excludedTagFilters.size > 0 && { excludeTagIds: [...excludedTagFilters].join(',') })
+                    ...(excludedTagFilters.size > 0 && { excludeTagIds: [...excludedTagFilters].join(',') }),
+                    ...(dateFrom && { dateFrom }),
+                    ...(dateTo && { dateTo })
                 });
 
                 const res = await fetch(`/api/pages/${selectedPageId}/contacts?${params}`);

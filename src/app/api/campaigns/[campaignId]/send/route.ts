@@ -4,6 +4,7 @@ import { authOptions } from '@/lib/auth';
 import { getSupabaseAdmin } from '@/lib/supabase';
 import { sendMessage, getConversationIdForPsid, getConversationMessages } from '@/lib/facebook';
 import { generatePersonalizedMessage } from '@/lib/ai';
+import { replaceTemplateVariables } from '@/lib/placeholders';
 
 // Increase timeout for sending campaigns (up to 5 minutes)
 export const maxDuration = 300;
@@ -204,6 +205,14 @@ export async function POST(
                 try {
                     let messageToSend = campaign.message_text;
 
+                    const placeholderContact = {
+                        id: recipient.contact_id,
+                        psid: contact.psid,
+                        page_id: campaign.page_id,
+                        name: contact.name || null,
+                        last_interaction_at: null
+                    };
+
                     // Generate AI personalized message if enabled
                     if (useAiMessages && campaign.ai_prompt) {
                         try {
@@ -233,8 +242,11 @@ export async function POST(
                         } catch (aiError) {
                             console.warn(`⚠️ AI generation failed for ${contact.psid}, using fallback:`, (aiError as Error).message);
                             // Fallback to a simple personalized greeting if AI fails
-                            messageToSend = campaign.ai_prompt.replace(/{name}/gi, contact.name || 'Friend');
+                            messageToSend = replaceTemplateVariables(campaign.ai_prompt, placeholderContact);
                         }
+                    } else if (messageToSend) {
+                        // Apply placeholder replacement for regular messages too
+                        messageToSend = replaceTemplateVariables(messageToSend, placeholderContact);
                     }
 
                     // Ensure we have a message to send

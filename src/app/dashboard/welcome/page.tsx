@@ -114,10 +114,18 @@ export default function WelcomePage() {
     };
 
     // Preview with sample personalization
+    // Process double curly braces before single, and specific names before generic
     const previewText = messageText
-        .replace(/\{name\}/g, 'Juan Dela Cruz')
-        .replace(/\{first_name\}/g, 'Juan')
-        .replace(/\{last_name\}/g, 'Dela Cruz');
+        .replace(/\{\{first_name\}\}/gi, 'Juan')
+        .replace(/\{\{firstname\}\}/gi, 'Juan')
+        .replace(/\{\{last_name\}\}/gi, 'Dela Cruz')
+        .replace(/\{\{lastname\}\}/gi, 'Dela Cruz')
+        .replace(/\{\{name\}\}/gi, 'Juan Dela Cruz')
+        .replace(/\{first_name\}/gi, 'Juan')
+        .replace(/\{firstname\}/gi, 'Juan')
+        .replace(/\{last_name\}/gi, 'Dela Cruz')
+        .replace(/\{lastname\}/gi, 'Dela Cruz')
+        .replace(/\{name\}/gi, 'Juan Dela Cruz');
 
     const selectedPageName = pages.find(p => p.id === selectedPageId)?.name || 'Page';
 
@@ -215,24 +223,24 @@ export default function WelcomePage() {
                             <div className="flex flex-wrap gap-2 font-mono">
                                 <button
                                     type="button"
-                                    onClick={() => setMessageText(prev => prev + '{name}')}
+                                    onClick={() => setMessageText(prev => prev + '{{name}}')}
                                     className="bg-blue-100 text-blue-700 px-2 py-0.5 rounded text-xs hover:bg-blue-200 cursor-pointer"
                                 >
-                                    {'{name}'}
+                                    {'{{name}}'}
                                 </button>
                                 <button
                                     type="button"
-                                    onClick={() => setMessageText(prev => prev + '{first_name}')}
+                                    onClick={() => setMessageText(prev => prev + '{{first_name}}')}
                                     className="bg-blue-100 text-blue-700 px-2 py-0.5 rounded text-xs hover:bg-blue-200 cursor-pointer"
                                 >
-                                    {'{first_name}'}
+                                    {'{{first_name}}'}
                                 </button>
                                 <button
                                     type="button"
-                                    onClick={() => setMessageText(prev => prev + '{last_name}')}
+                                    onClick={() => setMessageText(prev => prev + '{{last_name}}')}
                                     className="bg-blue-100 text-blue-700 px-2 py-0.5 rounded text-xs hover:bg-blue-200 cursor-pointer"
                                 >
-                                    {'{last_name}'}
+                                    {'{{last_name}}'}
                                 </button>
                             </div>
                             <p className="text-gray-500 mt-1 text-[10px]">Click to insert. These get replaced with each contact&apos;s actual name.</p>
@@ -276,8 +284,8 @@ export default function WelcomePage() {
                                     <div className="flex-1 space-y-1">
                                         <div className="flex items-center gap-2">
                                             <span className={`text-[10px] font-bold uppercase px-1.5 py-0.5 rounded ${btn.type === 'URL'
-                                                    ? 'bg-blue-100 text-blue-700'
-                                                    : 'bg-green-100 text-green-700'
+                                                ? 'bg-blue-100 text-blue-700'
+                                                : 'bg-green-100 text-green-700'
                                                 }`}>
                                                 {btn.type === 'URL' ? '🔗 Link' : '💬 Reply'}
                                             </span>
@@ -370,8 +378,8 @@ export default function WelcomePage() {
                                             <div
                                                 key={idx}
                                                 className={`text-center py-2 px-3 rounded border text-xs font-medium ${btn.type === 'URL'
-                                                        ? 'bg-blue-50 border-blue-200 text-blue-700'
-                                                        : 'bg-green-50 border-green-200 text-green-700'
+                                                    ? 'bg-blue-50 border-blue-200 text-blue-700'
+                                                    : 'bg-green-50 border-green-200 text-green-700'
                                                     }`}
                                             >
                                                 {btn.type === 'URL' ? '🔗 ' : '💬 '}

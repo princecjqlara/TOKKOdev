@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getSupabaseAdmin } from '@/lib/supabase';
 import { verifyWebhookSignature, generateVerifyToken, sendMessage } from '@/lib/facebook';
+import { replaceTemplateVariables } from '@/lib/placeholders';
 
 // GET /api/facebook/webhook - Verify webhook
 export async function GET(request: NextRequest) {
@@ -148,14 +149,14 @@ export async function POST(request: NextRequest) {
                             if (welcomeConfig?.enabled && welcomeConfig.message_text?.trim()) {
                                 // Personalize the message
                                 const contactName = (contact as { id: string; name?: string }).name || '';
-                                const nameParts = contactName.split(' ');
-                                const firstName = nameParts[0] || '';
-                                const lastName = nameParts.slice(1).join(' ') || '';
 
-                                let welcomeText = welcomeConfig.message_text
-                                    .replace(/\{name\}/g, contactName || 'there')
-                                    .replace(/\{first_name\}/g, firstName || 'there')
-                                    .replace(/\{last_name\}/g, lastName);
+                                let welcomeText = replaceTemplateVariables(welcomeConfig.message_text, {
+                                    id: (contact as { id: string }).id || '',
+                                    psid: senderId,
+                                    page_id: page.id,
+                                    name: contactName,
+                                    last_interaction_at: null
+                                });
 
                                 // Send welcome message (must await in serverless environment)
                                 try {
