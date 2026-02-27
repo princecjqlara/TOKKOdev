@@ -139,6 +139,107 @@ function createSupabaseMock() {
     };
 }
 
+function createSupabaseMockWithFirstInteractionColumnFailure() {
+    const pageSingle = vi.fn().mockResolvedValue({
+        data: {
+            id: 'page_row_1',
+            access_token: 'page_access_token_1'
+        },
+        error: null
+    });
+    const pageEq = vi.fn().mockReturnValue({ single: pageSingle });
+    const pageSelect = vi.fn().mockReturnValue({ eq: pageEq });
+
+    const existingContactMaybeSingle = vi.fn().mockResolvedValue({
+        data: null,
+        error: null
+    });
+    const existingContactEqPsid = vi.fn().mockReturnValue({ maybeSingle: existingContactMaybeSingle });
+    const existingContactEqPage = vi.fn().mockReturnValue({ eq: existingContactEqPsid });
+    const contactsSelect = vi.fn().mockReturnValue({ eq: existingContactEqPage });
+
+    const contactsUpsert = vi.fn()
+        .mockReturnValueOnce({
+            select: vi.fn().mockReturnValue({
+                single: vi.fn().mockResolvedValue({
+                    data: null,
+                    error: {
+                        message: "Could not find the 'first_interaction_at' column of 'contacts' in the schema cache"
+                    }
+                })
+            })
+        })
+        .mockReturnValueOnce({
+            select: vi.fn().mockReturnValue({
+                single: vi.fn().mockResolvedValue({
+                    data: {
+                        id: 'contact_row_2',
+                        name: 'Fallback Contact'
+                    },
+                    error: null
+                })
+            })
+        });
+
+    const contactsUpdateEq = vi.fn().mockResolvedValue({ error: null });
+    const contactsUpdate = vi.fn().mockReturnValue({ eq: contactsUpdateEq });
+
+    const welcomeSingle = vi.fn().mockResolvedValue({
+        data: {
+            enabled: false,
+            message_text: '',
+            buttons: []
+        },
+        error: null
+    });
+    const welcomeEq = vi.fn().mockReturnValue({ single: welcomeSingle });
+    const welcomeSelect = vi.fn().mockReturnValue({ eq: welcomeEq });
+
+    const interactionsInsert = vi.fn().mockResolvedValue({ error: null });
+    const interactionsSelectEqFromContact = vi.fn().mockResolvedValue({
+        data: [{ hour_of_day: 22 }],
+        error: null
+    });
+    const interactionsSelectEqContact = vi.fn().mockReturnValue({ eq: interactionsSelectEqFromContact });
+    const interactionsSelect = vi.fn().mockReturnValue({ eq: interactionsSelectEqContact });
+
+    const from = vi.fn((table: string) => {
+        if (table === 'pages') {
+            return {
+                select: pageSelect
+            };
+        }
+
+        if (table === 'contacts') {
+            return {
+                select: contactsSelect,
+                upsert: contactsUpsert,
+                update: contactsUpdate
+            };
+        }
+
+        if (table === 'welcome_messages') {
+            return {
+                select: welcomeSelect
+            };
+        }
+
+        if (table === 'contact_interactions') {
+            return {
+                insert: interactionsInsert,
+                select: interactionsSelect
+            };
+        }
+
+        throw new Error(`Unexpected table: ${table}`);
+    });
+
+    return {
+        from,
+        contactsUpsert
+    };
+}
+
 describe('POST /api/facebook/webhook', () => {
     beforeEach(() => {
         vi.clearAllMocks();
@@ -176,5 +277,28 @@ describe('POST /api/facebook/webhook', () => {
                 onConflict: 'page_id,psid'
             }
         );
+    });
+
+    it('retries contact upsert without first_interaction_at when schema is older', async () => {
+        const supabase = createSupabaseMockWithFirstInteractionColumnFailure();
+        mocks.getSupabaseAdmin.mockReturnValue(supabase);
+        mocks.getUserProfile.mockResolvedValue({
+            id: 'contact_psid_1',
+            name: 'Fallback Contact',
+            profile_pic: 'https://example.com/fallback.jpg'
+        });
+
+        const response = await POST(createWebhookRequest());
+        const body = await response.json();
+
+        expect(response.status).toBe(200);
+        expect(body.success).toBe(true);
+        expect(supabase.contactsUpsert).toHaveBeenCalledTimes(2);
+
+        const firstPayload = supabase.contactsUpsert.mock.calls[0][0] as Record<string, unknown>;
+        const secondPayload = supabase.contactsUpsert.mock.calls[1][0] as Record<string, unknown>;
+
+        expect(firstPayload).toHaveProperty('first_interaction_at');
+        expect(secondPayload).not.toHaveProperty('first_interaction_at');
     });
 });

@@ -132,23 +132,49 @@ export async function POST(request: NextRequest) {
                             }
                         }
 
-                        // Upsert contact
-                        const { data: contact } = await supabase
+                        const contactPayload: Record<string, unknown> = {
+                            page_id: page.id,
+                            psid: senderId,
+                            ...(profileName ? { name: profileName } : {}),
+                            ...(profilePic ? { profile_pic: profilePic } : {}),
+                            last_interaction_at: interactionAt,
+                            updated_at: new Date().toISOString(),
+                            ...(isNewContact ? { first_interaction_at: interactionAt } : {})
+                        };
+
+                        let { data: contact, error: contactUpsertError } = await supabase
                             .from('contacts')
-                            .upsert({
-                                page_id: page.id,
-                                psid: senderId,
-                                ...(profileName ? { name: profileName } : {}),
-                                ...(profilePic ? { profile_pic: profilePic } : {}),
-                                last_interaction_at: interactionAt,
-                                updated_at: new Date().toISOString(),
-                                // Set first_interaction_at only for brand-new contacts
-                                ...(isNewContact ? { first_interaction_at: interactionAt } : {})
-                            }, {
+                            .upsert(contactPayload, {
                                 onConflict: 'page_id,psid'
                             })
                             .select('id, name')
                             .single();
+
+                        if (
+                            contactUpsertError &&
+                            isNewContact &&
+                            Object.prototype.hasOwnProperty.call(contactPayload, 'first_interaction_at') &&
+                            /first_interaction_at/i.test(contactUpsertError.message || '')
+                        ) {
+                            const { first_interaction_at: _ignored, ...legacyContactPayload } = contactPayload;
+
+                            console.warn('⚠️ Retrying contact upsert without first_interaction_at due to schema mismatch');
+                            const retryResult = await supabase
+                                .from('contacts')
+                                .upsert(legacyContactPayload, {
+                                    onConflict: 'page_id,psid'
+                                })
+                                .select('id, name')
+                                .single();
+
+                            contact = retryResult.data;
+                            contactUpsertError = retryResult.error;
+                        }
+
+                        if (contactUpsertError) {
+                            console.error(`🔴 Failed to upsert contact ${senderId}:`, contactUpsertError);
+                            continue;
+                        }
 
                         // Send welcome message to new contacts
                         if (isNewContact && contact) {
