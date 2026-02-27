@@ -240,6 +240,90 @@ function createSupabaseMockWithFirstInteractionColumnFailure() {
     };
 }
 
+function createSupabaseMockWithGenericUpsertFailure() {
+    const pageSingle = vi.fn().mockResolvedValue({
+        data: {
+            id: 'page_row_1',
+            access_token: 'page_access_token_1'
+        },
+        error: null
+    });
+    const pageEq = vi.fn().mockReturnValue({ single: pageSingle });
+    const pageSelect = vi.fn().mockReturnValue({ eq: pageEq });
+
+    const existingContactMaybeSingle = vi.fn().mockResolvedValue({
+        data: null,
+        error: null
+    });
+    const existingContactEqPsid = vi.fn().mockReturnValue({ maybeSingle: existingContactMaybeSingle });
+    const existingContactEqPage = vi.fn().mockReturnValue({ eq: existingContactEqPsid });
+    const contactsSelect = vi.fn().mockReturnValue({ eq: existingContactEqPage });
+
+    const contactsUpsert = vi.fn().mockReturnValue({
+        select: vi.fn().mockReturnValue({
+            single: vi.fn().mockResolvedValue({
+                data: null,
+                error: {
+                    message: 'insert/update failed due to transient database issue'
+                }
+            })
+        })
+    });
+
+    const contactsUpdate = vi.fn().mockReturnValue({ eq: vi.fn().mockResolvedValue({ error: null }) });
+
+    const from = vi.fn((table: string) => {
+        if (table === 'pages') {
+            return {
+                select: pageSelect
+            };
+        }
+
+        if (table === 'contacts') {
+            return {
+                select: contactsSelect,
+                upsert: contactsUpsert,
+                update: contactsUpdate
+            };
+        }
+
+        if (table === 'welcome_messages') {
+            return {
+                select: vi.fn().mockReturnValue({
+                    eq: vi.fn().mockReturnValue({
+                        single: vi.fn().mockResolvedValue({
+                            data: {
+                                enabled: false,
+                                message_text: '',
+                                buttons: []
+                            },
+                            error: null
+                        })
+                    })
+                })
+            };
+        }
+
+        if (table === 'contact_interactions') {
+            return {
+                insert: vi.fn().mockResolvedValue({ error: null }),
+                select: vi.fn().mockReturnValue({
+                    eq: vi.fn().mockReturnValue({
+                        eq: vi.fn().mockResolvedValue({ data: [], error: null })
+                    })
+                })
+            };
+        }
+
+        throw new Error(`Unexpected table: ${table}`);
+    });
+
+    return {
+        from,
+        contactsUpsert
+    };
+}
+
 describe('POST /api/facebook/webhook', () => {
     beforeEach(() => {
         vi.clearAllMocks();
@@ -300,5 +384,22 @@ describe('POST /api/facebook/webhook', () => {
 
         expect(firstPayload).toHaveProperty('first_interaction_at');
         expect(secondPayload).not.toHaveProperty('first_interaction_at');
+    });
+
+    it('returns 500 when contact upsert fails after retry logic', async () => {
+        const supabase = createSupabaseMockWithGenericUpsertFailure();
+        mocks.getSupabaseAdmin.mockReturnValue(supabase);
+        mocks.getUserProfile.mockResolvedValue({
+            id: 'contact_psid_1',
+            name: 'Broken Contact',
+            profile_pic: 'https://example.com/broken.jpg'
+        });
+
+        const response = await POST(createWebhookRequest());
+        const body = await response.json();
+
+        expect(response.status).toBe(500);
+        expect(body.error).toBe('Webhook processing partially failed');
+        expect(supabase.contactsUpsert).toHaveBeenCalledTimes(1);
     });
 });

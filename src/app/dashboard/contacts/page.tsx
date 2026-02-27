@@ -120,7 +120,17 @@ export default function ContactsPage() {
         } finally {
             setLoading(false);
         }
-    }, [selectedPageId, page, pageSize, search, selectedTagFilters, excludedTagFilters]);
+    }, [selectedPageId, page, pageSize, search, selectedTagFilters, excludedTagFilters, dateFrom, dateTo]);
+
+    useEffect(() => {
+        if (!selectedPageId) return;
+
+        const intervalId = setInterval(() => {
+            fetchContacts();
+        }, 10000);
+
+        return () => clearInterval(intervalId);
+    }, [selectedPageId, fetchContacts]);
 
     const fetchTags = async () => {
         if (!selectedPageId) return;

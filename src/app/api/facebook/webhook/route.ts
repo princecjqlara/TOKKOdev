@@ -76,6 +76,7 @@ export async function POST(request: NextRequest) {
 
         const data = JSON.parse(body);
         const supabase = getSupabaseAdmin();
+        let hadCriticalFailure = false;
 
         // Process messaging events
         if (data.object === 'page') {
@@ -173,6 +174,7 @@ export async function POST(request: NextRequest) {
 
                         if (contactUpsertError) {
                             console.error(`🔴 Failed to upsert contact ${senderId}:`, contactUpsertError);
+                            hadCriticalFailure = true;
                             continue;
                         }
 
@@ -284,6 +286,16 @@ export async function POST(request: NextRequest) {
                     }
                 }
             }
+        }
+
+        if (hadCriticalFailure) {
+            return NextResponse.json(
+                {
+                    error: 'Webhook processing partially failed',
+                    message: 'One or more contact upserts failed. Returning 500 so Facebook can retry delivery.'
+                },
+                { status: 500 }
+            );
         }
 
         return NextResponse.json({ success: true });
