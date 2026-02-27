@@ -144,6 +144,46 @@ export async function getUserProfile(
     return await response.json();
 }
 
+// Subscribe a page to this app's webhook events
+export async function subscribePageToAppWebhook(
+    pageId: string,
+    pageAccessToken: string,
+    subscribedFields: string[] = ['messages', 'messaging_postbacks']
+): Promise<void> {
+    const formData = new URLSearchParams();
+    formData.set('access_token', pageAccessToken);
+
+    if (subscribedFields.length > 0) {
+        formData.set('subscribed_fields', subscribedFields.join(','));
+    }
+
+    const response = await fetch(
+        `${FACEBOOK_GRAPH_URL}/${pageId}/subscribed_apps`,
+        {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/x-www-form-urlencoded'
+            },
+            body: formData.toString()
+        }
+    );
+
+    const result = await response
+        .json()
+        .catch(() => ({} as { error?: { message?: string }; success?: boolean }));
+
+    if (!response.ok) {
+        const errorMessage =
+            result.error?.message ||
+            `HTTP ${response.status}: ${response.statusText}`;
+        throw new Error(errorMessage);
+    }
+
+    if (!result.success) {
+        throw new Error('Facebook did not confirm webhook subscription for this page');
+    }
+}
+
 // Send message to a contact
 // messagingType: 
 //   'RESPONSE' - within 24h window (plain text)

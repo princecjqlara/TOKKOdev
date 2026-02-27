@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getSessionFromRequest } from '@/lib/get-session';
 import { getSupabaseAdmin } from '@/lib/supabase';
+import { subscribePageToAppWebhook } from '@/lib/facebook';
 
 // POST /api/facebook/connect - Connect a Facebook page
 export async function POST(request: NextRequest) {
@@ -36,6 +37,19 @@ export async function POST(request: NextRequest) {
             return NextResponse.json(
                 { error: 'Bad Request', message: 'Missing required fields: fbPageId, name, accessToken' },
                 { status: 400 }
+            );
+        }
+
+        try {
+            await subscribePageToAppWebhook(fbPageId, accessToken, ['messages', 'messaging_postbacks']);
+        } catch (subscriptionError) {
+            console.error('🔴 Failed to subscribe page to webhook events:', subscriptionError);
+            return NextResponse.json(
+                {
+                    error: 'Webhook Subscription Failed',
+                    message: `Could not subscribe this page to webhook events. ${(subscriptionError as Error).message}`
+                },
+                { status: 502 }
             );
         }
 
