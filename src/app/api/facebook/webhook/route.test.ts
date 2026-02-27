@@ -270,6 +270,18 @@ function createSupabaseMockWithGenericUpsertFailure() {
         })
     });
 
+    const contactsInsert = vi.fn().mockReturnValue({
+        select: vi.fn().mockReturnValue({
+            single: vi.fn().mockResolvedValue({
+                data: {
+                    id: 'contact_row_inserted',
+                    name: 'Broken Contact'
+                },
+                error: null
+            })
+        })
+    });
+
     const contactsUpdate = vi.fn().mockReturnValue({ eq: vi.fn().mockResolvedValue({ error: null }) });
 
     const from = vi.fn((table: string) => {
@@ -283,6 +295,7 @@ function createSupabaseMockWithGenericUpsertFailure() {
             return {
                 select: contactsSelect,
                 upsert: contactsUpsert,
+                insert: contactsInsert,
                 update: contactsUpdate
             };
         }
@@ -320,7 +333,8 @@ function createSupabaseMockWithGenericUpsertFailure() {
 
     return {
         from,
-        contactsUpsert
+        contactsUpsert,
+        contactsInsert
     };
 }
 
@@ -386,7 +400,7 @@ describe('POST /api/facebook/webhook', () => {
         expect(secondPayload).not.toHaveProperty('first_interaction_at');
     });
 
-    it('returns 500 when contact upsert fails after retry logic', async () => {
+    it('falls back to insert for new contact when upsert fails unexpectedly', async () => {
         const supabase = createSupabaseMockWithGenericUpsertFailure();
         mocks.getSupabaseAdmin.mockReturnValue(supabase);
         mocks.getUserProfile.mockResolvedValue({
@@ -398,8 +412,9 @@ describe('POST /api/facebook/webhook', () => {
         const response = await POST(createWebhookRequest());
         const body = await response.json();
 
-        expect(response.status).toBe(500);
-        expect(body.error).toBe('Webhook processing partially failed');
+        expect(response.status).toBe(200);
+        expect(body.success).toBe(true);
         expect(supabase.contactsUpsert).toHaveBeenCalledTimes(1);
+        expect(supabase.contactsInsert).toHaveBeenCalledTimes(1);
     });
 });

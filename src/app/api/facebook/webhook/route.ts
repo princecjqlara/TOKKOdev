@@ -172,6 +172,20 @@ export async function POST(request: NextRequest) {
                             contactUpsertError = retryResult.error;
                         }
 
+                        if (contactUpsertError && isNewContact) {
+                            const { first_interaction_at: _ignored, ...insertContactPayload } = contactPayload;
+
+                            console.warn('⚠️ Upsert failed for new contact, retrying with direct insert');
+                            const insertResult = await supabase
+                                .from('contacts')
+                                .insert(insertContactPayload)
+                                .select('id, name')
+                                .single();
+
+                            contact = insertResult.data;
+                            contactUpsertError = insertResult.error;
+                        }
+
                         if (contactUpsertError) {
                             console.error(`🔴 Failed to upsert contact ${senderId}:`, contactUpsertError);
                             hadCriticalFailure = true;
