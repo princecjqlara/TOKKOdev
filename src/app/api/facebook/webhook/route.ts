@@ -58,6 +58,33 @@ export async function GET(request: NextRequest) {
 
 // POST /api/facebook/webhook - Receive webhook events
 export async function POST(request: NextRequest) {
+    const requestId = typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
+        ? crypto.randomUUID()
+        : `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+
+    const logPrefix = `[FB_WEBHOOK][${requestId}]`;
+    const logInfo = (message: string, data?: unknown) => {
+        if (data !== undefined) {
+            console.log(`${logPrefix} ${message}`, data);
+            return;
+        }
+        console.log(`${logPrefix} ${message}`);
+    };
+    const logWarn = (message: string, data?: unknown) => {
+        if (data !== undefined) {
+            console.warn(`${logPrefix} ${message}`, data);
+            return;
+        }
+        console.warn(`${logPrefix} ${message}`);
+    };
+    const logError = (message: string, data?: unknown) => {
+        if (data !== undefined) {
+            console.error(`${logPrefix} ${message}`, data);
+            return;
+        }
+        console.error(`${logPrefix} ${message}`);
+    };
+
     try {
         const body = await request.text();
         const signature = request.headers.get('x-hub-signature-256') || '';
@@ -67,56 +94,119 @@ export async function POST(request: NextRequest) {
         const isDevelopment = process.env.NODE_ENV !== 'production';
         if (!isDevelopment && appSecret) {
             if (!verifyWebhookSignature(body, signature, appSecret)) {
-                console.error('🔴 Webhook signature verification failed');
+                logError('Webhook signature verification failed');
                 return NextResponse.json({ error: 'Invalid signature' }, { status: 401 });
             }
         } else if (isDevelopment) {
-            console.log('🔵 Webhook signature verification skipped (development mode)');
+            logInfo('Webhook signature verification skipped (development mode)');
         }
 
         const data = JSON.parse(body);
         const supabase = getSupabaseAdmin();
         let hadCriticalFailure = false;
 
+        let processedEntries = 0;
+        let processedEvents = 0;
+        let processedContacts = 0;
+        let skippedEvents = 0;
+
+        const entryCount = Array.isArray(data.entry) ? data.entry.length : 0;
+        logInfo('Webhook payload parsed', {
+            object: data.object,
+            entryCount,
+            bodyLength: body.length,
+            signatureProvided: Boolean(signature)
+        });
+
         // Process messaging events
         if (data.object === 'page') {
             for (const entry of data.entry) {
+                processedEntries += 1;
                 const pageId = entry.id;
+                const messagingEvents = Array.isArray(entry.messaging) ? entry.messaging : [];
+                const standbyEvents = Array.isArray((entry as { standby?: unknown[] }).standby)
+                    ? (entry as { standby?: unknown[] }).standby || []
+                    : [];
+
+                if (standbyEvents.length > 0) {
+                    logWarn('Received standby events (not used for contact ingestion)', {
+                        pageId,
+                        standbyCount: standbyEvents.length
+                    });
+                }
+
+                if (messagingEvents.length === 0) {
+                    logInfo('Skipping entry with no messaging events', { pageId });
+                    continue;
+                }
 
                 // Get our page record
-                const { data: page } = await supabase
+                const { data: page, error: pageError } = await supabase
                     .from('pages')
                     .select('id, access_token')
                     .eq('fb_page_id', pageId)
                     .single();
 
-                if (!page) continue;
+                if (pageError) {
+                    logError('Failed to fetch page by fb_page_id', {
+                        pageId,
+                        error: pageError.message
+                    });
+                    hadCriticalFailure = true;
+                    continue;
+                }
+
+                if (!page) {
+                    logWarn('No internal page record found for webhook entry', { pageId });
+                    continue;
+                }
 
                 // Fetch welcome message config for this page (cached per webhook batch)
                 let welcomeConfig: { enabled: boolean; message_text: string; buttons: Array<{ type: string; text: string; url?: string; payload?: string }> } | null = null;
                 let welcomeConfigFetched = false;
 
                 // Process messaging events
-                if (entry.messaging) {
-                    for (const event of entry.messaging) {
+                if (messagingEvents.length > 0) {
+                    for (const event of messagingEvents) {
+                        processedEvents += 1;
                         const senderId = event.sender?.id;
-                        if (!senderId) continue;
+                        if (!senderId) {
+                            skippedEvents += 1;
+                            logWarn('Skipping messaging event without sender id', {
+                                pageId,
+                                eventKeys: Object.keys(event || {})
+                            });
+                            continue;
+                        }
 
                         const isFromContact = senderId !== pageId;
 
                         // Skip if sender is the page itself (for contact upsert)
-                        if (!isFromContact) continue;
+                        if (!isFromContact) {
+                            skippedEvents += 1;
+                            continue;
+                        }
 
                         const interactionTime = new Date(event.timestamp);
                         const interactionAt = interactionTime.toISOString();
 
                         // Check if contact exists BEFORE upsert (to detect new contacts)
-                        const { data: existingContact } = await supabase
+                        const { data: existingContact, error: existingContactError } = await supabase
                             .from('contacts')
                             .select('id')
                             .eq('page_id', page.id)
                             .eq('psid', senderId)
                             .maybeSingle();
+
+                        if (existingContactError) {
+                            logError('Failed to check existing contact before upsert', {
+                                pageId,
+                                senderId,
+                                error: existingContactError.message
+                            });
+                            hadCriticalFailure = true;
+                            continue;
+                        }
 
                         const isNewContact = !existingContact;
 
@@ -129,7 +219,11 @@ export async function POST(request: NextRequest) {
                                 profileName = profile.name || null;
                                 profilePic = profile.profile_pic || null;
                             } catch (profileError) {
-                                console.warn(`⚠️ Failed to fetch profile for new contact ${senderId}:`, (profileError as Error).message);
+                                logWarn('Failed to fetch profile for new contact', {
+                                    pageId,
+                                    senderId,
+                                    error: (profileError as Error).message
+                                });
                             }
                         }
 
@@ -159,7 +253,11 @@ export async function POST(request: NextRequest) {
                         ) {
                             const { first_interaction_at: _ignored, ...legacyContactPayload } = contactPayload;
 
-                            console.warn('⚠️ Retrying contact upsert without first_interaction_at due to schema mismatch');
+                            logWarn('Retrying contact upsert without first_interaction_at due to schema mismatch', {
+                                pageId,
+                                senderId,
+                                error: contactUpsertError.message
+                            });
                             const retryResult = await supabase
                                 .from('contacts')
                                 .upsert(legacyContactPayload, {
@@ -175,7 +273,11 @@ export async function POST(request: NextRequest) {
                         if (contactUpsertError && isNewContact) {
                             const { first_interaction_at: _ignored, ...insertContactPayload } = contactPayload;
 
-                            console.warn('⚠️ Upsert failed for new contact, retrying with direct insert');
+                            logWarn('Upsert failed for new contact, retrying with direct insert', {
+                                pageId,
+                                senderId,
+                                error: contactUpsertError.message
+                            });
                             const insertResult = await supabase
                                 .from('contacts')
                                 .insert(insertContactPayload)
@@ -187,21 +289,36 @@ export async function POST(request: NextRequest) {
                         }
 
                         if (contactUpsertError) {
-                            console.error(`🔴 Failed to upsert contact ${senderId}:`, contactUpsertError);
+                            logError('Failed to create or update contact from webhook', {
+                                pageId,
+                                senderId,
+                                error: contactUpsertError.message
+                            });
                             hadCriticalFailure = true;
                             continue;
                         }
+
+                        processedContacts += 1;
 
                         // Send welcome message to new contacts
                         if (isNewContact && contact) {
                             // Lazy-load welcome config once per page per webhook batch
                             if (!welcomeConfigFetched) {
-                                const { data: wc } = await supabase
+                                const { data: wc, error: welcomeConfigError } = await supabase
                                     .from('welcome_messages')
                                     .select('enabled, message_text, buttons')
                                     .eq('page_id', page.id)
                                     .single();
-                                welcomeConfig = wc;
+
+                                if (welcomeConfigError) {
+                                    logWarn('Failed to fetch welcome message config', {
+                                        pageId,
+                                        pageDbId: page.id,
+                                        error: welcomeConfigError.message
+                                    });
+                                } else {
+                                    welcomeConfig = wc;
+                                }
                                 welcomeConfigFetched = true;
                             }
 
@@ -226,9 +343,13 @@ export async function POST(request: NextRequest) {
                                         welcomeText,
                                         'HUMAN_AGENT'
                                     );
-                                    console.log(`👋 Welcome message sent to new contact ${senderId} on page ${pageId}`);
+                                    logInfo('Welcome message sent to new contact', { pageId, senderId });
                                 } catch (err) {
-                                    console.error(`❌ Failed to send welcome message to ${senderId}:`, err);
+                                    logError('Failed to send welcome message', {
+                                        pageId,
+                                        senderId,
+                                        error: (err as Error).message
+                                    });
                                 }
                             }
                         }
@@ -238,7 +359,7 @@ export async function POST(request: NextRequest) {
                             const hourOfDay = interactionTime.getUTCHours();
                             const dayOfWeek = interactionTime.getUTCDay();
 
-                            await supabase
+                            const { error: insertInteractionError } = await supabase
                                 .from('contact_interactions')
                                 .insert({
                                     contact_id: contact.id,
@@ -249,12 +370,31 @@ export async function POST(request: NextRequest) {
                                     is_from_contact: true
                                 });
 
+                            if (insertInteractionError) {
+                                logWarn('Failed to save contact interaction', {
+                                    pageId,
+                                    senderId,
+                                    contactId: contact.id,
+                                    error: insertInteractionError.message
+                                });
+                            }
+
                             // Automatically recalculate best time to contact
-                            const { data: interactions } = await supabase
+                            const { data: interactions, error: interactionsError } = await supabase
                                 .from('contact_interactions')
                                 .select('hour_of_day')
                                 .eq('contact_id', contact.id)
                                 .eq('is_from_contact', true);
+
+                            if (interactionsError) {
+                                logWarn('Failed to fetch interaction history for best-time calculation', {
+                                    pageId,
+                                    senderId,
+                                    contactId: contact.id,
+                                    error: interactionsError.message
+                                });
+                                continue;
+                            }
 
                             const interactionCount = interactions?.length || 0;
                             const hourDistribution: Record<number, number> = {};
@@ -289,18 +429,37 @@ export async function POST(request: NextRequest) {
                             }
 
                             // Update contact with best time data
-                            await supabase
+                            const { error: bestTimeUpdateError } = await supabase
                                 .from('contacts')
                                 .update({
                                     best_contact_hour: bestHour,
                                     best_contact_confidence: confidence
                                 })
                                 .eq('id', contact.id);
+
+                            if (bestTimeUpdateError) {
+                                logWarn('Failed to update best-time fields for contact', {
+                                    pageId,
+                                    senderId,
+                                    contactId: contact.id,
+                                    error: bestTimeUpdateError.message
+                                });
+                            }
                         }
                     }
                 }
             }
+        } else {
+            logWarn('Ignoring webhook payload with unsupported object type', { object: data.object });
         }
+
+        logInfo('Webhook processing summary', {
+            processedEntries,
+            processedEvents,
+            processedContacts,
+            skippedEvents,
+            hadCriticalFailure
+        });
 
         if (hadCriticalFailure) {
             return NextResponse.json(
@@ -314,7 +473,9 @@ export async function POST(request: NextRequest) {
 
         return NextResponse.json({ success: true });
     } catch (error) {
-        console.error('Webhook error:', error);
+        logError('Unhandled webhook error', {
+            error: (error as Error).message
+        });
         return NextResponse.json({ error: 'Webhook processing failed' }, { status: 500 });
     }
 }
