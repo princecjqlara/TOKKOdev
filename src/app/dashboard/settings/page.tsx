@@ -3,13 +3,15 @@
 import { useSession } from 'next-auth/react';
 import { useEffect, useState } from 'react';
 import { Page } from '@/types';
-import { User, Shield, Link as LinkIcon, CheckCircle } from 'lucide-react';
+import { User, Shield, Link as LinkIcon, CheckCircle, RefreshCw } from 'lucide-react';
 import Link from 'next/link';
 
 export default function SettingsPage() {
     const { data: session } = useSession();
     const [pages, setPages] = useState<Page[]>([]);
     const [loading, setLoading] = useState(true);
+    const [webhookActionPageId, setWebhookActionPageId] = useState<string | null>(null);
+    const [webhookStatus, setWebhookStatus] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
 
     useEffect(() => {
         fetchPages();
@@ -24,6 +26,38 @@ export default function SettingsPage() {
             console.error('Error fetching pages:', error);
         } finally {
             setLoading(false);
+        }
+    };
+
+    const handleResubscribeWebhook = async (page: Page) => {
+        setWebhookActionPageId(page.id);
+        setWebhookStatus(null);
+
+        try {
+            const res = await fetch(`/api/pages/${page.id}/webhook`, {
+                method: 'POST'
+            });
+            const data = await res.json();
+
+            if (res.ok && data.success) {
+                setWebhookStatus({
+                    type: 'success',
+                    message: `Webhook subscription refreshed for "${page.name}".`
+                });
+            } else {
+                setWebhookStatus({
+                    type: 'error',
+                    message: data.message || 'Failed to refresh webhook subscription.'
+                });
+            }
+        } catch (error) {
+            console.error('Error refreshing page webhook subscription:', error);
+            setWebhookStatus({
+                type: 'error',
+                message: 'Failed to refresh webhook subscription.'
+            });
+        } finally {
+            setWebhookActionPageId(null);
         }
     };
 
@@ -86,12 +120,19 @@ export default function SettingsPage() {
                     </div>
                 ) : (
                     <div className="overflow-x-auto">
+                        {webhookStatus && (
+                            <div className={`mb-3 p-3 border text-xs font-bold uppercase ${webhookStatus.type === 'success' ? 'bg-green-50 border-green-500 text-green-800' : 'bg-red-50 border-red-500 text-red-800'}`}>
+                                {webhookStatus.message}
+                            </div>
+                        )}
+
                         <table className="table-wireframe">
                             <thead>
                                 <tr>
                                     <th>Page Name</th>
                                     <th>Page ID</th>
                                     <th>Status</th>
+                                    <th className="text-right">Webhook</th>
                                 </tr>
                             </thead>
                             <tbody className="bg-white">
@@ -104,6 +145,16 @@ export default function SettingsPage() {
                                                 <CheckCircle className="w-3 h-3 mr-1" />
                                                 Connected
                                             </span>
+                                        </td>
+                                        <td className="text-right">
+                                            <button
+                                                onClick={() => handleResubscribeWebhook(page)}
+                                                disabled={webhookActionPageId === page.id}
+                                                className="btn-ghost-wireframe text-xs h-8"
+                                            >
+                                                <RefreshCw className="w-3 h-3 mr-1" />
+                                                {webhookActionPageId === page.id ? 'Refreshing...' : 'Refresh Webhook'}
+                                            </button>
                                         </td>
                                     </tr>
                                 ))}
