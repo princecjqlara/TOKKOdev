@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getSupabaseAdmin } from '@/lib/supabase';
-import { verifyWebhookSignature, generateVerifyToken, sendMessage } from '@/lib/facebook';
+import { verifyWebhookSignature, generateVerifyToken, sendMessage, getUserProfile } from '@/lib/facebook';
 import { replaceTemplateVariables } from '@/lib/placeholders';
 
 // GET /api/facebook/webhook - Verify webhook
@@ -99,6 +99,8 @@ export async function POST(request: NextRequest) {
                 if (entry.messaging) {
                     for (const event of entry.messaging) {
                         const senderId = event.sender?.id;
+                        if (!senderId) continue;
+
                         const isFromContact = senderId !== pageId;
 
                         // Skip if sender is the page itself (for contact upsert)
@@ -117,12 +119,27 @@ export async function POST(request: NextRequest) {
 
                         const isNewContact = !existingContact;
 
+                        let profileName: string | null = null;
+                        let profilePic: string | null = null;
+
+                        if (isNewContact) {
+                            try {
+                                const profile = await getUserProfile(senderId, page.access_token);
+                                profileName = profile.name || null;
+                                profilePic = profile.profile_pic || null;
+                            } catch (profileError) {
+                                console.warn(`⚠️ Failed to fetch profile for new contact ${senderId}:`, (profileError as Error).message);
+                            }
+                        }
+
                         // Upsert contact
                         const { data: contact } = await supabase
                             .from('contacts')
                             .upsert({
                                 page_id: page.id,
                                 psid: senderId,
+                                ...(profileName ? { name: profileName } : {}),
+                                ...(profilePic ? { profile_pic: profilePic } : {}),
                                 last_interaction_at: interactionAt,
                                 updated_at: new Date().toISOString(),
                                 // Set first_interaction_at only for brand-new contacts
