@@ -1,7 +1,7 @@
 'use client';
 
 import { useSession } from 'next-auth/react';
-import { useEffect, useState, useCallback } from 'react';
+import { useEffect, useState, useCallback, useRef } from 'react';
 import {
     Search,
     Filter,
@@ -70,6 +70,8 @@ export default function ContactsPage() {
     const [failedContactIds, setFailedContactIds] = useState<string[]>([]);
     const [failedContactErrors, setFailedContactErrors] = useState<SendError[]>([]);
     const [lastSendResults, setLastSendResults] = useState<{ sent: number; failed: number } | null>(null);
+    const autoSyncInFlightRef = useRef(false);
+    const lastAutoSyncAtRef = useRef(0);
 
     useEffect(() => {
         fetchPages();
@@ -122,15 +124,52 @@ export default function ContactsPage() {
         }
     }, [selectedPageId, page, pageSize, search, selectedTagFilters, excludedTagFilters, dateFrom, dateTo]);
 
+    const runIncrementalSyncFallback = useCallback(async () => {
+        if (!selectedPageId || autoSyncInFlightRef.current) return;
+
+        const now = Date.now();
+        const AUTO_SYNC_INTERVAL_MS = 15000;
+        if (now - lastAutoSyncAtRef.current < AUTO_SYNC_INTERVAL_MS) {
+            return;
+        }
+
+        autoSyncInFlightRef.current = true;
+        try {
+            const res = await fetch(`/api/pages/${selectedPageId}/sync`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ forceFullSync: false })
+            });
+
+            if (!res.ok) {
+                const data = await res.json().catch(() => ({} as { message?: string }));
+                console.warn('Incremental sync fallback failed:', data.message || `HTTP ${res.status}`);
+            }
+        } catch (error) {
+            console.warn('Incremental sync fallback error:', (error as Error).message);
+        } finally {
+            lastAutoSyncAtRef.current = Date.now();
+            autoSyncInFlightRef.current = false;
+        }
+    }, [selectedPageId]);
+
+    useEffect(() => {
+        if (!selectedPageId) return;
+
+        lastAutoSyncAtRef.current = 0;
+        void runIncrementalSyncFallback();
+    }, [selectedPageId, runIncrementalSyncFallback]);
+
     useEffect(() => {
         if (!selectedPageId) return;
 
         const intervalId = setInterval(() => {
+            void runIncrementalSyncFallback();
             fetchContacts();
         }, 10000);
 
         return () => clearInterval(intervalId);
-    }, [selectedPageId, fetchContacts]);
+    }, [selectedPageId, runIncrementalSyncFallback, fetchContacts]);
 
     const fetchTags = async () => {
         if (!selectedPageId) return;
