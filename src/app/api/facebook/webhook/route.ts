@@ -171,25 +171,89 @@ export async function POST(request: NextRequest) {
                 if (inboundEvents.length > 0) {
                     for (const event of inboundEvents) {
                         processedEvents += 1;
-                        const senderId = event.sender?.id;
-                        if (!senderId) {
-                            skippedEvents += 1;
-                            logWarn('Skipping messaging event without sender id', {
-                                pageId,
-                                eventKeys: Object.keys(event || {})
-                            });
-                            continue;
-                        }
+                        try {
+                            const eventType = event.message
+                                ? 'message'
+                                : event.postback
+                                    ? 'postback'
+                                    : event.referral
+                                        ? 'referral'
+                                        : event.delivery
+                                            ? 'delivery'
+                                            : event.read
+                                                ? 'read'
+                                                : event.optin
+                                                    ? 'optin'
+                                                    : 'unknown';
+                            const senderId = event.sender?.id;
+                            const recipientId = event.recipient?.id;
+
+                            if (!senderId) {
+                                skippedEvents += 1;
+                                logWarn('Skipping messaging event without sender id', {
+                                    pageId,
+                                    recipientId: recipientId ?? null,
+                                    eventType,
+                                    eventKeys: Object.keys(event || {})
+                                });
+                                continue;
+                            }
 
                         const isFromContact = senderId !== pageId;
 
                         // Skip if sender is the page itself (for contact upsert)
                         if (!isFromContact) {
                             skippedEvents += 1;
+                            if (eventType === 'message' || eventType === 'postback' || eventType === 'referral') {
+                                logInfo('Skipping outbound page event from webhook payload', {
+                                    pageId,
+                                    senderId,
+                                    recipientId: recipientId ?? null,
+                                    eventType
+                                });
+                            }
                             continue;
                         }
 
-                        const interactionTime = new Date(event.timestamp);
+                        let interactionTime = new Date();
+                        const rawTimestamp = event.timestamp;
+                        if (rawTimestamp !== undefined && rawTimestamp !== null) {
+                            let parsedTime: Date | null = null;
+                            if (typeof rawTimestamp === 'number' || typeof rawTimestamp === 'string') {
+                                const numericTimestamp = Number(rawTimestamp);
+                                if (Number.isFinite(numericTimestamp)) {
+                                    const candidate = new Date(numericTimestamp);
+                                    if (!Number.isNaN(candidate.getTime())) {
+                                        parsedTime = candidate;
+                                    }
+                                }
+
+                                if (!parsedTime) {
+                                    const candidate = new Date(rawTimestamp);
+                                    if (!Number.isNaN(candidate.getTime())) {
+                                        parsedTime = candidate;
+                                    }
+                                }
+                            }
+
+                            if (parsedTime) {
+                                interactionTime = parsedTime;
+                            } else {
+                                logWarn('Invalid webhook event timestamp; using server time fallback', {
+                                    pageId,
+                                    senderId,
+                                    eventType,
+                                    rawTimestamp
+                                });
+                            }
+                        } else {
+                            logWarn('Webhook event missing timestamp; using server time fallback', {
+                                pageId,
+                                senderId,
+                                eventType
+                            });
+                        }
+
                         const interactionAt = interactionTime.toISOString();
 
                         // Check if contact exists BEFORE upsert (to detect new contacts)
@@ -447,6 +511,17 @@ export async function POST(request: NextRequest) {
                                     error: bestTimeUpdateError.message
                                 });
                             }
+                        }
+                        } catch (eventError) {
+                            skippedEvents += 1;
+                            hadCriticalFailure = true;
+                            logError('Unhandled exception while processing inbound webhook event', {
+                                pageId,
+                                senderId: event?.sender?.id ?? null,
+                                recipientId: event?.recipient?.id ?? null,
+                                eventKeys: Object.keys(event || {}),
+                                error: (eventError as Error).message
+                            });
                         }
                     }
                 }

@@ -10,10 +10,37 @@ export async function GET(
     request: NextRequest,
     { params }: { params: Promise<{ pageId: string }> }
 ) {
+    const requestId = typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
+        ? crypto.randomUUID()
+        : `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+    const logPrefix = `[CONTACTS_GET][${requestId}]`;
+    const logInfo = (message: string, data?: unknown) => {
+        if (data !== undefined) {
+            console.log(`${logPrefix} ${message}`, data);
+            return;
+        }
+        console.log(`${logPrefix} ${message}`);
+    };
+    const logWarn = (message: string, data?: unknown) => {
+        if (data !== undefined) {
+            console.warn(`${logPrefix} ${message}`, data);
+            return;
+        }
+        console.warn(`${logPrefix} ${message}`);
+    };
+    const logError = (message: string, data?: unknown) => {
+        if (data !== undefined) {
+            console.error(`${logPrefix} ${message}`, data);
+            return;
+        }
+        console.error(`${logPrefix} ${message}`);
+    };
+
     try {
         const session = await getServerSession(authOptions);
 
         if (!session?.user?.id) {
+            logWarn('Unauthorized contacts request');
             return NextResponse.json(
                 { error: 'Unauthorized', message: 'Please sign in' },
                 { status: 401 }
@@ -34,6 +61,20 @@ export async function GET(
         const dateFrom = searchParams.get('dateFrom') || '';
         const dateTo = searchParams.get('dateTo') || '';
 
+        logInfo('Contacts request received', {
+            userId: session.user.id,
+            pageId,
+            page,
+            pageSize,
+            hasSearch: Boolean(search),
+            searchLength: search.length,
+            includeTagCount: tagIds.length,
+            excludeTagCount: excludeTagIds.length,
+            sendableOnly,
+            dateFrom: dateFrom || null,
+            dateTo: dateTo || null
+        });
+
         const supabase = getSupabaseAdmin();
 
         // Verify user has access to page
@@ -45,6 +86,10 @@ export async function GET(
             .single();
 
         if (!userPage) {
+            logWarn('User attempted contacts request for page without access', {
+                userId: session.user.id,
+                pageId
+            });
             return NextResponse.json(
                 { error: 'Forbidden', message: 'You do not have access to this page' },
                 { status: 403 }
@@ -92,8 +137,15 @@ export async function GET(
 
             if (contactIds.length > 0) {
                 query = query.in('id', contactIds);
+                logInfo('Applied include-tag filter', {
+                    includeTagCount: tagIds.length,
+                    matchingContactCount: contactIds.length
+                });
             } else {
                 // No contacts with any of these tags
+                logInfo('Include-tag filter matched no contacts', {
+                    includeTagCount: tagIds.length
+                });
                 return NextResponse.json({
                     items: [],
                     page,
@@ -116,6 +168,10 @@ export async function GET(
             const notInFilter = buildNotInFilter(excludedIds);
             if (notInFilter) {
                 query = query.not('id', 'in', notInFilter);
+                logInfo('Applied exclude-tag filter', {
+                    excludeTagCount: excludeTagIds.length,
+                    excludedContactCount: excludedIds.length
+                });
             }
         }
 
@@ -135,6 +191,15 @@ export async function GET(
             contact_tags: undefined
         })) || [];
 
+        logInfo('Returning contacts response', {
+            returnedItems: transformedContacts.length,
+            totalMatched: count || 0,
+            page,
+            pageSize,
+            firstReturnedContactId: transformedContacts[0]?.id ?? null,
+            firstReturnedPsid: transformedContacts[0]?.psid ?? null
+        });
+
         return NextResponse.json({
             items: transformedContacts,
             page,
@@ -142,7 +207,9 @@ export async function GET(
             total: count || 0
         } as PaginatedResponse<Contact>);
     } catch (error) {
-        console.error('Error fetching contacts:', error);
+        logError('Error fetching contacts', {
+            error: (error as Error).message
+        });
         return NextResponse.json(
             { error: 'Failed to fetch contacts', message: (error as Error).message },
             { status: 500 }

@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getSessionFromRequest } from '@/lib/get-session';
 import { getSupabaseAdmin } from '@/lib/supabase';
-import { getPageConversations, getUserProfile, getConversationMessages } from '@/lib/facebook';
+import { getPageConversations, getUserProfile, getConversationMessages, subscribePageToAppWebhook } from '@/lib/facebook';
 
 // Increase timeout for sync operations (up to 5 minutes)
 export const maxDuration = 300;
@@ -11,11 +11,37 @@ export async function POST(
     request: NextRequest,
     { params }: { params: Promise<{ pageId: string }> }
 ) {
+    const requestId = typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
+        ? crypto.randomUUID()
+        : `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+    const logPrefix = `[CONTACT_SYNC][${requestId}]`;
+    const logInfo = (message: string, data?: unknown) => {
+        if (data !== undefined) {
+            console.log(`${logPrefix} ${message}`, data);
+            return;
+        }
+        console.log(`${logPrefix} ${message}`);
+    };
+    const logWarn = (message: string, data?: unknown) => {
+        if (data !== undefined) {
+            console.warn(`${logPrefix} ${message}`, data);
+            return;
+        }
+        console.warn(`${logPrefix} ${message}`);
+    };
+    const logError = (message: string, data?: unknown) => {
+        if (data !== undefined) {
+            console.error(`${logPrefix} ${message}`, data);
+            return;
+        }
+        console.error(`${logPrefix} ${message}`);
+    };
+
     try {
         const session = await getSessionFromRequest(request);
 
         if (!session) {
-            console.error('🔴 No session found in /api/pages/[pageId]/sync');
+            logError('No session found in /api/pages/[pageId]/sync');
             return NextResponse.json(
                 { error: 'Unauthorized', message: 'Please sign in' },
                 { status: 401 }
@@ -24,7 +50,10 @@ export async function POST(
 
         const userId = session.user?.id;
         if (!userId) {
-            console.error('🔴 No user ID in session:', session.user);
+            logError('No user ID in session', {
+                hasSessionUser: Boolean(session.user),
+                userEmail: session.user?.email ?? null
+            });
             return NextResponse.json(
                 { error: 'Unauthorized', message: 'User not found. Please sign in again.' },
                 { status: 401 }
@@ -43,6 +72,12 @@ export async function POST(
             // No body provided, use default (incremental sync)
         }
 
+        logInfo('Sync request received', {
+            userId,
+            pageId,
+            forceFullSync
+        });
+
         // Verify user has access to page
         const { data: userPage } = await supabase
             .from('user_pages')
@@ -52,6 +87,10 @@ export async function POST(
             .single();
 
         if (!userPage) {
+            logWarn('User attempted sync for page without access', {
+                userId,
+                pageId
+            });
             return NextResponse.json(
                 { error: 'Forbidden', message: 'You do not have access to this page' },
                 { status: 403 }
@@ -66,21 +105,47 @@ export async function POST(
             .single();
 
         if (!page) {
+            logWarn('Page not found for sync request', {
+                userId,
+                pageId
+            });
             return NextResponse.json(
                 { error: 'Not Found', message: 'Page not found' },
                 { status: 404 }
             );
         }
 
+        try {
+            await subscribePageToAppWebhook(page.fb_page_id, page.access_token, ['messages', 'messaging_postbacks']);
+            logInfo('Verified page webhook subscription before sync', {
+                pageId,
+                fbPageId: page.fb_page_id
+            });
+        } catch (subscriptionError) {
+            logWarn('Failed to verify page webhook subscription before sync', {
+                pageId,
+                fbPageId: page.fb_page_id,
+                error: (subscriptionError as Error).message
+            });
+        }
+
         // Determine if this is a full sync or incremental sync
         const isIncremental = !forceFullSync && !!page.last_synced_at;
         const syncStartTime = new Date().toISOString();
 
-        console.log(`🔵 Starting ${isIncremental ? 'incremental' : 'full'} sync for page: ${page.fb_page_id} (${pageId})`);
+        logInfo('Starting sync run', {
+            syncMode: isIncremental ? 'incremental' : 'full',
+            fbPageId: page.fb_page_id,
+            pageId,
+            lastSyncedAt: page.last_synced_at ?? null,
+            forceFullSync
+        });
         if (isIncremental) {
-            console.log(`🔵 Last synced: ${page.last_synced_at}, fetching only new/updated conversations`);
+            logInfo('Incremental sync using last_synced_at checkpoint', {
+                lastSyncedAt: page.last_synced_at
+            });
         } else if (forceFullSync) {
-            console.log(`🔵 Force full sync requested - syncing all conversations`);
+            logInfo('Force full sync requested - syncing all conversations');
         }
 
         // Fetch conversations from Facebook (only new ones if incremental)
@@ -93,9 +158,14 @@ export async function POST(
                 true,
                 isIncremental ? page.last_synced_at : undefined
             );
-            console.log(`🔵 Fetched ${conversations.length} ${isIncremental ? 'new/updated' : ''} conversations from Facebook`);
+            logInfo('Fetched conversations from Facebook', {
+                conversationCount: conversations.length,
+                incremental: isIncremental
+            });
         } catch (error) {
-            console.error('🔴 Error fetching conversations from Facebook:', error);
+            logError('Error fetching conversations from Facebook', {
+                error: (error as Error).message
+            });
             const errorMessage = (error as Error).message || String(error);
 
             // Check if it's a permissions error
@@ -120,6 +190,13 @@ export async function POST(
         const validConversations = conversations.filter(conv => {
             const participant = conv.participants?.data?.find(p => p.id !== page.fb_page_id);
             return participant && participant.id;
+        });
+
+        const invalidConversationCount = conversations.length - validConversations.length;
+        logInfo('Conversation validation complete', {
+            totalConversations: conversations.length,
+            validConversations: validConversations.length,
+            invalidConversations: invalidConversationCount
         });
 
         // Check for deleted contacts that should be re-added
@@ -147,11 +224,15 @@ export async function POST(
 
                 if (missingPsids.length > 0) {
                     restoredCount = missingPsids.length;
-                    console.log(`🔵 Found ${restoredCount} deleted contacts to restore (they still exist in Facebook conversations)`);
+                    logInfo('Found deleted contacts to restore from Facebook conversations', {
+                        restoredCount
+                    });
                 }
             } catch (error) {
                 // Don't fail the sync if checking for deleted contacts fails
-                console.warn('⚠️ Error checking for deleted contacts (non-critical):', (error as Error).message);
+                logWarn('Error checking for deleted contacts (non-critical)', {
+                    error: (error as Error).message
+                });
             }
         }
 
@@ -166,7 +247,13 @@ export async function POST(
         const PROFILE_FETCH_TIMEOUT = 2000; // 2 seconds max per profile fetch (reduced for faster processing)
         const startTime = Date.now();
 
-        console.log(`Processing ${validConversations.length} valid conversations in batches of ${SYNC_BATCH_SIZE}`);
+        logInfo('Beginning conversation processing', {
+            validConversations: validConversations.length,
+            batchSize: SYNC_BATCH_SIZE,
+            delayBetweenBatchesMs: DELAY_BETWEEN_BATCHES,
+            maxProcessingTimeMs: MAX_PROCESSING_TIME,
+            profileFetchTimeoutMs: PROFILE_FETCH_TIMEOUT
+        });
         // #region agent log
         fetch('http://127.0.0.1:7242/ingest/6358f30b-ef0a-4ea4-8acc-50c08c025924', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ location: 'sync/route.ts:169', message: 'Sync start', data: { totalConversations: validConversations.length, isIncremental, lastSyncedAt: page.last_synced_at, startTime }, timestamp: Date.now(), sessionId: 'debug-session', runId: 'run1', hypothesisId: 'E' }) }).catch(() => { });
         // #endregion
@@ -189,7 +276,14 @@ export async function POST(
                     })
                     .filter((psid): psid is string => !!psid);
 
-                console.warn(`⚠️ Approaching timeout, processed ${i}/${validConversations.length} conversations. ${remainingConversations.length} conversations remaining.`);
+                logWarn('Approaching timeout, returning partial sync response', {
+                    processedConversations: i,
+                    totalConversations: validConversations.length,
+                    remainingConversations: remainingConversations.length,
+                    synced,
+                    failed,
+                    elapsedMs: elapsed
+                });
                 return NextResponse.json({
                     success: true,
                     partial: true,
@@ -205,6 +299,19 @@ export async function POST(
             }
 
             const batch = validConversations.slice(i, i + SYNC_BATCH_SIZE);
+            const batchNumber = Math.floor(i / SYNC_BATCH_SIZE) + 1;
+            const totalBatches = Math.ceil(validConversations.length / SYNC_BATCH_SIZE);
+
+            if (batchNumber === 1 || batchNumber % 10 === 0 || batchNumber === totalBatches) {
+                logInfo('Starting batch', {
+                    batchNumber,
+                    totalBatches,
+                    batchSize: batch.length,
+                    processedBeforeBatch: i,
+                    synced,
+                    failed
+                });
+            }
 
             // Process batch in parallel - use allSettled to continue even if some fail
             const batchPromises = batch.map(async (conversation) => {
@@ -242,7 +349,10 @@ export async function POST(
                             errorMsg.includes('does not support this operation');
 
                         if (!isExpectedError) {
-                            console.warn(`⚠️ Failed to fetch profile for ${participant.id}:`, errorMsg);
+                            logWarn('Unexpected profile fetch error', {
+                                psid: participant.id,
+                                error: errorMsg
+                            });
                         }
                     }
 
@@ -311,7 +421,11 @@ export async function POST(
                         }
                     } catch (msgError) {
                         // Message fetch failed, fallback to last interaction time
-                        console.warn(`⚠️ Could not fetch messages for ${participant.id}:`, (msgError as Error).message);
+                        logWarn('Could not fetch conversation messages; using fallback heuristics', {
+                            psid: participant.id,
+                            conversationId: conversation.id,
+                            error: (msgError as Error).message
+                        });
                     }
 
                     // Fallback: if no messages analyzed, use last interaction time
@@ -343,13 +457,21 @@ export async function POST(
                         });
 
                     if (upsertError) {
-                        console.error(`🔴 Error upserting contact ${participant.id}:`, upsertError);
+                        logError('Error upserting contact', {
+                            psid: participant.id,
+                            conversationId: conversation.id,
+                            error: upsertError.message
+                        });
                         return { success: false, psid: participant.id, error: upsertError.message };
                     } else {
                         return { success: true, psid: participant.id };
                     }
                 } catch (error) {
-                    console.error(`🔴 Error processing contact ${participant.id}:`, error);
+                    logError('Unhandled error processing contact', {
+                        psid: participant.id,
+                        conversationId: conversation.id,
+                        error: (error as Error).message
+                    });
                     return { success: false, psid: participant.id, error: (error as Error).message };
                 }
             });
@@ -376,6 +498,22 @@ export async function POST(
                 }
             }
 
+            const batchSynced = batchResults.filter(
+                (result) => result.status === 'fulfilled' && result.value.success
+            ).length;
+            const batchFailed = batchResults.length - batchSynced;
+            if (batchFailed > 0 || batchNumber % 10 === 0 || batchNumber === totalBatches) {
+                logInfo('Batch completed', {
+                    batchNumber,
+                    totalBatches,
+                    batchSynced,
+                    batchFailed,
+                    cumulativeSynced: synced,
+                    cumulativeFailed: failed,
+                    errorSamples: errors.slice(-3)
+                });
+            }
+
             // Add delay between batches to avoid rate limiting
             if (i + SYNC_BATCH_SIZE < validConversations.length) {
                 await new Promise(resolve => setTimeout(resolve, DELAY_BETWEEN_BATCHES));
@@ -386,11 +524,26 @@ export async function POST(
                 const elapsed = Date.now() - startTime;
                 const remaining = validConversations.length - (i + SYNC_BATCH_SIZE);
                 const estimatedTimeRemaining = remaining > 0 ? Math.round((elapsed / (i + SYNC_BATCH_SIZE)) * remaining / 1000) : 0;
-                console.log(`Progress: ${Math.min(i + SYNC_BATCH_SIZE, validConversations.length)}/${validConversations.length} conversations processed (Synced: ${synced}, Failed: ${failed}, Elapsed: ${Math.round(elapsed / 1000)}s, Est. remaining: ${estimatedTimeRemaining}s)`);
+                logInfo('Sync progress', {
+                    processed: Math.min(i + SYNC_BATCH_SIZE, validConversations.length),
+                    total: validConversations.length,
+                    synced,
+                    failed,
+                    elapsedSeconds: Math.round(elapsed / 1000),
+                    estimatedRemainingSeconds: estimatedTimeRemaining
+                });
             }
         }
 
-        console.log(`✅ Sync complete: ${synced} synced, ${failed} failed${restoredCount > 0 ? `, ${restoredCount} deleted contacts restored` : ''}`);
+        logInfo('Sync complete before metadata update', {
+            synced,
+            failed,
+            restoredCount,
+            totalValidConversations: validConversations.length,
+            elapsedMs: Date.now() - startTime,
+            errorCount: errors.length,
+            errorSamples: errors.slice(0, 5)
+        });
         // #region agent log
         fetch('http://127.0.0.1:7242/ingest/6358f30b-ef0a-4ea4-8acc-50c08c025924', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ location: 'sync/route.ts:291', message: 'Sync complete', data: { synced, failed, total: validConversations.length, restored: restoredCount, elapsed: Date.now() - startTime }, timestamp: Date.now(), sessionId: 'debug-session', runId: 'run1', hypothesisId: 'E' }) }).catch(() => { });
         // #endregion
@@ -398,7 +551,7 @@ export async function POST(
         // Always update last_synced_at to the start time of this sync
         // This ensures that if we retry, we won't re-fetch conversations we've already processed
         // The upsert with onConflict will handle duplicates correctly
-        await supabase
+        const { error: checkpointError } = await supabase
             .from('pages')
             .update({
                 last_synced_at: syncStartTime,
@@ -406,11 +559,28 @@ export async function POST(
             })
             .eq('id', pageId);
 
-        if (synced + failed < validConversations.length) {
-            console.log(`⚠️ Partial sync - processed ${synced + failed}/${validConversations.length} conversations. last_synced_at updated to ${syncStartTime}`);
+        if (checkpointError) {
+            logWarn('Failed to update last_synced_at checkpoint', {
+                pageId,
+                syncStartTime,
+                error: checkpointError.message
+            });
+        } else {
+            logInfo('Updated last_synced_at checkpoint', {
+                pageId,
+                syncStartTime
+            });
         }
 
-        return NextResponse.json({
+        if (synced + failed < validConversations.length) {
+            logWarn('Partial sync completed', {
+                processed: synced + failed,
+                totalValidConversations: validConversations.length,
+                syncStartTime
+            });
+        }
+
+        const responsePayload = {
             success: true,
             synced,
             failed,
@@ -419,9 +589,18 @@ export async function POST(
             restored: restoredCount, // Number of deleted contacts that were re-added
             last_synced_at: syncStartTime,
             errors: errors.slice(0, 10) // Return first 10 errors
+        };
+
+        logInfo('Returning sync response', {
+            ...responsePayload,
+            fullErrorCount: errors.length
         });
+
+        return NextResponse.json(responsePayload);
     } catch (error) {
-        console.error('Error syncing contacts:', error);
+        logError('Unhandled error syncing contacts', {
+            error: (error as Error).message
+        });
         return NextResponse.json(
             { error: 'Failed to sync contacts', message: (error as Error).message },
             { status: 500 }

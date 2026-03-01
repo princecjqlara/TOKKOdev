@@ -74,6 +74,7 @@ export default function ContactsPage() {
     const realtimeRefreshTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
     const realtimeFallbackIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
     const realtimeSubscribeTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+    const webhookRefreshAttemptedRef = useRef<Set<string>>(new Set());
 
     useEffect(() => {
         fetchPages();
@@ -85,6 +86,42 @@ export default function ContactsPage() {
             fetchTags();
         }
     }, [selectedPageId, page, pageSize, search, selectedTagFilters, excludedTagFilters, dateFrom, dateTo]);
+
+    useEffect(() => {
+        if (!selectedPageId) return;
+        if (webhookRefreshAttemptedRef.current.has(selectedPageId)) return;
+
+        webhookRefreshAttemptedRef.current.add(selectedPageId);
+
+        const refreshWebhookSubscription = async () => {
+            try {
+                const response = await fetch(`/api/pages/${selectedPageId}/webhook`, {
+                    method: 'POST'
+                });
+
+                if (!response.ok) {
+                    const data = await response.json().catch(() => ({} as { message?: string }));
+                    console.warn('[CONTACTS_WEBHOOK] Failed to refresh page webhook subscription', {
+                        pageId: selectedPageId,
+                        status: response.status,
+                        message: data.message || null
+                    });
+                    return;
+                }
+
+                console.log('[CONTACTS_WEBHOOK] Page webhook subscription refreshed', {
+                    pageId: selectedPageId
+                });
+            } catch (error) {
+                console.warn('[CONTACTS_WEBHOOK] Error refreshing page webhook subscription', {
+                    pageId: selectedPageId,
+                    error: (error as Error).message
+                });
+            }
+        };
+
+        void refreshWebhookSubscription();
+    }, [selectedPageId]);
 
     const fetchPages = async () => {
         try {
@@ -167,7 +204,14 @@ export default function ContactsPage() {
                     table: 'contacts',
                     filter: `page_id=eq.${selectedPageId}`
                 },
-                () => {
+                (payload) => {
+                    console.log('[CONTACTS_REALTIME] postgres_changes event received', {
+                        pageId: selectedPageId,
+                        eventType: payload.eventType,
+                        table: payload.table,
+                        schema: payload.schema
+                    });
+
                     if (realtimeRefreshTimerRef.current) {
                         clearTimeout(realtimeRefreshTimerRef.current);
                     }
@@ -179,6 +223,11 @@ export default function ContactsPage() {
                 }
             )
             .subscribe((status) => {
+                console.log('[CONTACTS_REALTIME] subscription status', {
+                    pageId: selectedPageId,
+                    status
+                });
+
                 if (status === 'SUBSCRIBED') {
                     if (realtimeSubscribeTimeoutRef.current) {
                         clearTimeout(realtimeSubscribeTimeoutRef.current);
