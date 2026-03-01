@@ -50,6 +50,11 @@ describe('replaceTemplateVariables', () => {
         expect(replaceTemplateVariables(template, contact)).toBe('Juan Dela Cruz is your name, right Juan Dela Cruz?');
     });
 
+    it('should replace placeholder variants with spaces and dashes', () => {
+        const template = 'Hi { first name } {{ last-name }}!';
+        expect(replaceTemplateVariables(template, contact)).toBe('Hi Juan Dela Cruz!');
+    });
+
     it('should use "there" as fallback for name if contact name is missing', () => {
         const emptyContact = { ...contact, name: null };
         const template = 'Hello {first_name}!';

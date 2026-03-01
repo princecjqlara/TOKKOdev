@@ -22,15 +22,21 @@ export function replaceTemplateVariables(template: string, contact: ContactRecor
     // to prevent {name} from matching the inner part of {{name}}
     message = message.replace(/\{\{first_name\}\}/gi, firstName);
     message = message.replace(/\{\{firstname\}\}/gi, firstName);
+    message = message.replace(/\{\{\s*first[\s_-]*name\s*\}\}/gi, firstName);
     message = message.replace(/\{\{last_name\}\}/gi, lastName);
     message = message.replace(/\{\{lastname\}\}/gi, lastName);
+    message = message.replace(/\{\{\s*last[\s_-]*name\s*\}\}/gi, lastName);
     message = message.replace(/\{\{name\}\}/gi, name);
+    message = message.replace(/\{\{\s*name\s*\}\}/gi, name);
 
     message = message.replace(/\{first_name\}/gi, firstName);
     message = message.replace(/\{firstname\}/gi, firstName);
+    message = message.replace(/\{\s*first[\s_-]*name\s*\}/gi, firstName);
     message = message.replace(/\{last_name\}/gi, lastName);
     message = message.replace(/\{lastname\}/gi, lastName);
+    message = message.replace(/\{\s*last[\s_-]*name\s*\}/gi, lastName);
     message = message.replace(/\{name\}/gi, name);
+    message = message.replace(/\{\s*name\s*\}/gi, name);
 
     return message;
 }
