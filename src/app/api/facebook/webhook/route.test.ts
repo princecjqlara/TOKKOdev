@@ -53,7 +53,13 @@ function createWebhookRequest(payload?: Record<string, unknown>): NextRequest {
     }) as unknown as NextRequest;
 }
 
-function createSupabaseMock() {
+function createSupabaseMock(options?: {
+    welcomeConfig?: {
+        enabled: boolean;
+        message_text: string;
+        buttons: Array<{ type: string; text: string; url?: string; payload?: string }>;
+    };
+}) {
     const pageSingle = vi.fn().mockResolvedValue({
         data: {
             id: 'page_row_1',
@@ -86,7 +92,7 @@ function createSupabaseMock() {
     const contactsUpdate = vi.fn().mockReturnValue({ eq: contactsUpdateEq });
 
     const welcomeSingle = vi.fn().mockResolvedValue({
-        data: {
+        data: options?.welcomeConfig ?? {
             enabled: false,
             message_text: '',
             buttons: []
@@ -451,5 +457,41 @@ describe('POST /api/facebook/webhook', () => {
         expect(body.success).toBe(true);
         expect(mocks.getUserProfile).toHaveBeenCalledWith('contact_psid_1', 'page_access_token_1');
         expect(supabase.contactsUpsert).toHaveBeenCalledTimes(1);
+    });
+
+    it('sends welcome as RESPONSE with mapped buttons when welcome config has buttons', async () => {
+        const supabase = createSupabaseMock({
+            welcomeConfig: {
+                enabled: true,
+                message_text: 'Hi {first_name} handa ka na bang palakasin sales mo this month?',
+                buttons: [
+                    { type: 'URL', text: 'CLICK HERE!', url: 'https://meet.google.com/peh-jivc-tgx' },
+                    { type: 'QUICK_REPLY', text: 'Talk to sales', payload: '' }
+                ]
+            }
+        });
+        mocks.getSupabaseAdmin.mockReturnValue(supabase);
+        mocks.getUserProfile.mockResolvedValue({
+            id: 'contact_psid_1',
+            name: 'Jane Contact',
+            profile_pic: 'https://example.com/jane.jpg'
+        });
+
+        const response = await POST(createWebhookRequest());
+        const body = await response.json();
+
+        expect(response.status).toBe(200);
+        expect(body.success).toBe(true);
+        expect(mocks.sendMessage).toHaveBeenCalledTimes(1);
+
+        const sendArgs = mocks.sendMessage.mock.calls[0];
+        expect(sendArgs[0]).toBe('fb_page_1');
+        expect(sendArgs[1]).toBe('page_access_token_1');
+        expect(sendArgs[2]).toBe('contact_psid_1');
+        expect(sendArgs[4]).toBe('RESPONSE');
+        expect(sendArgs[8]).toEqual([
+            { type: 'URL', text: 'CLICK HERE!', url: 'https://meet.google.com/peh-jivc-tgx' },
+            { type: 'POSTBACK', text: 'Talk to sales', payload: 'Talk to sales' }
+        ]);
     });
 });

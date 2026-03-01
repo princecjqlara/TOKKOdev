@@ -400,6 +400,39 @@ export async function POST(request: NextRequest) {
                                     last_interaction_at: null
                                 });
 
+                                const mappedWelcomeButtons = Array.isArray(welcomeConfig.buttons)
+                                    ? welcomeConfig.buttons
+                                        .map((button) => {
+                                            const text = typeof button?.text === 'string' ? button.text.trim() : '';
+                                            if (!text) return null;
+
+                                            const buttonType = typeof button?.type === 'string' ? button.type.toUpperCase() : 'URL';
+                                            if (buttonType === 'QUICK_REPLY') {
+                                                const payload = typeof button?.payload === 'string' && button.payload.trim().length > 0
+                                                    ? button.payload.trim()
+                                                    : text;
+                                                return {
+                                                    type: 'POSTBACK' as const,
+                                                    text,
+                                                    payload
+                                                };
+                                            }
+
+                                            const url = typeof button?.url === 'string' ? button.url.trim() : '';
+                                            if (!url) return null;
+
+                                            return {
+                                                type: 'URL' as const,
+                                                text,
+                                                url
+                                            };
+                                        })
+                                        .filter((button): button is { type: 'URL'; text: string; url: string } | { type: 'POSTBACK'; text: string; payload: string } => button !== null)
+                                        .slice(0, 3)
+                                    : [];
+
+                                const welcomeMessagingType = mappedWelcomeButtons.length > 0 ? 'RESPONSE' : 'HUMAN_AGENT';
+
                                 // Send welcome message (must await in serverless environment)
                                 try {
                                     await sendMessage(
@@ -407,9 +440,18 @@ export async function POST(request: NextRequest) {
                                         page.access_token,
                                         senderId,
                                         welcomeText,
-                                        'HUMAN_AGENT'
+                                        welcomeMessagingType,
+                                        undefined,
+                                        undefined,
+                                        undefined,
+                                        mappedWelcomeButtons.length > 0 ? mappedWelcomeButtons : undefined
                                     );
-                                    logInfo('Welcome message sent to new contact', { pageId, senderId });
+                                    logInfo('Welcome message sent to new contact', {
+                                        pageId,
+                                        senderId,
+                                        messagingType: welcomeMessagingType,
+                                        buttonCount: mappedWelcomeButtons.length
+                                    });
                                 } catch (err) {
                                     logError('Failed to send welcome message', {
                                         pageId,

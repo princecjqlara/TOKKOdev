@@ -206,6 +206,37 @@ export async function sendMessage(
     // Build the request payload based on messaging type
     let bodyPayload: Record<string, unknown>;
 
+    const responseButtons = messagingType === 'RESPONSE' && Array.isArray(templateButtons)
+        ? templateButtons
+            .map((button) => {
+                const title = typeof button.text === 'string' ? button.text.trim() : '';
+                if (!title) return null;
+
+                if (button.type === 'URL') {
+                    const url = typeof button.url === 'string' ? button.url.trim() : '';
+                    if (!url) return null;
+
+                    return {
+                        type: 'web_url' as const,
+                        title,
+                        url
+                    };
+                }
+
+                const payload = typeof button.payload === 'string' && button.payload.trim().length > 0
+                    ? button.payload.trim()
+                    : title;
+
+                return {
+                    type: 'postback' as const,
+                    title,
+                    payload
+                };
+            })
+            .filter((button): button is { type: 'web_url'; title: string; url: string } | { type: 'postback'; title: string; payload: string } => button !== null)
+            .slice(0, 3)
+        : [];
+
     if (messagingType === 'UTILITY') {
         // Utility message with template - no time window restrictions
         const template = templateName || DEFAULT_UTILITY_TEMPLATE;
@@ -262,11 +293,28 @@ export async function sendMessage(
         };
     } else {
         // RESPONSE - standard messaging within 24-hour window
-        bodyPayload = {
-            recipient: { id: recipientPsid },
-            messaging_type: 'RESPONSE',
-            message: { text: messageText }
-        };
+        if (responseButtons.length > 0) {
+            bodyPayload = {
+                recipient: { id: recipientPsid },
+                messaging_type: 'RESPONSE',
+                message: {
+                    attachment: {
+                        type: 'template',
+                        payload: {
+                            template_type: 'button',
+                            text: messageText,
+                            buttons: responseButtons
+                        }
+                    }
+                }
+            };
+        } else {
+            bodyPayload = {
+                recipient: { id: recipientPsid },
+                messaging_type: 'RESPONSE',
+                message: { text: messageText }
+            };
+        }
     }
 
     // Facebook Messenger API endpoint - use /me/messages with page access token

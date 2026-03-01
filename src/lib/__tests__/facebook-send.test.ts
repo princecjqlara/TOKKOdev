@@ -108,6 +108,47 @@ describe('sendMessage', () => {
         expect(payload.message.text).toBe('hello');
     });
 
+    it('sends RESPONSE button template payload when buttons are provided', async () => {
+        const fetchMock = vi
+            .fn()
+            .mockResolvedValue(createJsonResponse(true, { message_id: 'mid.response.buttons' }));
+        vi.stubGlobal('fetch', fetchMock);
+
+        await sendMessage(
+            'page_1',
+            'token_1',
+            'psid_1',
+            'Need help with your booking?',
+            'RESPONSE',
+            undefined,
+            'en_US',
+            undefined,
+            [
+                { type: 'URL', text: 'Book now', url: 'https://example.com/book' },
+                { type: 'POSTBACK', text: 'Talk to sales', payload: 'talk_sales' }
+            ]
+        );
+
+        const [, requestInit] = fetchMock.mock.calls[0];
+        const payload = JSON.parse((requestInit as RequestInit).body as string);
+        expect(payload.messaging_type).toBe('RESPONSE');
+        expect(payload.message.attachment.type).toBe('template');
+        expect(payload.message.attachment.payload.template_type).toBe('button');
+        expect(payload.message.attachment.payload.text).toBe('Need help with your booking?');
+        expect(payload.message.attachment.payload.buttons).toEqual([
+            {
+                type: 'web_url',
+                title: 'Book now',
+                url: 'https://example.com/book'
+            },
+            {
+                type: 'postback',
+                title: 'Talk to sales',
+                payload: 'talk_sales'
+            }
+        ]);
+    });
+
     it('sends UTILITY message with buttons (buttons are in template, not payload)', async () => {
         const fetchMock = vi
             .fn()
