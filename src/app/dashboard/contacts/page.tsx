@@ -72,6 +72,8 @@ export default function ContactsPage() {
     const [failedContactErrors, setFailedContactErrors] = useState<SendError[]>([]);
     const [lastSendResults, setLastSendResults] = useState<{ sent: number; failed: number } | null>(null);
     const realtimeRefreshTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+    const realtimeFallbackIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+    const realtimeSubscribeTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
     useEffect(() => {
         fetchPages();
@@ -132,6 +134,29 @@ export default function ContactsPage() {
         if (!selectedPageId) return;
 
         const supabase = getSupabaseClient();
+        const stopFallbackPolling = () => {
+            if (realtimeFallbackIntervalRef.current) {
+                clearInterval(realtimeFallbackIntervalRef.current);
+                realtimeFallbackIntervalRef.current = null;
+            }
+        };
+
+        const startFallbackPolling = () => {
+            if (realtimeFallbackIntervalRef.current) {
+                return;
+            }
+
+            void fetchContacts({ silent: true });
+            realtimeFallbackIntervalRef.current = setInterval(() => {
+                void fetchContacts({ silent: true });
+            }, 5000);
+        };
+
+        realtimeSubscribeTimeoutRef.current = setTimeout(() => {
+            console.warn('Realtime subscription not ready; enabling contacts refresh fallback.');
+            startFallbackPolling();
+        }, 5000);
+
         const channel = supabase
             .channel(`contacts-page-${selectedPageId}`)
             .on(
@@ -153,13 +178,33 @@ export default function ContactsPage() {
                     }, 250);
                 }
             )
-            .subscribe();
+            .subscribe((status) => {
+                if (status === 'SUBSCRIBED') {
+                    if (realtimeSubscribeTimeoutRef.current) {
+                        clearTimeout(realtimeSubscribeTimeoutRef.current);
+                        realtimeSubscribeTimeoutRef.current = null;
+                    }
+                    stopFallbackPolling();
+                    return;
+                }
+
+                if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT' || status === 'CLOSED') {
+                    startFallbackPolling();
+                }
+            });
 
         return () => {
             if (realtimeRefreshTimerRef.current) {
                 clearTimeout(realtimeRefreshTimerRef.current);
                 realtimeRefreshTimerRef.current = null;
             }
+
+            if (realtimeSubscribeTimeoutRef.current) {
+                clearTimeout(realtimeSubscribeTimeoutRef.current);
+                realtimeSubscribeTimeoutRef.current = null;
+            }
+
+            stopFallbackPolling();
 
             void supabase.removeChannel(channel);
         };
