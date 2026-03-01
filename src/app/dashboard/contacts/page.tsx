@@ -26,6 +26,7 @@ import {
     SendError,
     summarizeSendErrors
 } from '@/lib/send-errors';
+import { getSupabaseClient } from '@/lib/supabase';
 
 export default function ContactsPage() {
     const { data: session } = useSession();
@@ -70,8 +71,7 @@ export default function ContactsPage() {
     const [failedContactIds, setFailedContactIds] = useState<string[]>([]);
     const [failedContactErrors, setFailedContactErrors] = useState<SendError[]>([]);
     const [lastSendResults, setLastSendResults] = useState<{ sent: number; failed: number } | null>(null);
-    const autoSyncInFlightRef = useRef(false);
-    const lastAutoSyncAtRef = useRef(0);
+    const realtimeRefreshTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
     useEffect(() => {
         fetchPages();
@@ -97,10 +97,12 @@ export default function ContactsPage() {
         }
     };
 
-    const fetchContacts = useCallback(async () => {
+    const fetchContacts = useCallback(async ({ silent = false }: { silent?: boolean } = {}) => {
         if (!selectedPageId) return;
 
-        setLoading(true);
+        if (!silent) {
+            setLoading(true);
+        }
         try {
             const params = new URLSearchParams({
                 page: page.toString(),
@@ -120,56 +122,48 @@ export default function ContactsPage() {
         } catch (error) {
             console.error('Error fetching contacts:', error);
         } finally {
-            setLoading(false);
+            if (!silent) {
+                setLoading(false);
+            }
         }
     }, [selectedPageId, page, pageSize, search, selectedTagFilters, excludedTagFilters, dateFrom, dateTo]);
 
-    const runIncrementalSyncFallback = useCallback(async () => {
-        if (!selectedPageId || autoSyncInFlightRef.current) return;
+    useEffect(() => {
+        if (!selectedPageId) return;
 
-        const now = Date.now();
-        const AUTO_SYNC_INTERVAL_MS = 15000;
-        if (now - lastAutoSyncAtRef.current < AUTO_SYNC_INTERVAL_MS) {
-            return;
-        }
+        const supabase = getSupabaseClient();
+        const channel = supabase
+            .channel(`contacts-page-${selectedPageId}`)
+            .on(
+                'postgres_changes',
+                {
+                    event: '*',
+                    schema: 'public',
+                    table: 'contacts',
+                    filter: `page_id=eq.${selectedPageId}`
+                },
+                () => {
+                    if (realtimeRefreshTimerRef.current) {
+                        clearTimeout(realtimeRefreshTimerRef.current);
+                    }
 
-        autoSyncInFlightRef.current = true;
-        try {
-            const res = await fetch(`/api/pages/${selectedPageId}/sync`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ forceFullSync: false })
-            });
+                    realtimeRefreshTimerRef.current = setTimeout(() => {
+                        void fetchContacts({ silent: true });
+                        realtimeRefreshTimerRef.current = null;
+                    }, 250);
+                }
+            )
+            .subscribe();
 
-            if (!res.ok) {
-                const data = await res.json().catch(() => ({} as { message?: string }));
-                console.warn('Incremental sync fallback failed:', data.message || `HTTP ${res.status}`);
+        return () => {
+            if (realtimeRefreshTimerRef.current) {
+                clearTimeout(realtimeRefreshTimerRef.current);
+                realtimeRefreshTimerRef.current = null;
             }
-        } catch (error) {
-            console.warn('Incremental sync fallback error:', (error as Error).message);
-        } finally {
-            lastAutoSyncAtRef.current = Date.now();
-            autoSyncInFlightRef.current = false;
-        }
-    }, [selectedPageId]);
 
-    useEffect(() => {
-        if (!selectedPageId) return;
-
-        lastAutoSyncAtRef.current = 0;
-        void runIncrementalSyncFallback();
-    }, [selectedPageId, runIncrementalSyncFallback]);
-
-    useEffect(() => {
-        if (!selectedPageId) return;
-
-        const intervalId = setInterval(() => {
-            void runIncrementalSyncFallback();
-            fetchContacts();
-        }, 10000);
-
-        return () => clearInterval(intervalId);
-    }, [selectedPageId, runIncrementalSyncFallback, fetchContacts]);
+            void supabase.removeChannel(channel);
+        };
+    }, [selectedPageId, fetchContacts]);
 
     const fetchTags = async () => {
         if (!selectedPageId) return;
