@@ -26,28 +26,30 @@ vi.mock('@/lib/placeholders', () => ({
 
 import { POST } from './route';
 
-function createWebhookRequest(): NextRequest {
+function createWebhookRequest(payload?: Record<string, unknown>): NextRequest {
+    const defaultPayload = {
+        object: 'page',
+        entry: [
+            {
+                id: 'fb_page_1',
+                messaging: [
+                    {
+                        sender: { id: 'contact_psid_1' },
+                        recipient: { id: 'fb_page_1' },
+                        timestamp: 1700000000000,
+                        message: { mid: 'mid.1', text: 'hello there' }
+                    }
+                ]
+            }
+        ]
+    };
+
     return new Request('http://localhost:3000/api/facebook/webhook', {
         method: 'POST',
         headers: {
             'Content-Type': 'application/json'
         },
-        body: JSON.stringify({
-            object: 'page',
-            entry: [
-                {
-                    id: 'fb_page_1',
-                    messaging: [
-                        {
-                            sender: { id: 'contact_psid_1' },
-                            recipient: { id: 'fb_page_1' },
-                            timestamp: 1700000000000,
-                            message: { mid: 'mid.1', text: 'hello there' }
-                        }
-                    ]
-                }
-            ]
-        })
+        body: JSON.stringify(payload ?? defaultPayload)
     }) as unknown as NextRequest;
 }
 
@@ -416,5 +418,38 @@ describe('POST /api/facebook/webhook', () => {
         expect(body.success).toBe(true);
         expect(supabase.contactsUpsert).toHaveBeenCalledTimes(1);
         expect(supabase.contactsInsert).toHaveBeenCalledTimes(1);
+    });
+
+    it('ingests inbound standby events so contacts appear without manual sync', async () => {
+        const supabase = createSupabaseMock();
+        mocks.getSupabaseAdmin.mockReturnValue(supabase);
+        mocks.getUserProfile.mockResolvedValue({
+            id: 'contact_psid_1',
+            name: 'Standby Contact',
+            profile_pic: 'https://example.com/standby.jpg'
+        });
+
+        const response = await POST(createWebhookRequest({
+            object: 'page',
+            entry: [
+                {
+                    id: 'fb_page_1',
+                    standby: [
+                        {
+                            sender: { id: 'contact_psid_1' },
+                            recipient: { id: 'fb_page_1' },
+                            timestamp: 1700000000000,
+                            message: { mid: 'mid.2', text: 'hi from standby' }
+                        }
+                    ]
+                }
+            ]
+        }));
+        const body = await response.json();
+
+        expect(response.status).toBe(200);
+        expect(body.success).toBe(true);
+        expect(mocks.getUserProfile).toHaveBeenCalledWith('contact_psid_1', 'page_access_token_1');
+        expect(supabase.contactsUpsert).toHaveBeenCalledTimes(1);
     });
 });

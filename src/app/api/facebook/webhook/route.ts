@@ -128,15 +128,17 @@ export async function POST(request: NextRequest) {
                     ? (entry as { standby?: unknown[] }).standby || []
                     : [];
 
+                const inboundEvents = [...messagingEvents, ...standbyEvents];
+
                 if (standbyEvents.length > 0) {
-                    logWarn('Received standby events (not used for contact ingestion)', {
+                    logInfo('Received standby events for contact ingestion', {
                         pageId,
                         standbyCount: standbyEvents.length
                     });
                 }
 
-                if (messagingEvents.length === 0) {
-                    logInfo('Skipping entry with no messaging events', { pageId });
+                if (inboundEvents.length === 0) {
+                    logInfo('Skipping entry with no inbound events', { pageId });
                     continue;
                 }
 
@@ -165,9 +167,9 @@ export async function POST(request: NextRequest) {
                 let welcomeConfig: { enabled: boolean; message_text: string; buttons: Array<{ type: string; text: string; url?: string; payload?: string }> } | null = null;
                 let welcomeConfigFetched = false;
 
-                // Process messaging events
-                if (messagingEvents.length > 0) {
-                    for (const event of messagingEvents) {
+                // Process inbound events from both messaging and standby arrays
+                if (inboundEvents.length > 0) {
+                    for (const event of inboundEvents) {
                         processedEvents += 1;
                         const senderId = event.sender?.id;
                         if (!senderId) {
