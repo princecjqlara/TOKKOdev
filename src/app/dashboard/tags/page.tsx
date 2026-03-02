@@ -38,6 +38,7 @@ export default function TagsPage() {
     const [tagName, setTagName] = useState('');
     const [tagColor, setTagColor] = useState(TAG_COLORS[0]);
     const [tagOwnerType, setTagOwnerType] = useState<'user' | 'page'>('page');
+    const [tagIsShared, setTagIsShared] = useState(false);
     const [actionLoading, setActionLoading] = useState(false);
 
     useEffect(() => {
@@ -118,13 +119,15 @@ export default function TagsPage() {
                     color: tagColor,
                     ownerType: tagOwnerType,
                     ownerId,
-                    pageId: selectedPageId
+                    pageId: selectedPageId,
+                    isShared: tagOwnerType === 'user' ? tagIsShared : false
                 })
             });
 
             setShowCreateModal(false);
             setTagName('');
             setTagColor(TAG_COLORS[0]);
+            setTagIsShared(false);
             await fetchTags();
         } catch (error) {
             console.error('Error creating tag:', error);
@@ -138,14 +141,25 @@ export default function TagsPage() {
 
         setActionLoading(true);
         try {
+            const payload: {
+                id: string;
+                name: string;
+                color: string;
+                isShared?: boolean;
+            } = {
+                id: editingTag.id,
+                name: tagName.trim(),
+                color: tagColor
+            };
+
+            if (editingTag.owner_type === 'user') {
+                payload.isShared = tagIsShared;
+            }
+
             await fetch('/api/tags', {
                 method: 'PUT',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    id: editingTag.id,
-                    name: tagName.trim(),
-                    color: tagColor
-                })
+                body: JSON.stringify(payload)
             });
 
             setShowEditModal(false);
@@ -205,6 +219,7 @@ export default function TagsPage() {
         setEditingTag(tag);
         setTagName(tag.name);
         setTagColor(tag.color);
+        setTagIsShared(Boolean(tag.is_shared));
         setShowEditModal(true);
     };
 
@@ -257,6 +272,7 @@ export default function TagsPage() {
                             setTagName('');
                             setTagColor(TAG_COLORS[0]);
                             setTagOwnerType('page');
+                            setTagIsShared(false);
                             setShowCreateModal(true);
                         }}
                         className="btn-wireframe whitespace-nowrap"
@@ -304,7 +320,13 @@ export default function TagsPage() {
                         Get started by creating your first tag.
                     </p>
                     <button
-                        onClick={() => setShowCreateModal(true)}
+                        onClick={() => {
+                            setTagName('');
+                            setTagColor(TAG_COLORS[0]);
+                            setTagOwnerType('page');
+                            setTagIsShared(false);
+                            setShowCreateModal(true);
+                        }}
                         className="btn-wireframe"
                     >
                         Create Tag
@@ -351,12 +373,19 @@ export default function TagsPage() {
                                             </div>
                                         </td>
                                         <td>
-                                            <span className={`badge-wireframe ${tag.owner_type === 'user' ? 'bg-gray-100' :
-                                                    tag.owner_type === 'page' ? 'bg-black text-white' :
-                                                        'bg-white'
-                                                }`}>
-                                                {getOwnerTypeLabel(tag)}
-                                            </span>
+                                            <div className="flex items-center gap-2">
+                                                <span className={`badge-wireframe ${tag.owner_type === 'user' ? 'bg-gray-100' :
+                                                        tag.owner_type === 'page' ? 'bg-black text-white' :
+                                                            'bg-white'
+                                                    }`}>
+                                                    {getOwnerTypeLabel(tag)}
+                                                </span>
+                                                {tag.owner_type === 'user' && tag.is_shared && (
+                                                    <span className="badge-wireframe bg-black text-white">
+                                                        Shared
+                                                    </span>
+                                                )}
+                                            </div>
                                         </td>
                                         <td className="font-mono text-xs text-gray-500">
                                             {new Date(tag.created_at).toLocaleDateString()}
@@ -403,7 +432,10 @@ export default function TagsPage() {
             {/* Create Tag Modal */}
             <Modal
                 isOpen={showCreateModal}
-                onClose={() => setShowCreateModal(false)}
+                onClose={() => {
+                    setShowCreateModal(false);
+                    setTagIsShared(false);
+                }}
                 title="Create New Tag"
             >
                 <div className="space-y-6">
@@ -438,7 +470,10 @@ export default function TagsPage() {
                         <label className="label-wireframe">Scope</label>
                         <div className="grid grid-cols-2 gap-4">
                             <button
-                                onClick={() => setTagOwnerType('page')}
+                                onClick={() => {
+                                    setTagOwnerType('page');
+                                    setTagIsShared(false);
+                                }}
                                 className={`border border-black p-4 text-left transition-colors ${tagOwnerType === 'page' ? 'bg-black text-white' : 'bg-white hover:bg-gray-50'
                                     }`}
                             >
@@ -460,9 +495,29 @@ export default function TagsPage() {
                         </div>
                     </div>
 
+                    {tagOwnerType === 'user' && selectedPageId && (
+                        <label className="flex items-start gap-3 border border-black p-4 bg-gray-50 cursor-pointer">
+                            <input
+                                type="checkbox"
+                                checked={tagIsShared}
+                                onChange={(e) => setTagIsShared(e.target.checked)}
+                                className="w-4 h-4 border border-black rounded-none focus:ring-0 text-black mt-1"
+                            />
+                            <div>
+                                <p className="font-bold text-sm uppercase">Share with this page team</p>
+                                <p className="text-xs mt-1 font-mono text-gray-500">
+                                    Teammates on the selected page can use this tag, but only you can edit or delete it.
+                                </p>
+                            </div>
+                        </label>
+                    )}
+
                     <div className="flex justify-end gap-3 pt-4 border-t border-black">
                         <button
-                            onClick={() => setShowCreateModal(false)}
+                            onClick={() => {
+                                setShowCreateModal(false);
+                                setTagIsShared(false);
+                            }}
                             className="btn-wireframe bg-white text-black hover:bg-gray-100"
                         >
                             Cancel
@@ -484,6 +539,7 @@ export default function TagsPage() {
                 onClose={() => {
                     setShowEditModal(false);
                     setEditingTag(null);
+                    setTagIsShared(false);
                 }}
                 title="Edit Tag"
             >
@@ -513,11 +569,29 @@ export default function TagsPage() {
                         </div>
                     </div>
 
+                    {editingTag?.owner_type === 'user' && editingTag.page_id && (
+                        <label className="flex items-start gap-3 border border-black p-4 bg-gray-50 cursor-pointer">
+                            <input
+                                type="checkbox"
+                                checked={tagIsShared}
+                                onChange={(e) => setTagIsShared(e.target.checked)}
+                                className="w-4 h-4 border border-black rounded-none focus:ring-0 text-black mt-1"
+                            />
+                            <div>
+                                <p className="font-bold text-sm uppercase">Share with this page team</p>
+                                <p className="text-xs mt-1 font-mono text-gray-500">
+                                    Teammates on this page can use this tag, while ownership stays with you.
+                                </p>
+                            </div>
+                        </label>
+                    )}
+
                     <div className="flex justify-end gap-3 pt-4 border-t border-black">
                         <button
                             onClick={() => {
                                 setShowEditModal(false);
                                 setEditingTag(null);
+                                setTagIsShared(false);
                             }}
                             className="btn-wireframe bg-white text-black hover:bg-gray-100"
                         >

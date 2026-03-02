@@ -66,26 +66,47 @@ export async function GET(request: NextRequest) {
 
             const pageIds = userPages?.map(up => up.page_id) || [];
             const businessIds = businessUsers?.map(bu => bu.business_id) || [];
+            const accessiblePageIds = pageId
+                ? pageIds.filter((id) => id === pageId)
+                : pageIds;
 
             // Use multiple queries and combine results instead of complex OR
             const allTags: Tag[] = [];
 
             // Get user's own tags
-            const { data: userTags } = await supabase
+            let userTagsQuery = supabase
                 .from('tags')
                 .select('*')
                 .eq('owner_type', 'user')
                 .eq('owner_id', session.user.id);
+
+            if (pageId) {
+                userTagsQuery = userTagsQuery.eq('page_id', pageId);
+            }
+
+            const { data: userTags } = await userTagsQuery;
             if (userTags) allTags.push(...userTags);
 
             // Get page tags
-            if (pageIds.length > 0) {
+            if (accessiblePageIds.length > 0) {
                 const { data: pageTags } = await supabase
                     .from('tags')
                     .select('*')
                     .eq('owner_type', 'page')
-                    .in('owner_id', pageIds);
+                    .in('owner_id', accessiblePageIds);
                 if (pageTags) allTags.push(...pageTags);
+            }
+
+            // Get personal tags shared by teammates on the same page(s)
+            if (accessiblePageIds.length > 0) {
+                const { data: sharedPersonalTags } = await supabase
+                    .from('tags')
+                    .select('*')
+                    .eq('owner_type', 'user')
+                    .eq('is_shared', true)
+                    .neq('owner_id', session.user.id)
+                    .in('page_id', accessiblePageIds);
+                if (sharedPersonalTags) allTags.push(...sharedPersonalTags);
             }
 
             // Get business tags
@@ -98,16 +119,20 @@ export async function GET(request: NextRequest) {
                 if (bizTags) allTags.push(...bizTags);
             }
 
-            // Sort by name and apply pagination
-            allTags.sort((a, b) => a.name.localeCompare(b.name));
+            // Remove duplicates, sort by name, and apply pagination
+            const uniqueTags = Array.from(
+                new Map(allTags.map((tag) => [tag.id, tag])).values()
+            );
+
+            uniqueTags.sort((a, b) => a.name.localeCompare(b.name));
             const from = (page - 1) * pageSize;
-            const paginatedTags = allTags.slice(from, from + pageSize);
+            const paginatedTags = uniqueTags.slice(from, from + pageSize);
 
             return NextResponse.json({
                 items: paginatedTags,
                 page,
                 pageSize,
-                total: allTags.length,
+                total: uniqueTags.length,
                 tags: paginatedTags // For backwards compatibility
             } as PaginatedResponse<Tag>);
         }
@@ -150,7 +175,7 @@ export async function POST(request: NextRequest) {
         }
 
         const body = await request.json();
-        const { name, color, ownerType, ownerId, pageId } = body;
+        const { name, color, ownerType, ownerId, pageId, isShared } = body;
 
         if (!name || !ownerType || !ownerId) {
             return NextResponse.json(
@@ -160,6 +185,8 @@ export async function POST(request: NextRequest) {
         }
 
         const supabase = getSupabaseAdmin();
+
+        const shouldShareWithPage = ownerType === 'user' && isShared === true;
 
         // Verify ownership permission
         if (ownerType === 'page') {
@@ -197,6 +224,29 @@ export async function POST(request: NextRequest) {
             );
         }
 
+        if (shouldShareWithPage) {
+            if (!pageId) {
+                return NextResponse.json(
+                    { error: 'Bad Request', message: 'pageId is required when sharing a personal tag' },
+                    { status: 400 }
+                );
+            }
+
+            const { data: userPage } = await supabase
+                .from('user_pages')
+                .select('page_id')
+                .eq('user_id', session.user.id)
+                .eq('page_id', pageId)
+                .single();
+
+            if (!userPage) {
+                return NextResponse.json(
+                    { error: 'Forbidden', message: 'You do not have access to this page' },
+                    { status: 403 }
+                );
+            }
+        }
+
         const { data: tag, error } = await supabase
             .from('tags')
             .insert({
@@ -204,7 +254,8 @@ export async function POST(request: NextRequest) {
                 color: color || '#6366f1',
                 owner_type: ownerType,
                 owner_id: ownerId,
-                page_id: pageId || null
+                page_id: pageId || null,
+                is_shared: shouldShareWithPage
             })
             .select()
             .single();
@@ -234,7 +285,7 @@ export async function PUT(request: NextRequest) {
         }
 
         const body = await request.json();
-        const { id, name, color } = body;
+        const { id, name, color, isShared } = body;
 
         if (!id) {
             return NextResponse.json(
@@ -288,9 +339,46 @@ export async function PUT(request: NextRequest) {
             );
         }
 
-        const updates: { name?: string; color?: string } = {};
+        const updates: { name?: string; color?: string; is_shared?: boolean } = {};
         if (name) updates.name = name;
         if (color) updates.color = color;
+
+        if (typeof isShared === 'boolean') {
+            if (existingTag.owner_type !== 'user') {
+                return NextResponse.json(
+                    { error: 'Bad Request', message: 'Sharing is only available for personal tags' },
+                    { status: 400 }
+                );
+            }
+
+            if (isShared) {
+                if (!existingTag.page_id) {
+                    return NextResponse.json(
+                        {
+                            error: 'Bad Request',
+                            message: 'A personal tag must be connected to a page before it can be shared'
+                        },
+                        { status: 400 }
+                    );
+                }
+
+                const { data: userPage } = await supabase
+                    .from('user_pages')
+                    .select('page_id')
+                    .eq('user_id', session.user.id)
+                    .eq('page_id', existingTag.page_id)
+                    .single();
+
+                if (!userPage) {
+                    return NextResponse.json(
+                        { error: 'Forbidden', message: 'You do not have access to this page' },
+                        { status: 403 }
+                    );
+                }
+            }
+
+            updates.is_shared = isShared;
+        }
 
         const { data: tag, error } = await supabase
             .from('tags')

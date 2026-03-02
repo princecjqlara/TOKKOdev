@@ -75,6 +75,7 @@
         owner_type TEXT NOT NULL DEFAULT 'user', -- 'user', 'page', 'business'
         owner_id UUID NOT NULL, -- References user_id, page_id, or business_id based on owner_type
         page_id UUID REFERENCES pages(id) ON DELETE CASCADE,
+        is_shared BOOLEAN NOT NULL DEFAULT FALSE,
         created_at TIMESTAMPTZ DEFAULT NOW(),
         updated_at TIMESTAMPTZ DEFAULT NOW()
     );
@@ -132,6 +133,7 @@
     CREATE INDEX IF NOT EXISTS idx_tags_owner_type ON tags(owner_type);
     CREATE INDEX IF NOT EXISTS idx_tags_owner_id ON tags(owner_id);
     CREATE INDEX IF NOT EXISTS idx_tags_page_id ON tags(page_id);
+    CREATE INDEX IF NOT EXISTS idx_tags_is_shared ON tags(is_shared);
     CREATE INDEX IF NOT EXISTS idx_campaigns_page_id ON campaigns(page_id);
     CREATE INDEX IF NOT EXISTS idx_campaigns_status ON campaigns(status);
     CREATE INDEX IF NOT EXISTS idx_campaign_recipients_campaign_id ON campaign_recipients(campaign_id);

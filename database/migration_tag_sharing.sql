@@ -1,0 +1,4 @@
+ALTER TABLE tags
+ADD COLUMN IF NOT EXISTS is_shared BOOLEAN NOT NULL DEFAULT FALSE;
+
+CREATE INDEX IF NOT EXISTS idx_tags_is_shared ON tags(is_shared);

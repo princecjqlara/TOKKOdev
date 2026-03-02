@@ -63,6 +63,7 @@ export interface Tag {
   owner_type: 'user' | 'page' | 'business';
   owner_id: string;
   page_id: string | null;
+  is_shared?: boolean;
   created_at: string;
 }
 
