@@ -84,16 +84,29 @@ function createSupabaseMockForPost() {
         }))
     }));
 
+    const tagSharesUpsert = vi.fn().mockResolvedValue({ error: null });
+
     return {
         insert,
+        tagSharesUpsert,
         from: vi.fn((table: string) => {
             if (table === 'user_pages') {
-                return createFilterableQuery([{ user_id: 'user_1', page_id: 'page_1' }]);
+                return createFilterableQuery([
+                    { user_id: 'user_1', page_id: 'page_1' },
+                    { user_id: 'user_2', page_id: 'page_1' },
+                    { user_id: 'user_3', page_id: 'page_1' }
+                ]);
             }
 
             if (table === 'tags') {
                 return {
                     insert
+                };
+            }
+
+            if (table === 'tag_shares') {
+                return {
+                    upsert: tagSharesUpsert
                 };
             }
 
@@ -173,6 +186,63 @@ describe('GET /api/tags', () => {
         expect(tagIds).toContain('tag_shared');
         expect(tagIds).not.toContain('tag_private');
     });
+
+    it('only includes teammate shared tags targeted to the current user', async () => {
+        mocks.getServerSession.mockResolvedValue({
+            user: {
+                id: 'user_1'
+            }
+        });
+
+        const supabase = createSupabaseMockForGet({
+            user_pages: [{ user_id: 'user_1', page_id: 'page_1' }],
+            business_users: [],
+            tags: [
+                {
+                    id: 'tag_visible_targeted',
+                    name: 'Visible Targeted',
+                    color: '#000000',
+                    owner_type: 'user',
+                    owner_id: 'user_2',
+                    page_id: 'page_1',
+                    is_shared: true,
+                    created_at: '2026-01-01T00:00:00.000Z'
+                },
+                {
+                    id: 'tag_hidden_targeted',
+                    name: 'Hidden Targeted',
+                    color: '#111111',
+                    owner_type: 'user',
+                    owner_id: 'user_2',
+                    page_id: 'page_1',
+                    is_shared: true,
+                    created_at: '2026-01-01T00:00:00.000Z'
+                }
+            ],
+            tag_shares: [
+                {
+                    tag_id: 'tag_visible_targeted',
+                    shared_with_user_id: 'user_1'
+                },
+                {
+                    tag_id: 'tag_hidden_targeted',
+                    shared_with_user_id: 'user_3'
+                }
+            ]
+        });
+
+        mocks.getSupabaseAdmin.mockReturnValue(supabase);
+
+        const response = await GET(
+            createRequest('http://localhost:3000/api/tags?scope=all&page=1&pageSize=50&pageId=page_1')
+        );
+        const body = await response.json();
+
+        expect(response.status).toBe(200);
+        const tagIds = body.items.map((tag: { id: string }) => tag.id);
+        expect(tagIds).toContain('tag_visible_targeted');
+        expect(tagIds).not.toContain('tag_hidden_targeted');
+    });
 });
 
 describe('POST /api/tags', () => {
@@ -212,6 +282,47 @@ describe('POST /api/tags', () => {
             expect.objectContaining({
                 is_shared: true
             })
+        );
+    });
+
+    it('stores selected share recipients when creating a shared personal tag', async () => {
+        mocks.getServerSession.mockResolvedValue({
+            user: {
+                id: 'user_1'
+            }
+        });
+
+        const supabase = createSupabaseMockForPost();
+        mocks.getSupabaseAdmin.mockReturnValue(supabase);
+
+        const response = await POST(
+            createRequest('http://localhost:3000/api/tags', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({
+                    name: 'VIP Team Subset',
+                    color: '#000000',
+                    ownerType: 'user',
+                    ownerId: 'user_1',
+                    pageId: 'page_1',
+                    isShared: true,
+                    sharedWithUserIds: ['user_2', 'user_3']
+                })
+            })
+        );
+
+        expect(response.status).toBe(200);
+        expect(supabase.tagSharesUpsert).toHaveBeenCalledWith(
+            [
+                { tag_id: 'tag_1', shared_with_user_id: 'user_2' },
+                { tag_id: 'tag_1', shared_with_user_id: 'user_3' }
+            ],
+            {
+                onConflict: 'tag_id,shared_with_user_id',
+                ignoreDuplicates: true
+            }
         );
     });
 });

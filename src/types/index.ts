@@ -64,6 +64,9 @@ export interface Tag {
   owner_id: string;
   page_id: string | null;
   is_shared?: boolean;
+  shared_with_user_ids?: string[];
+  tagged_by_user_id?: string | null;
+  tagged_by_name?: string | null;
   created_at: string;
 }
 

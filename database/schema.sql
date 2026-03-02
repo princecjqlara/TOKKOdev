@@ -81,10 +81,20 @@
     );
 
     -- Contact tags table (many-to-many relationship)
+    CREATE TABLE IF NOT EXISTS tag_shares (
+        id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+        tag_id UUID NOT NULL REFERENCES tags(id) ON DELETE CASCADE,
+        shared_with_user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        created_at TIMESTAMPTZ DEFAULT NOW(),
+        UNIQUE(tag_id, shared_with_user_id)
+    );
+
+    -- Contact tags table (many-to-many relationship)
     CREATE TABLE IF NOT EXISTS contact_tags (
         id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
         contact_id UUID NOT NULL REFERENCES contacts(id) ON DELETE CASCADE,
         tag_id UUID NOT NULL REFERENCES tags(id) ON DELETE CASCADE,
+        created_by UUID REFERENCES users(id) ON DELETE SET NULL,
         created_at TIMESTAMPTZ DEFAULT NOW(),
         UNIQUE(contact_id, tag_id)
     );
@@ -130,10 +140,13 @@
     CREATE INDEX IF NOT EXISTS idx_contacts_page_psid ON contacts(page_id, psid);
     CREATE INDEX IF NOT EXISTS idx_contact_tags_contact_id ON contact_tags(contact_id);
     CREATE INDEX IF NOT EXISTS idx_contact_tags_tag_id ON contact_tags(tag_id);
+    CREATE INDEX IF NOT EXISTS idx_contact_tags_created_by ON contact_tags(created_by);
     CREATE INDEX IF NOT EXISTS idx_tags_owner_type ON tags(owner_type);
     CREATE INDEX IF NOT EXISTS idx_tags_owner_id ON tags(owner_id);
     CREATE INDEX IF NOT EXISTS idx_tags_page_id ON tags(page_id);
     CREATE INDEX IF NOT EXISTS idx_tags_is_shared ON tags(is_shared);
+    CREATE INDEX IF NOT EXISTS idx_tag_shares_tag_id ON tag_shares(tag_id);
+    CREATE INDEX IF NOT EXISTS idx_tag_shares_shared_with_user_id ON tag_shares(shared_with_user_id);
     CREATE INDEX IF NOT EXISTS idx_campaigns_page_id ON campaigns(page_id);
     CREATE INDEX IF NOT EXISTS idx_campaigns_status ON campaigns(status);
     CREATE INDEX IF NOT EXISTS idx_campaign_recipients_campaign_id ON campaign_recipients(campaign_id);
@@ -174,6 +187,7 @@
     ALTER TABLE user_pages ENABLE ROW LEVEL SECURITY;
     ALTER TABLE contacts ENABLE ROW LEVEL SECURITY;
     ALTER TABLE tags ENABLE ROW LEVEL SECURITY;
+    ALTER TABLE tag_shares ENABLE ROW LEVEL SECURITY;
     ALTER TABLE contact_tags ENABLE ROW LEVEL SECURITY;
     ALTER TABLE campaigns ENABLE ROW LEVEL SECURITY;
     ALTER TABLE campaign_recipients ENABLE ROW LEVEL SECURITY;

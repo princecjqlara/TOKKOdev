@@ -7,6 +7,12 @@ import Pagination from '@/components/Pagination';
 import Modal from '@/components/Modal';
 import { Tag, Page, PaginatedResponse } from '@/types';
 
+interface TeamMember {
+    id: string;
+    name: string | null;
+    email: string | null;
+}
+
 const TAG_COLORS = [
     '#000000', '#4b5563', '#dc2626', '#ea580c', '#d97706',
     '#16a34a', '#0891b2', '#2563eb', '#7c3aed', '#db2777'
@@ -39,7 +45,12 @@ export default function TagsPage() {
     const [tagColor, setTagColor] = useState(TAG_COLORS[0]);
     const [tagOwnerType, setTagOwnerType] = useState<'user' | 'page'>('page');
     const [tagIsShared, setTagIsShared] = useState(false);
+    const [selectedShareUserIds, setSelectedShareUserIds] = useState<Set<string>>(new Set());
     const [actionLoading, setActionLoading] = useState(false);
+
+    // Team members for selected page
+    const [teamMembers, setTeamMembers] = useState<TeamMember[]>([]);
+    const [teamLoading, setTeamLoading] = useState(false);
 
     useEffect(() => {
         fetchPages();
@@ -50,6 +61,15 @@ export default function TagsPage() {
             fetchTags();
         }
     }, [selectedPageId, page, pageSize, session]);
+
+    useEffect(() => {
+        if (selectedPageId) {
+            fetchTeamMembers(selectedPageId);
+            return;
+        }
+
+        setTeamMembers([]);
+    }, [selectedPageId]);
 
     const fetchPages = async () => {
         try {
@@ -120,7 +140,10 @@ export default function TagsPage() {
                     ownerType: tagOwnerType,
                     ownerId,
                     pageId: selectedPageId,
-                    isShared: tagOwnerType === 'user' ? tagIsShared : false
+                    isShared: tagOwnerType === 'user' ? tagIsShared : false,
+                    sharedWithUserIds: tagOwnerType === 'user' && tagIsShared
+                        ? Array.from(selectedShareUserIds)
+                        : []
                 })
             });
 
@@ -128,6 +151,7 @@ export default function TagsPage() {
             setTagName('');
             setTagColor(TAG_COLORS[0]);
             setTagIsShared(false);
+            setSelectedShareUserIds(new Set());
             await fetchTags();
         } catch (error) {
             console.error('Error creating tag:', error);
@@ -146,6 +170,7 @@ export default function TagsPage() {
                 name: string;
                 color: string;
                 isShared?: boolean;
+                sharedWithUserIds?: string[];
             } = {
                 id: editingTag.id,
                 name: tagName.trim(),
@@ -154,6 +179,7 @@ export default function TagsPage() {
 
             if (editingTag.owner_type === 'user') {
                 payload.isShared = tagIsShared;
+                payload.sharedWithUserIds = tagIsShared ? Array.from(selectedShareUserIds) : [];
             }
 
             await fetch('/api/tags', {
@@ -165,6 +191,8 @@ export default function TagsPage() {
             setShowEditModal(false);
             setEditingTag(null);
             setTagName('');
+            setTagIsShared(false);
+            setSelectedShareUserIds(new Set());
             await fetchTags();
         } catch (error) {
             console.error('Error updating tag:', error);
@@ -220,8 +248,44 @@ export default function TagsPage() {
         setTagName(tag.name);
         setTagColor(tag.color);
         setTagIsShared(Boolean(tag.is_shared));
+        setSelectedShareUserIds(new Set(tag.shared_with_user_ids || []));
         setShowEditModal(true);
     };
+
+    const fetchTeamMembers = async (pageId: string) => {
+        setTeamLoading(true);
+        try {
+            const res = await fetch(`/api/pages/${pageId}/team`);
+            const data = await res.json();
+
+            setTeamMembers(data.members || []);
+        } catch (error) {
+            console.error('Error fetching team members:', error);
+            setTeamMembers([]);
+        } finally {
+            setTeamLoading(false);
+        }
+    };
+
+    const toggleShareMember = (userId: string) => {
+        setSelectedShareUserIds((previous) => {
+            const next = new Set(previous);
+            if (next.has(userId)) {
+                next.delete(userId);
+            } else {
+                next.add(userId);
+            }
+
+            return next;
+        });
+    };
+
+    const getTeamMemberDisplayName = (member: TeamMember) => {
+        return member.name || member.email || member.id;
+    };
+
+    const selectableTeamMembers = teamMembers
+        .filter((member) => member.id !== session?.user?.id);
 
     const openDeleteModal = (tag: Tag) => {
         setEditingTag(tag);
@@ -256,6 +320,7 @@ export default function TagsPage() {
                                 setSelectedPageId(e.target.value);
                                 setPage(1);
                                 setSelectedIds(new Set());
+                                setSelectedShareUserIds(new Set());
                             }}
                             className="input-wireframe w-full h-10"
                         >
@@ -265,6 +330,9 @@ export default function TagsPage() {
                                 </option>
                             ))}
                         </select>
+                        <p className="mt-1 font-mono text-[11px] text-gray-500 uppercase tracking-wide">
+                            Team Members: {teamLoading ? 'Loading...' : teamMembers.length}
+                        </p>
                     </div>
 
                     <button
@@ -273,6 +341,7 @@ export default function TagsPage() {
                             setTagColor(TAG_COLORS[0]);
                             setTagOwnerType('page');
                             setTagIsShared(false);
+                            setSelectedShareUserIds(new Set());
                             setShowCreateModal(true);
                         }}
                         className="btn-wireframe whitespace-nowrap"
@@ -325,6 +394,7 @@ export default function TagsPage() {
                             setTagColor(TAG_COLORS[0]);
                             setTagOwnerType('page');
                             setTagIsShared(false);
+                            setSelectedShareUserIds(new Set());
                             setShowCreateModal(true);
                         }}
                         className="btn-wireframe"
@@ -435,6 +505,7 @@ export default function TagsPage() {
                 onClose={() => {
                     setShowCreateModal(false);
                     setTagIsShared(false);
+                    setSelectedShareUserIds(new Set());
                 }}
                 title="Create New Tag"
             >
@@ -473,6 +544,7 @@ export default function TagsPage() {
                                 onClick={() => {
                                     setTagOwnerType('page');
                                     setTagIsShared(false);
+                                    setSelectedShareUserIds(new Set());
                                 }}
                                 className={`border border-black p-4 text-left transition-colors ${tagOwnerType === 'page' ? 'bg-black text-white' : 'bg-white hover:bg-gray-50'
                                     }`}
@@ -496,20 +568,56 @@ export default function TagsPage() {
                     </div>
 
                     {tagOwnerType === 'user' && selectedPageId && (
-                        <label className="flex items-start gap-3 border border-black p-4 bg-gray-50 cursor-pointer">
-                            <input
-                                type="checkbox"
-                                checked={tagIsShared}
-                                onChange={(e) => setTagIsShared(e.target.checked)}
-                                className="w-4 h-4 border border-black rounded-none focus:ring-0 text-black mt-1"
-                            />
-                            <div>
-                                <p className="font-bold text-sm uppercase">Share with this page team</p>
-                                <p className="text-xs mt-1 font-mono text-gray-500">
-                                    Teammates on the selected page can use this tag, but only you can edit or delete it.
-                                </p>
-                            </div>
-                        </label>
+                        <>
+                            <label className="flex items-start gap-3 border border-black p-4 bg-gray-50 cursor-pointer">
+                                <input
+                                    type="checkbox"
+                                    checked={tagIsShared}
+                                    onChange={(e) => setTagIsShared(e.target.checked)}
+                                    className="w-4 h-4 border border-black rounded-none focus:ring-0 text-black mt-1"
+                                />
+                                <div>
+                                    <p className="font-bold text-sm uppercase">Share with this page team</p>
+                                    <p className="text-xs mt-1 font-mono text-gray-500">
+                                        Team size: {teamLoading ? 'Loading...' : teamMembers.length}. Only you can edit or delete this personal tag.
+                                    </p>
+                                </div>
+                            </label>
+
+                            {tagIsShared && (
+                                <div className="border border-black p-4 bg-white space-y-3">
+                                    <p className="text-xs font-bold uppercase">Optional: choose specific teammates</p>
+                                    <p className="text-xs font-mono text-gray-500">
+                                        Leave everyone unchecked to share with the full page team.
+                                    </p>
+
+                                    {teamLoading ? (
+                                        <p className="font-mono text-xs text-gray-500">Loading team members...</p>
+                                    ) : selectableTeamMembers.length === 0 ? (
+                                        <p className="font-mono text-xs text-gray-500">No other team members found on this page.</p>
+                                    ) : (
+                                        <div className="max-h-48 overflow-y-auto border border-black">
+                                            {selectableTeamMembers.map((member) => (
+                                                <label
+                                                    key={member.id}
+                                                    className="flex items-center gap-3 px-3 py-2 border-b border-gray-200 last:border-b-0 cursor-pointer hover:bg-gray-50"
+                                                >
+                                                    <input
+                                                        type="checkbox"
+                                                        checked={selectedShareUserIds.has(member.id)}
+                                                        onChange={() => toggleShareMember(member.id)}
+                                                        className="w-4 h-4 border border-black rounded-none focus:ring-0 text-black"
+                                                    />
+                                                    <span className="font-mono text-xs">
+                                                        {getTeamMemberDisplayName(member)}
+                                                    </span>
+                                                </label>
+                                            ))}
+                                        </div>
+                                    )}
+                                </div>
+                            )}
+                        </>
                     )}
 
                     <div className="flex justify-end gap-3 pt-4 border-t border-black">
@@ -517,6 +625,7 @@ export default function TagsPage() {
                             onClick={() => {
                                 setShowCreateModal(false);
                                 setTagIsShared(false);
+                                setSelectedShareUserIds(new Set());
                             }}
                             className="btn-wireframe bg-white text-black hover:bg-gray-100"
                         >
@@ -540,6 +649,7 @@ export default function TagsPage() {
                     setShowEditModal(false);
                     setEditingTag(null);
                     setTagIsShared(false);
+                    setSelectedShareUserIds(new Set());
                 }}
                 title="Edit Tag"
             >
@@ -570,20 +680,56 @@ export default function TagsPage() {
                     </div>
 
                     {editingTag?.owner_type === 'user' && editingTag.page_id && (
-                        <label className="flex items-start gap-3 border border-black p-4 bg-gray-50 cursor-pointer">
-                            <input
-                                type="checkbox"
-                                checked={tagIsShared}
-                                onChange={(e) => setTagIsShared(e.target.checked)}
-                                className="w-4 h-4 border border-black rounded-none focus:ring-0 text-black mt-1"
-                            />
-                            <div>
-                                <p className="font-bold text-sm uppercase">Share with this page team</p>
-                                <p className="text-xs mt-1 font-mono text-gray-500">
-                                    Teammates on this page can use this tag, while ownership stays with you.
-                                </p>
-                            </div>
-                        </label>
+                        <>
+                            <label className="flex items-start gap-3 border border-black p-4 bg-gray-50 cursor-pointer">
+                                <input
+                                    type="checkbox"
+                                    checked={tagIsShared}
+                                    onChange={(e) => setTagIsShared(e.target.checked)}
+                                    className="w-4 h-4 border border-black rounded-none focus:ring-0 text-black mt-1"
+                                />
+                                <div>
+                                    <p className="font-bold text-sm uppercase">Share with this page team</p>
+                                    <p className="text-xs mt-1 font-mono text-gray-500">
+                                        Team size: {teamLoading ? 'Loading...' : teamMembers.length}. Ownership stays with you.
+                                    </p>
+                                </div>
+                            </label>
+
+                            {tagIsShared && (
+                                <div className="border border-black p-4 bg-white space-y-3">
+                                    <p className="text-xs font-bold uppercase">Optional: choose specific teammates</p>
+                                    <p className="text-xs font-mono text-gray-500">
+                                        Leave everyone unchecked to share with the full page team.
+                                    </p>
+
+                                    {teamLoading ? (
+                                        <p className="font-mono text-xs text-gray-500">Loading team members...</p>
+                                    ) : selectableTeamMembers.length === 0 ? (
+                                        <p className="font-mono text-xs text-gray-500">No other team members found on this page.</p>
+                                    ) : (
+                                        <div className="max-h-48 overflow-y-auto border border-black">
+                                            {selectableTeamMembers.map((member) => (
+                                                <label
+                                                    key={member.id}
+                                                    className="flex items-center gap-3 px-3 py-2 border-b border-gray-200 last:border-b-0 cursor-pointer hover:bg-gray-50"
+                                                >
+                                                    <input
+                                                        type="checkbox"
+                                                        checked={selectedShareUserIds.has(member.id)}
+                                                        onChange={() => toggleShareMember(member.id)}
+                                                        className="w-4 h-4 border border-black rounded-none focus:ring-0 text-black"
+                                                    />
+                                                    <span className="font-mono text-xs">
+                                                        {getTeamMemberDisplayName(member)}
+                                                    </span>
+                                                </label>
+                                            ))}
+                                        </div>
+                                    )}
+                                </div>
+                            )}
+                        </>
                     )}
 
                     <div className="flex justify-end gap-3 pt-4 border-t border-black">
@@ -592,6 +738,7 @@ export default function TagsPage() {
                                 setShowEditModal(false);
                                 setEditingTag(null);
                                 setTagIsShared(false);
+                                setSelectedShareUserIds(new Set());
                             }}
                             className="btn-wireframe bg-white text-black hover:bg-gray-100"
                         >

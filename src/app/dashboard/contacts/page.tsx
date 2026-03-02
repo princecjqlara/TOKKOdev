@@ -1437,17 +1437,24 @@ export default function ContactsPage() {
                                     <td>
                                         <div className="flex flex-wrap gap-2">
                                             {contact.tags?.slice(0, 3).map((tag) => (
-                                                <span
+                                                <div
                                                     key={tag.id}
-                                                    className="badge-wireframe"
-                                                    style={{
-                                                        backgroundColor: tag.color,
-                                                        color: '#fff', // Assuming dark colors or check contrast
-                                                        borderColor: 'black'
-                                                    }}
+                                                    className="flex items-center gap-2 border border-black bg-white px-2 py-1"
                                                 >
-                                                    {tag.name}
-                                                </span>
+                                                    <span
+                                                        className="badge-wireframe"
+                                                        style={{
+                                                            backgroundColor: tag.color,
+                                                            color: '#fff',
+                                                            borderColor: 'black'
+                                                        }}
+                                                    >
+                                                        {tag.name}
+                                                    </span>
+                                                    <span className="font-mono text-[10px] text-gray-500 whitespace-nowrap">
+                                                        by {tag.tagged_by_name || 'unknown'}
+                                                    </span>
+                                                </div>
                                             ))}
                                             {(contact.tags?.length || 0) > 3 && (
                                                 <span className="badge-wireframe bg-gray-100 text-black">

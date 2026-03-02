@@ -4,6 +4,19 @@ import { authOptions } from '@/lib/auth';
 import { getSupabaseAdmin } from '@/lib/supabase';
 import { PaginatedResponse, Tag } from '@/types';
 
+function normalizeUserIdList(value: unknown): string[] {
+    if (!Array.isArray(value)) {
+        return [];
+    }
+
+    const ids = value
+        .filter((item): item is string => typeof item === 'string')
+        .map((item) => item.trim())
+        .filter(Boolean);
+
+    return Array.from(new Set(ids));
+}
+
 // GET /api/tags - Get tags with pagination
 export async function GET(request: NextRequest) {
     try {
@@ -15,6 +28,8 @@ export async function GET(request: NextRequest) {
                 { status: 401 }
             );
         }
+
+        const currentUserId = session.user.id;
 
         const searchParams = request.nextUrl.searchParams;
         const page = parseInt(searchParams.get('page') || '1');
@@ -31,7 +46,7 @@ export async function GET(request: NextRequest) {
             .order('name');
 
         if (scope === 'user') {
-            query = query.eq('owner_type', 'user').eq('owner_id', session.user.id);
+            query = query.eq('owner_type', 'user').eq('owner_id', currentUserId);
         } else if (scope === 'page' && pageId) {
             query = query.eq('owner_type', 'page').eq('owner_id', pageId);
         } else if (scope === 'business') {
@@ -39,7 +54,7 @@ export async function GET(request: NextRequest) {
             const { data: businessUsers } = await supabase
                 .from('business_users')
                 .select('business_id')
-                .eq('user_id', session.user.id);
+                .eq('user_id', currentUserId);
 
             const businessIds = businessUsers?.map(bu => bu.business_id) || [];
             if (businessIds.length > 0) {
@@ -57,12 +72,12 @@ export async function GET(request: NextRequest) {
             const { data: userPages } = await supabase
                 .from('user_pages')
                 .select('page_id')
-                .eq('user_id', session.user.id);
+                .eq('user_id', currentUserId);
 
             const { data: businessUsers } = await supabase
                 .from('business_users')
                 .select('business_id')
-                .eq('user_id', session.user.id);
+                .eq('user_id', currentUserId);
 
             const pageIds = userPages?.map(up => up.page_id) || [];
             const businessIds = businessUsers?.map(bu => bu.business_id) || [];
@@ -78,7 +93,7 @@ export async function GET(request: NextRequest) {
                 .from('tags')
                 .select('*')
                 .eq('owner_type', 'user')
-                .eq('owner_id', session.user.id);
+                .eq('owner_id', currentUserId);
 
             if (pageId) {
                 userTagsQuery = userTagsQuery.eq('page_id', pageId);
@@ -104,9 +119,36 @@ export async function GET(request: NextRequest) {
                     .select('*')
                     .eq('owner_type', 'user')
                     .eq('is_shared', true)
-                    .neq('owner_id', session.user.id)
+                    .neq('owner_id', currentUserId)
                     .in('page_id', accessiblePageIds);
-                if (sharedPersonalTags) allTags.push(...sharedPersonalTags);
+
+                let visibleSharedPersonalTags = sharedPersonalTags || [];
+
+                if (visibleSharedPersonalTags.length > 0) {
+                    const sharedTagIds = visibleSharedPersonalTags.map((tag) => tag.id);
+                    const { data: shareRows } = await supabase
+                        .from('tag_shares')
+                        .select('tag_id,shared_with_user_id')
+                        .in('tag_id', sharedTagIds);
+
+                    const sharesByTagId = new Map<string, string[]>();
+                    for (const row of shareRows || []) {
+                        const existing = sharesByTagId.get(row.tag_id) || [];
+                        existing.push(row.shared_with_user_id);
+                        sharesByTagId.set(row.tag_id, existing);
+                    }
+
+                    visibleSharedPersonalTags = visibleSharedPersonalTags.filter((tag) => {
+                        const recipients = sharesByTagId.get(tag.id) || [];
+                        if (recipients.length === 0) {
+                            return true;
+                        }
+
+                        return recipients.includes(currentUserId);
+                    });
+                }
+
+                allTags.push(...visibleSharedPersonalTags);
             }
 
             // Get business tags
@@ -126,7 +168,45 @@ export async function GET(request: NextRequest) {
 
             uniqueTags.sort((a, b) => a.name.localeCompare(b.name));
             const from = (page - 1) * pageSize;
-            const paginatedTags = uniqueTags.slice(from, from + pageSize);
+            let paginatedTags = uniqueTags.slice(from, from + pageSize);
+
+            const ownSharedTagIds = paginatedTags
+                .filter(
+                    (tag) =>
+                        tag.owner_type === 'user' &&
+                        tag.owner_id === currentUserId &&
+                        tag.is_shared === true
+                )
+                .map((tag) => tag.id);
+
+            if (ownSharedTagIds.length > 0) {
+                const { data: ownShareRows } = await supabase
+                    .from('tag_shares')
+                    .select('tag_id,shared_with_user_id')
+                    .in('tag_id', ownSharedTagIds);
+
+                const sharedWithByTagId = new Map<string, string[]>();
+                for (const row of ownShareRows || []) {
+                    const existing = sharedWithByTagId.get(row.tag_id) || [];
+                    existing.push(row.shared_with_user_id);
+                    sharedWithByTagId.set(row.tag_id, existing);
+                }
+
+                paginatedTags = paginatedTags.map((tag) => {
+                    if (
+                        tag.owner_type === 'user' &&
+                        tag.owner_id === currentUserId &&
+                        tag.is_shared === true
+                    ) {
+                        return {
+                            ...tag,
+                            shared_with_user_ids: sharedWithByTagId.get(tag.id) || []
+                        };
+                    }
+
+                    return tag;
+                });
+            }
 
             return NextResponse.json({
                 items: paginatedTags,
@@ -174,8 +254,10 @@ export async function POST(request: NextRequest) {
             );
         }
 
+        const currentUserId = session.user.id;
+
         const body = await request.json();
-        const { name, color, ownerType, ownerId, pageId, isShared } = body;
+        const { name, color, ownerType, ownerId, pageId, isShared, sharedWithUserIds } = body;
 
         if (!name || !ownerType || !ownerId) {
             return NextResponse.json(
@@ -187,13 +269,15 @@ export async function POST(request: NextRequest) {
         const supabase = getSupabaseAdmin();
 
         const shouldShareWithPage = ownerType === 'user' && isShared === true;
+        const normalizedShareTargets = normalizeUserIdList(sharedWithUserIds)
+            .filter((id) => id !== currentUserId);
 
         // Verify ownership permission
         if (ownerType === 'page') {
             const { data: userPage } = await supabase
                 .from('user_pages')
                 .select('page_id')
-                .eq('user_id', session.user.id)
+                .eq('user_id', currentUserId)
                 .eq('page_id', ownerId)
                 .single();
 
@@ -207,7 +291,7 @@ export async function POST(request: NextRequest) {
             const { data: businessUser } = await supabase
                 .from('business_users')
                 .select('business_id')
-                .eq('user_id', session.user.id)
+                .eq('user_id', currentUserId)
                 .eq('business_id', ownerId)
                 .single();
 
@@ -217,7 +301,7 @@ export async function POST(request: NextRequest) {
                     { status: 403 }
                 );
             }
-        } else if (ownerType === 'user' && ownerId !== session.user.id) {
+        } else if (ownerType === 'user' && ownerId !== currentUserId) {
             return NextResponse.json(
                 { error: 'Forbidden', message: 'Cannot create tags for other users' },
                 { status: 403 }
@@ -235,7 +319,7 @@ export async function POST(request: NextRequest) {
             const { data: userPage } = await supabase
                 .from('user_pages')
                 .select('page_id')
-                .eq('user_id', session.user.id)
+                .eq('user_id', currentUserId)
                 .eq('page_id', pageId)
                 .single();
 
@@ -244,6 +328,29 @@ export async function POST(request: NextRequest) {
                     { error: 'Forbidden', message: 'You do not have access to this page' },
                     { status: 403 }
                 );
+            }
+
+            if (normalizedShareTargets.length > 0) {
+                const { data: validShareTargets, error: validShareTargetsError } = await supabase
+                    .from('user_pages')
+                    .select('user_id')
+                    .eq('page_id', pageId)
+                    .in('user_id', normalizedShareTargets);
+
+                if (validShareTargetsError) throw validShareTargetsError;
+
+                const validTargetIds = new Set(validShareTargets?.map((row) => row.user_id) || []);
+                const invalidTargetIds = normalizedShareTargets.filter((id) => !validTargetIds.has(id));
+
+                if (invalidTargetIds.length > 0) {
+                    return NextResponse.json(
+                        {
+                            error: 'Bad Request',
+                            message: 'Some selected team members do not belong to this page'
+                        },
+                        { status: 400 }
+                    );
+                }
             }
         }
 
@@ -262,7 +369,29 @@ export async function POST(request: NextRequest) {
 
         if (error) throw error;
 
-        return NextResponse.json({ tag });
+        if (shouldShareWithPage && normalizedShareTargets.length > 0) {
+            const { error: shareError } = await supabase
+                .from('tag_shares')
+                .upsert(
+                    normalizedShareTargets.map((userId: string) => ({
+                        tag_id: tag.id,
+                        shared_with_user_id: userId
+                    })),
+                    {
+                        onConflict: 'tag_id,shared_with_user_id',
+                        ignoreDuplicates: true
+                    }
+                );
+
+            if (shareError) throw shareError;
+        }
+
+        return NextResponse.json({
+            tag: {
+                ...tag,
+                shared_with_user_ids: shouldShareWithPage ? normalizedShareTargets : []
+            }
+        });
     } catch (error) {
         console.error('Error creating tag:', error);
         return NextResponse.json(
@@ -284,8 +413,10 @@ export async function PUT(request: NextRequest) {
             );
         }
 
+        const currentUserId = session.user.id;
+
         const body = await request.json();
-        const { id, name, color, isShared } = body;
+        const { id, name, color, isShared, sharedWithUserIds } = body;
 
         if (!id) {
             return NextResponse.json(
@@ -312,13 +443,13 @@ export async function PUT(request: NextRequest) {
 
         // Verify permission based on owner_type
         let hasPermission = false;
-        if (existingTag.owner_type === 'user' && existingTag.owner_id === session.user.id) {
+        if (existingTag.owner_type === 'user' && existingTag.owner_id === currentUserId) {
             hasPermission = true;
         } else if (existingTag.owner_type === 'page') {
             const { data: userPage } = await supabase
                 .from('user_pages')
                 .select('page_id')
-                .eq('user_id', session.user.id)
+                .eq('user_id', currentUserId)
                 .eq('page_id', existingTag.owner_id)
                 .single();
             hasPermission = !!userPage;
@@ -326,7 +457,7 @@ export async function PUT(request: NextRequest) {
             const { data: businessUser } = await supabase
                 .from('business_users')
                 .select('business_id')
-                .eq('user_id', session.user.id)
+                .eq('user_id', currentUserId)
                 .eq('business_id', existingTag.owner_id)
                 .single();
             hasPermission = !!businessUser;
@@ -343,6 +474,14 @@ export async function PUT(request: NextRequest) {
         if (name) updates.name = name;
         if (color) updates.color = color;
 
+        const shouldUpdateShareTargets = Array.isArray(sharedWithUserIds);
+        const normalizedShareTargets = normalizeUserIdList(sharedWithUserIds)
+            .filter((userId) => userId !== currentUserId);
+        const nextIsShared =
+            typeof isShared === 'boolean'
+                ? isShared
+                : Boolean(existingTag.is_shared);
+
         if (typeof isShared === 'boolean') {
             if (existingTag.owner_type !== 'user') {
                 return NextResponse.json(
@@ -351,7 +490,7 @@ export async function PUT(request: NextRequest) {
                 );
             }
 
-            if (isShared) {
+            if (nextIsShared) {
                 if (!existingTag.page_id) {
                     return NextResponse.json(
                         {
@@ -365,7 +504,7 @@ export async function PUT(request: NextRequest) {
                 const { data: userPage } = await supabase
                     .from('user_pages')
                     .select('page_id')
-                    .eq('user_id', session.user.id)
+                    .eq('user_id', currentUserId)
                     .eq('page_id', existingTag.page_id)
                     .single();
 
@@ -377,7 +516,49 @@ export async function PUT(request: NextRequest) {
                 }
             }
 
-            updates.is_shared = isShared;
+            updates.is_shared = nextIsShared;
+        }
+
+        if (shouldUpdateShareTargets && existingTag.owner_type !== 'user') {
+            return NextResponse.json(
+                { error: 'Bad Request', message: 'Share targets are only available for personal tags' },
+                { status: 400 }
+            );
+        }
+
+        if (shouldUpdateShareTargets && nextIsShared) {
+            if (!existingTag.page_id) {
+                return NextResponse.json(
+                    {
+                        error: 'Bad Request',
+                        message: 'A personal tag must be connected to a page before it can be shared'
+                    },
+                    { status: 400 }
+                );
+            }
+
+            if (normalizedShareTargets.length > 0) {
+                const { data: validShareTargets, error: validShareTargetsError } = await supabase
+                    .from('user_pages')
+                    .select('user_id')
+                    .eq('page_id', existingTag.page_id)
+                    .in('user_id', normalizedShareTargets);
+
+                if (validShareTargetsError) throw validShareTargetsError;
+
+                const validTargetIds = new Set(validShareTargets?.map((row) => row.user_id) || []);
+                const invalidTargetIds = normalizedShareTargets.filter((userId) => !validTargetIds.has(userId));
+
+                if (invalidTargetIds.length > 0) {
+                    return NextResponse.json(
+                        {
+                            error: 'Bad Request',
+                            message: 'Some selected team members do not belong to this page'
+                        },
+                        { status: 400 }
+                    );
+                }
+            }
         }
 
         const { data: tag, error } = await supabase
@@ -389,7 +570,38 @@ export async function PUT(request: NextRequest) {
 
         if (error) throw error;
 
-        return NextResponse.json({ tag });
+        if (existingTag.owner_type === 'user' && (typeof isShared === 'boolean' || shouldUpdateShareTargets)) {
+            const { error: clearShareError } = await supabase
+                .from('tag_shares')
+                .delete()
+                .eq('tag_id', id);
+
+            if (clearShareError) throw clearShareError;
+
+            if (nextIsShared && shouldUpdateShareTargets && normalizedShareTargets.length > 0) {
+                const { error: addShareError } = await supabase
+                    .from('tag_shares')
+                    .upsert(
+                        normalizedShareTargets.map((userId) => ({
+                            tag_id: id,
+                            shared_with_user_id: userId
+                        })),
+                        {
+                            onConflict: 'tag_id,shared_with_user_id',
+                            ignoreDuplicates: true
+                        }
+                    );
+
+                if (addShareError) throw addShareError;
+            }
+        }
+
+        return NextResponse.json({
+            tag: {
+                ...tag,
+                shared_with_user_ids: nextIsShared && shouldUpdateShareTargets ? normalizedShareTargets : []
+            }
+        });
     } catch (error) {
         console.error('Error updating tag:', error);
         return NextResponse.json(
@@ -410,6 +622,8 @@ export async function DELETE(request: NextRequest) {
                 { status: 401 }
             );
         }
+
+        const currentUserId = session.user.id;
 
         const searchParams = request.nextUrl.searchParams;
         const id = searchParams.get('id');
@@ -439,13 +653,13 @@ export async function DELETE(request: NextRequest) {
 
         // Same permission check as PUT
         let hasPermission = false;
-        if (existingTag.owner_type === 'user' && existingTag.owner_id === session.user.id) {
+        if (existingTag.owner_type === 'user' && existingTag.owner_id === currentUserId) {
             hasPermission = true;
         } else if (existingTag.owner_type === 'page') {
             const { data: userPage } = await supabase
                 .from('user_pages')
                 .select('page_id')
-                .eq('user_id', session.user.id)
+                .eq('user_id', currentUserId)
                 .eq('page_id', existingTag.owner_id)
                 .single();
             hasPermission = !!userPage;
@@ -453,7 +667,7 @@ export async function DELETE(request: NextRequest) {
             const { data: businessUser } = await supabase
                 .from('business_users')
                 .select('business_id')
-                .eq('user_id', session.user.id)
+                .eq('user_id', currentUserId)
                 .eq('business_id', existingTag.owner_id)
                 .single();
             hasPermission = !!businessUser;

@@ -61,7 +61,8 @@ export async function POST(
             for (const tagId of tagIds) {
                 entries.push({
                     contact_id: contactId,
-                    tag_id: tagId
+                    tag_id: tagId,
+                    created_by: session.user.id
                 });
             }
         }

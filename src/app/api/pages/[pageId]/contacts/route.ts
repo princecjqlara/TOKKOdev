@@ -99,7 +99,7 @@ export async function GET(
         // Build query
         let query = supabase
             .from('contacts')
-            .select('*, contact_tags(tag_id, tags(*))', { count: 'exact' })
+            .select('*, contact_tags(tag_id, created_by, tags(*))', { count: 'exact' })
             .eq('page_id', pageId)
             .order('last_interaction_at', { ascending: false, nullsFirst: false });
 
@@ -184,10 +184,49 @@ export async function GET(
 
         if (error) throw error;
 
+        const taggedByIds = [
+            ...new Set(
+                (contacts || [])
+                    .flatMap((contact) =>
+                        (contact.contact_tags || [])
+                            .map((ct: { created_by?: string | null }) => ct.created_by)
+                            .filter((createdBy: string | null | undefined): createdBy is string => Boolean(createdBy))
+                    )
+            )
+        ];
+
+        const taggedByUsers = new Map<string, { name: string | null; email: string | null }>();
+        if (taggedByIds.length > 0) {
+            const { data: users, error: usersError } = await supabase
+                .from('users')
+                .select('id,name,email')
+                .in('id', taggedByIds);
+
+            if (usersError) throw usersError;
+
+            for (const user of users || []) {
+                taggedByUsers.set(user.id, {
+                    name: user.name,
+                    email: user.email
+                });
+            }
+        }
+
         // Transform contacts to include tags array
         const transformedContacts = contacts?.map(contact => ({
             ...contact,
-            tags: contact.contact_tags?.map((ct: { tags: unknown }) => ct.tags) || [],
+            tags: contact.contact_tags?.map((ct: {
+                created_by?: string | null;
+                tags: Record<string, unknown>;
+            }) => {
+                const taggedBy = ct.created_by ? taggedByUsers.get(ct.created_by) : undefined;
+                const tagData = ct.tags && typeof ct.tags === 'object' ? ct.tags : {};
+                return {
+                    ...tagData,
+                    tagged_by_user_id: ct.created_by || null,
+                    tagged_by_name: taggedBy?.name || taggedBy?.email || null
+                };
+            }) || [],
             contact_tags: undefined
         })) || [];
 
