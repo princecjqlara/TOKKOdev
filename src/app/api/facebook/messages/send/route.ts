@@ -47,6 +47,123 @@ const AUTO_TEMPLATE_TIME_BUDGET_MS = 240000;
 const AUTO_TEMPLATE_MESSAGES = ['{{1}}'];
 const FACEBOOK_GRAPH_URL = 'https://graph.facebook.com/v21.0';
 
+type RequestedMessageButton = {
+    type?: string;
+    text: string;
+    url?: string;
+    payload?: string;
+};
+
+type NormalizedTemplateButton = {
+    type: 'URL' | 'QUICK_REPLY';
+    text: string;
+    value: string;
+};
+
+function normalizeTemplateButtonType(type: unknown): 'URL' | 'QUICK_REPLY' | null {
+    if (typeof type !== 'string') {
+        return null;
+    }
+
+    const normalizedType = type.trim().toUpperCase();
+    if (normalizedType === 'URL' || normalizedType === 'WEB_URL') {
+        return 'URL';
+    }
+
+    if (normalizedType === 'POSTBACK' || normalizedType === 'QUICK_REPLY') {
+        return 'QUICK_REPLY';
+    }
+
+    return null;
+}
+
+function normalizeButtonCandidate(button: RequestedMessageButton | Record<string, unknown>): NormalizedTemplateButton | null {
+    const type = normalizeTemplateButtonType(button.type);
+    const text = typeof button.text === 'string' ? button.text.trim() : '';
+
+    if (!type || !text) {
+        return null;
+    }
+
+    if (type === 'URL') {
+        const value = typeof button.url === 'string' ? button.url.trim() : '';
+        if (!value) {
+            return null;
+        }
+
+        return { type, text, value };
+    }
+
+    const payload =
+        typeof button.payload === 'string' && button.payload.trim().length > 0
+            ? button.payload.trim()
+            : text;
+
+    return { type, text, value: payload };
+}
+
+function extractTemplateButtons(template: Record<string, unknown>): NormalizedTemplateButton[] {
+    const components = template.components;
+    if (!Array.isArray(components)) {
+        return [];
+    }
+
+    const buttonComponent = components.find((component) => {
+        if (!component || typeof component !== 'object') return false;
+        const componentType = (component as Record<string, unknown>).type;
+        return typeof componentType === 'string' && componentType.trim().toUpperCase() === 'BUTTONS';
+    }) as Record<string, unknown> | undefined;
+
+    if (!buttonComponent || !Array.isArray(buttonComponent.buttons)) {
+        return [];
+    }
+
+    return buttonComponent.buttons
+        .map((button) => {
+            if (!button || typeof button !== 'object') {
+                return null;
+            }
+
+            return normalizeButtonCandidate(button as Record<string, unknown>);
+        })
+        .filter((button): button is NormalizedTemplateButton => button !== null);
+}
+
+function normalizeRequestedButtons(buttons?: RequestedMessageButton[]): NormalizedTemplateButton[] {
+    if (!Array.isArray(buttons) || buttons.length === 0) {
+        return [];
+    }
+
+    return buttons
+        .map((button) => normalizeButtonCandidate(button))
+        .filter((button): button is NormalizedTemplateButton => button !== null);
+}
+
+export function templateMatchesRequestedButtons(
+    template: Record<string, unknown>,
+    requestedButtons?: RequestedMessageButton[]
+): boolean {
+    const expectedButtons = normalizeRequestedButtons(requestedButtons);
+    const templateButtons = extractTemplateButtons(template);
+
+    if (templateButtons.length !== expectedButtons.length) {
+        return false;
+    }
+
+    return expectedButtons.every((expectedButton, index) => {
+        const templateButton = templateButtons[index];
+        if (!templateButton) {
+            return false;
+        }
+
+        return (
+            expectedButton.type === templateButton.type &&
+            expectedButton.text === templateButton.text &&
+            expectedButton.value === templateButton.value
+        );
+    });
+}
+
 function normalizeTemplateStatus(status: unknown): string | null {
     if (typeof status !== 'string') return null;
     const normalized = status.trim().toUpperCase();
@@ -199,7 +316,7 @@ function buildAutoTemplateCandidate(
     name: string,
     language: string,
     pageName: string,
-    buttons?: Array<{ type?: string; text: string; url?: string; payload?: string }>
+    buttons?: RequestedMessageButton[]
 ): UtilityTemplate {
     const bodyText = `{{1}} — Message from ${pageName} support team — {{2}}`;
 
@@ -347,7 +464,7 @@ export async function POST(request: NextRequest) {
             pageId?: string;
             contactIds?: string[];
             messageText?: string;
-            buttons?: Array<{ type?: string; text: string; url?: string; payload?: string }>;
+            buttons?: RequestedMessageButton[];
         };
 
         if (!pageId || !contactIds?.length || !messageText) {
@@ -778,16 +895,24 @@ export async function POST(request: NextRequest) {
                             return status && SENDABLE_TEMPLATE_STATUSES.has(status);
                         });
 
+                        const matchesRequestedButtons = (template: Record<string, unknown>) => {
+                            return templateMatchesRequestedButtons(template, buttons);
+                        };
+
                         const supportTeamTemplate = sendableTemplates.find((template) => {
-                            return isSupportTeamTemplate(template) && countPlaceholders(template) === 2;
+                            return (
+                                isSupportTeamTemplate(template) &&
+                                countPlaceholders(template) === 2 &&
+                                matchesRequestedButtons(template)
+                            );
                         });
 
                         const twoPlaceholderTemplate = sendableTemplates.find((template) => {
-                            return countPlaceholders(template) === 2;
+                            return countPlaceholders(template) === 2 && matchesRequestedButtons(template);
                         });
 
                         const anyApprovedWithPlaceholder = sendableTemplates.find((template) => {
-                            return hasEditablePlaceholder(template);
+                            return hasEditablePlaceholder(template) && matchesRequestedButtons(template);
                         });
 
                         const selectedTemplate = supportTeamTemplate || twoPlaceholderTemplate || anyApprovedWithPlaceholder;
@@ -805,8 +930,12 @@ export async function POST(request: NextRequest) {
                                         return `${name}:${status}`;
                                     })
                                     .join(', ');
+                                const buttonRequirement =
+                                    Array.isArray(buttons) && buttons.length > 0
+                                        ? ' with matching buttons'
+                                        : ' without buttons';
                                 utilityTemplateBootstrapError =
-                                    `No approved utility template with {{1}} placeholder found. Existing statuses: ${statuses}`;
+                                    `No approved utility template${buttonRequirement} and {{1}} placeholder found. Existing statuses: ${statuses}`;
                                 return false;
                             }
 

@@ -22,7 +22,10 @@ vi.mock('@/lib/placeholders', () => ({
     replaceTemplateVariablesForParts: vi.fn()
 }));
 
-import { buildUtilityBodyParameters } from './route';
+import {
+    buildUtilityBodyParameters,
+    templateMatchesRequestedButtons
+} from './route';
 
 describe('buildUtilityBodyParameters', () => {
     it('keeps support-team separator between message parts', () => {
@@ -48,5 +51,63 @@ describe('buildUtilityBodyParameters', () => {
         );
 
         expect(parameters).toEqual(['Prince', 'Your appointment is confirmed']);
+    });
+});
+
+describe('templateMatchesRequestedButtons', () => {
+    it('rejects a template with stale URL button values', () => {
+        const template = {
+            components: [
+                { type: 'BODY', text: '{{1}} - Message from Ares Media support team - {{2}}' },
+                {
+                    type: 'BUTTONS',
+                    buttons: [
+                        { type: 'URL', text: 'Click here', url: 'https://old.example.com/join' }
+                    ]
+                }
+            ]
+        };
+
+        const requestedButtons = [
+            { type: 'URL', text: 'Click here', url: 'https://instantmeeting.vercel.app/join/aresmedia' }
+        ];
+
+        expect(templateMatchesRequestedButtons(template, requestedButtons)).toBe(false);
+    });
+
+    it('rejects templates with buttons when none are requested', () => {
+        const template = {
+            components: [
+                { type: 'BODY', text: '{{1}}' },
+                {
+                    type: 'BUTTONS',
+                    buttons: [
+                        { type: 'URL', text: 'Click here', url: 'https://example.com' }
+                    ]
+                }
+            ]
+        };
+
+        expect(templateMatchesRequestedButtons(template, undefined)).toBe(false);
+    });
+
+    it('matches equivalent quick reply and postback button payloads', () => {
+        const template = {
+            components: [
+                { type: 'BODY', text: '{{1}}' },
+                {
+                    type: 'BUTTONS',
+                    buttons: [
+                        { type: 'POSTBACK', text: 'Talk to sales', payload: 'talk_sales' }
+                    ]
+                }
+            ]
+        };
+
+        const requestedButtons = [
+            { type: 'QUICK_REPLY', text: 'Talk to sales', payload: 'talk_sales' }
+        ];
+
+        expect(templateMatchesRequestedButtons(template, requestedButtons)).toBe(true);
     });
 });
