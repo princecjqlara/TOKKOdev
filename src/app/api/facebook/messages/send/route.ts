@@ -139,7 +139,7 @@ function buildPageStatusHeadline(pageName?: string | null): string {
     return normalized;
 }
 
-function buildUtilityBodyParameters(
+export function buildUtilityBodyParameters(
     placeholderCount: number,
     message: string,
     contact: Pick<ContactRecord, 'id' | 'name'>,
@@ -156,6 +156,7 @@ function buildUtilityBodyParameters(
     const firstName = contact.name?.trim().split(/\s+/)[0] || 'there';
     const contactReference = contact.id.replace(/-/g, '').slice(0, 8) || '00000000';
     const normalizedBodyText = templateBodyText.toLowerCase();
+    const isSupportTeamBody = normalizedBodyText.includes('support team');
     const looksLikeOrderTemplate =
         normalizedBodyText.includes('order') ||
         normalizedBodyText.includes('delivery') ||
@@ -168,6 +169,10 @@ function buildUtilityBodyParameters(
     }
 
     if (placeholderCount === 2) {
+        if (isSupportTeamBody) {
+            return [part1, part2];
+        }
+
         // For 2 placeholders, {{1}} is usually name and {{2}} is content in our "auto" templates
         if (templateBodyText.includes('{{1}}') && templateBodyText.includes('{{2}}')) {
             return [firstName, part1];
@@ -196,7 +201,7 @@ function buildAutoTemplateCandidate(
     pageName: string,
     buttons?: Array<{ type?: string; text: string; url?: string; payload?: string }>
 ): UtilityTemplate {
-    const bodyText = `{{1}} — Message from ${pageName} support team. {{2}}`;
+    const bodyText = `{{1}} — Message from ${pageName} support team — {{2}}`;
 
     const components: UtilityTemplate['components'] = [
         {
