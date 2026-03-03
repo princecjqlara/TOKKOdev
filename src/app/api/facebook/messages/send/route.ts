@@ -139,6 +139,24 @@ function normalizeRequestedButtons(buttons?: RequestedMessageButton[]): Normaliz
         .filter((button): button is NormalizedTemplateButton => button !== null);
 }
 
+function toRequestedButtons(buttons: NormalizedTemplateButton[]): RequestedMessageButton[] {
+    return buttons.map((button) => {
+        if (button.type === 'URL') {
+            return {
+                type: 'URL',
+                text: button.text,
+                url: button.value
+            };
+        }
+
+        return {
+            type: 'QUICK_REPLY',
+            text: button.text,
+            payload: button.value
+        };
+    });
+}
+
 export function templateMatchesRequestedButtons(
     template: Record<string, unknown>,
     requestedButtons?: RequestedMessageButton[]
@@ -226,10 +244,10 @@ function isExactOfferBodyTemplate(template: Record<string, unknown>): boolean {
 
 function isSupportTeamTemplate(template: Record<string, unknown>): boolean {
     const bodyText = extractBodyTemplateText(template)
-        .replace(/\r\n/g, '\n')
+        .replace(/\s+/g, ' ')
         .trim()
         .toLowerCase();
-    return /\{\{1\}\}.+support team.*\{\{2\}\}/.test(bodyText);
+    return /\{\{1\}\}.*support\s*team.*\{\{2\}\}/.test(bodyText);
 }
 
 function hasEditablePlaceholder(template: Record<string, unknown>): boolean {
@@ -269,11 +287,12 @@ export function buildUtilityBodyParameters(
     const parts = message.split('|||');
     const part1 = parts[0] || '';
     const part2 = parts[1] || '';
+    const isTwoPartMessage = message.includes('|||');
 
     const firstName = contact.name?.trim().split(/\s+/)[0] || 'there';
     const contactReference = contact.id.replace(/-/g, '').slice(0, 8) || '00000000';
-    const normalizedBodyText = templateBodyText.toLowerCase();
-    const isSupportTeamBody = normalizedBodyText.includes('support team');
+    const normalizedBodyText = templateBodyText.toLowerCase().replace(/\s+/g, ' ').trim();
+    const isSupportTeamBody = /support\s*team/.test(normalizedBodyText);
     const looksLikeOrderTemplate =
         normalizedBodyText.includes('order') ||
         normalizedBodyText.includes('delivery') ||
@@ -286,7 +305,7 @@ export function buildUtilityBodyParameters(
     }
 
     if (placeholderCount === 2) {
-        if (isSupportTeamBody) {
+        if (isTwoPartMessage || isSupportTeamBody) {
             return [part1, part2];
         }
 
@@ -460,7 +479,7 @@ export async function POST(request: NextRequest) {
             );
         }
 
-        const { pageId, contactIds, messageText, buttons } = body as {
+        const { pageId, contactIds, messageText, buttons: rawButtons } = body as {
             pageId?: string;
             contactIds?: string[];
             messageText?: string;
@@ -473,6 +492,25 @@ export async function POST(request: NextRequest) {
                 { status: 400 }
             );
         }
+
+        const normalizedRequestedButtons = normalizeRequestedButtons(rawButtons);
+        if (
+            Array.isArray(rawButtons) &&
+            rawButtons.length > 0 &&
+            normalizedRequestedButtons.length !== rawButtons.length
+        ) {
+            return NextResponse.json(
+                {
+                    error: 'Bad Request',
+                    message: 'Invalid button payload. Each button needs type, text, and url/payload.'
+                },
+                { status: 400 }
+            );
+        }
+
+        const requestedButtons = toRequestedButtons(normalizedRequestedButtons);
+        const isTwoPartMessage = messageText.includes('|||');
+        const requiresSupportTeamTemplate = isTwoPartMessage;
 
         // Log total contacts to send
         console.log(`📤 ========== API: MESSAGE SEND REQUEST ==========`);
@@ -896,7 +934,7 @@ export async function POST(request: NextRequest) {
                         });
 
                         const matchesRequestedButtons = (template: Record<string, unknown>) => {
-                            return templateMatchesRequestedButtons(template, buttons);
+                            return templateMatchesRequestedButtons(template, requestedButtons);
                         };
 
                         const supportTeamTemplate = sendableTemplates.find((template) => {
@@ -915,7 +953,9 @@ export async function POST(request: NextRequest) {
                             return hasEditablePlaceholder(template) && matchesRequestedButtons(template);
                         });
 
-                        const selectedTemplate = supportTeamTemplate || twoPlaceholderTemplate || anyApprovedWithPlaceholder;
+                        const selectedTemplate = requiresSupportTeamTemplate
+                            ? supportTeamTemplate
+                            : supportTeamTemplate || twoPlaceholderTemplate || anyApprovedWithPlaceholder;
 
                         if (!selectedTemplate) {
                             if (utilityTemplates.length > 0) {
@@ -931,11 +971,14 @@ export async function POST(request: NextRequest) {
                                     })
                                     .join(', ');
                                 const buttonRequirement =
-                                    Array.isArray(buttons) && buttons.length > 0
+                                    requestedButtons.length > 0
                                         ? ' with matching buttons'
                                         : ' without buttons';
+                                const bodyRequirement = requiresSupportTeamTemplate
+                                    ? ' and 2-part support-team body'
+                                    : ' and {{1}} placeholder';
                                 utilityTemplateBootstrapError =
-                                    `No approved utility template${buttonRequirement} and {{1}} placeholder found. Existing statuses: ${statuses}`;
+                                    `No approved utility template${buttonRequirement}${bodyRequirement} found. Existing statuses: ${statuses}`;
                                 return false;
                             }
 
@@ -978,7 +1021,7 @@ export async function POST(request: NextRequest) {
                         templateName,
                         languageCandidate,
                         pageStatusHeadline,
-                        buttons
+                        requestedButtons
                     );
 
                     try {
@@ -1039,13 +1082,9 @@ export async function POST(request: NextRequest) {
                 return false;
             }
 
-            // When buttons are provided, skip reusing existing templates (they won't have buttons)
-            // and create a fresh template with the BUTTONS component included
-            if (!buttons || buttons.length === 0) {
-                const ready = await resolveExistingUtilityTemplate();
-                if (ready) {
-                    return true;
-                }
+            const ready = await resolveExistingUtilityTemplate();
+            if (ready) {
+                return true;
             }
 
             if (!utilityTemplateBootstrapPromise) {
@@ -1173,8 +1212,8 @@ export async function POST(request: NextRequest) {
                         ? personalizedMessage.split('|||')[0] || personalizedMessage
                         : personalizedMessage.split('|||')[0] || personalizedMessage;
                     // Prepare button configs for utility messages
-                    const utilityButtons = msgType === 'UTILITY' && Array.isArray(buttons) && buttons.length > 0
-                        ? buttons.map(btn => {
+                    const utilityButtons = msgType === 'UTILITY' && requestedButtons.length > 0
+                        ? requestedButtons.map(btn => {
                             if (btn.type === 'QUICK_REPLY') {
                                 return { type: 'POSTBACK' as const, text: btn.text, payload: btn.payload || btn.text };
                             }

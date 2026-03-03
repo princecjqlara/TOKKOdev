@@ -604,7 +604,7 @@ export default function ContactsPage() {
                             pageId: selectedPageId,
                             contactIds: chunk,
                             messageText: messageText.trim(),
-                            buttons: messageButtons.length > 0 ? messageButtons : undefined
+                            buttons: messageButtons
                         })
                     });
 
@@ -705,7 +705,7 @@ export default function ContactsPage() {
                                             pageId: selectedPageId,
                                             contactIds: retryChunk,
                                             messageText: messageText.trim(),
-                                            buttons: messageButtons.length > 0 ? messageButtons : undefined
+                                            buttons: messageButtons
                                         })
                                     });
 
@@ -981,7 +981,7 @@ export default function ContactsPage() {
                     pageId: selectedPageId,
                     contactIds: failedContactIds,
                     messageText: messageText.trim(),
-                    buttons: messageButtons.length > 0 ? messageButtons : undefined
+                    buttons: messageButtons
                 })
             });
 

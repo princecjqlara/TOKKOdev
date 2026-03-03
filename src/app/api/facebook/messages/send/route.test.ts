@@ -42,15 +42,26 @@ describe('buildUtilityBodyParameters', () => {
         ]);
     });
 
-    it('keeps first-name substitution for non support-team templates', () => {
+    it('keeps first-name substitution for one-part non support-team templates', () => {
         const parameters = buildUtilityBodyParameters(
             2,
-            'Your appointment is confirmed|||See you soon',
+            'Your appointment is confirmed',
             { id: 'contact-1234', name: 'Prince Doe' },
             '{{1}}, your update: {{2}}'
         );
 
         expect(parameters).toEqual(['Prince', 'Your appointment is confirmed']);
+    });
+
+    it('keeps part1 and part2 order for two-part messages even on generic two-slot templates', () => {
+        const parameters = buildUtilityBodyParameters(
+            2,
+            'Huy! Kikim still interested?|||Don\'t worry there are 5 lots left',
+            { id: 'contact-1234', name: 'Prince Doe' },
+            '{{1}}, your update: {{2}}'
+        );
+
+        expect(parameters).toEqual(['Huy! Kikim still interested?', 'Don\'t worry there are 5 lots left']);
     });
 });
 
