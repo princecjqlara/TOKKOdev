@@ -604,6 +604,8 @@ export default function ContactsPage() {
                             pageId: selectedPageId,
                             contactIds: chunk,
                             messageText: messageText.trim(),
+                            messagePart1,
+                            messagePart2,
                             buttons: messageButtons
                         })
                     });
@@ -705,6 +707,8 @@ export default function ContactsPage() {
                                             pageId: selectedPageId,
                                             contactIds: retryChunk,
                                             messageText: messageText.trim(),
+                                            messagePart1,
+                                            messagePart2,
                                             buttons: messageButtons
                                         })
                                     });
@@ -981,6 +985,8 @@ export default function ContactsPage() {
                     pageId: selectedPageId,
                     contactIds: failedContactIds,
                     messageText: messageText.trim(),
+                    messagePart1,
+                    messagePart2,
                     buttons: messageButtons
                 })
             });

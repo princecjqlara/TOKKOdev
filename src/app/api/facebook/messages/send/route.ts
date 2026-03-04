@@ -60,6 +60,13 @@ type NormalizedTemplateButton = {
     value: string;
 };
 
+type ResolvedMessageParts = {
+    part1: string;
+    part2: string;
+    combined: string;
+    isTwoPart: boolean;
+};
+
 function normalizeTemplateButtonType(type: unknown): 'URL' | 'QUICK_REPLY' | null {
     if (typeof type !== 'string') {
         return null;
@@ -155,6 +162,46 @@ function toRequestedButtons(buttons: NormalizedTemplateButton[]): RequestedMessa
             payload: button.value
         };
     });
+}
+
+export function resolveMessageParts(
+    rawMessageText?: string,
+    rawPart1?: string,
+    rawPart2?: string
+): ResolvedMessageParts {
+    const hasExplicitPart1 = typeof rawPart1 === 'string';
+    const hasExplicitPart2 = typeof rawPart2 === 'string';
+
+    if (hasExplicitPart1 || hasExplicitPart2) {
+        const part1 = hasExplicitPart1 ? rawPart1 || '' : '';
+        const part2 = hasExplicitPart2 ? rawPart2 || '' : '';
+        return {
+            part1,
+            part2,
+            combined: `${part1}|||${part2}`,
+            isTwoPart: part2.trim().length > 0
+        };
+    }
+
+    const source = typeof rawMessageText === 'string' ? rawMessageText : '';
+    const separatorIndex = source.indexOf('|||');
+    if (separatorIndex === -1) {
+        return {
+            part1: source,
+            part2: '',
+            combined: `${source}|||`,
+            isTwoPart: false
+        };
+    }
+
+    const part1 = source.slice(0, separatorIndex);
+    const part2 = source.slice(separatorIndex + 3);
+    return {
+        part1,
+        part2,
+        combined: `${part1}|||${part2}`,
+        isTwoPart: part2.trim().length > 0
+    };
 }
 
 export function templateMatchesRequestedButtons(
@@ -287,7 +334,7 @@ export function buildUtilityBodyParameters(
     const parts = message.split('|||');
     const part1 = parts[0] || '';
     const part2 = parts[1] || '';
-    const isTwoPartMessage = message.includes('|||');
+    const isTwoPartMessage = part2.trim().length > 0;
 
     const firstName = contact.name?.trim().split(/\s+/)[0] || 'there';
     const contactReference = contact.id.replace(/-/g, '').slice(0, 8) || '00000000';
@@ -479,14 +526,26 @@ export async function POST(request: NextRequest) {
             );
         }
 
-        const { pageId, contactIds, messageText, buttons: rawButtons } = body as {
+        const {
+            pageId,
+            contactIds,
+            messageText: rawMessageText,
+            messagePart1: rawMessagePart1,
+            messagePart2: rawMessagePart2,
+            buttons: rawButtons
+        } = body as {
             pageId?: string;
             contactIds?: string[];
             messageText?: string;
+            messagePart1?: string;
+            messagePart2?: string;
             buttons?: RequestedMessageButton[];
         };
 
-        if (!pageId || !contactIds?.length || !messageText) {
+        const resolvedMessage = resolveMessageParts(rawMessageText, rawMessagePart1, rawMessagePart2);
+        const messageText = resolvedMessage.combined;
+
+        if (!pageId || !contactIds?.length || !resolvedMessage.part1.trim()) {
             return NextResponse.json(
                 { error: 'Bad Request', message: 'Missing required fields' },
                 { status: 400 }
@@ -509,8 +568,7 @@ export async function POST(request: NextRequest) {
         }
 
         const requestedButtons = toRequestedButtons(normalizedRequestedButtons);
-        const isTwoPartMessage = messageText.includes('|||');
-        const requiresSupportTeamTemplate = isTwoPartMessage;
+        const requiresSupportTeamTemplate = resolvedMessage.isTwoPart;
 
         // Log total contacts to send
         console.log(`📤 ========== API: MESSAGE SEND REQUEST ==========`);

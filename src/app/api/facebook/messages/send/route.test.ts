@@ -24,6 +24,7 @@ vi.mock('@/lib/placeholders', () => ({
 
 import {
     buildUtilityBodyParameters,
+    resolveMessageParts,
     templateMatchesRequestedButtons
 } from './route';
 
@@ -120,5 +121,44 @@ describe('templateMatchesRequestedButtons', () => {
         ];
 
         expect(templateMatchesRequestedButtons(template, requestedButtons)).toBe(true);
+    });
+});
+
+describe('resolveMessageParts', () => {
+    it('prefers explicit message parts when provided', () => {
+        const resolved = resolveMessageParts(
+            'Old combined text',
+            'Hi may marketing system na ba sila?',
+            'if intresado ka pa para sa real estate team mo click below'
+        );
+
+        expect(resolved).toEqual({
+            part1: 'Hi may marketing system na ba sila?',
+            part2: 'if intresado ka pa para sa real estate team mo click below',
+            combined: 'Hi may marketing system na ba sila?|||if intresado ka pa para sa real estate team mo click below',
+            isTwoPart: true
+        });
+    });
+
+    it('parses separator-based message text when explicit parts are missing', () => {
+        const resolved = resolveMessageParts('Part 1|||Part 2');
+
+        expect(resolved).toEqual({
+            part1: 'Part 1',
+            part2: 'Part 2',
+            combined: 'Part 1|||Part 2',
+            isTwoPart: true
+        });
+    });
+
+    it('treats empty second part as single-part message', () => {
+        const resolved = resolveMessageParts('Part 1|||   ');
+
+        expect(resolved).toEqual({
+            part1: 'Part 1',
+            part2: '   ',
+            combined: 'Part 1|||   ',
+            isTwoPart: false
+        });
     });
 });
