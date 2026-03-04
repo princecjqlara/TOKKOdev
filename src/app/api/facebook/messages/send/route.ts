@@ -109,23 +109,34 @@ function normalizeButtonCandidate(button: RequestedMessageButton | Record<string
     return { type, text, value: payload };
 }
 
-function extractTemplateButtons(template: Record<string, unknown>): NormalizedTemplateButton[] {
+function extractTemplateButtons(template: Record<string, unknown>): {
+    rawCount: number;
+    normalizedButtons: NormalizedTemplateButton[];
+} {
     const components = template.components;
     if (!Array.isArray(components)) {
-        return [];
+        return { rawCount: 0, normalizedButtons: [] };
     }
 
-    const buttonComponent = components.find((component) => {
+    const buttonComponents = components.filter((component) => {
         if (!component || typeof component !== 'object') return false;
         const componentType = (component as Record<string, unknown>).type;
         return typeof componentType === 'string' && componentType.trim().toUpperCase() === 'BUTTONS';
-    }) as Record<string, unknown> | undefined;
+    }) as Record<string, unknown>[];
 
-    if (!buttonComponent || !Array.isArray(buttonComponent.buttons)) {
-        return [];
+    if (buttonComponents.length === 0) {
+        return { rawCount: 0, normalizedButtons: [] };
     }
 
-    return buttonComponent.buttons
+    const rawButtons = buttonComponents.flatMap((buttonComponent) => {
+        if (!Array.isArray(buttonComponent.buttons)) {
+            return [];
+        }
+
+        return buttonComponent.buttons;
+    });
+
+    const normalizedButtons = rawButtons
         .map((button) => {
             if (!button || typeof button !== 'object') {
                 return null;
@@ -134,6 +145,11 @@ function extractTemplateButtons(template: Record<string, unknown>): NormalizedTe
             return normalizeButtonCandidate(button as Record<string, unknown>);
         })
         .filter((button): button is NormalizedTemplateButton => button !== null);
+
+    return {
+        rawCount: rawButtons.length,
+        normalizedButtons
+    };
 }
 
 function normalizeRequestedButtons(buttons?: RequestedMessageButton[]): NormalizedTemplateButton[] {
@@ -209,14 +225,18 @@ export function templateMatchesRequestedButtons(
     requestedButtons?: RequestedMessageButton[]
 ): boolean {
     const expectedButtons = normalizeRequestedButtons(requestedButtons);
-    const templateButtons = extractTemplateButtons(template);
+    const { rawCount, normalizedButtons } = extractTemplateButtons(template);
 
-    if (templateButtons.length !== expectedButtons.length) {
+    if (rawCount !== expectedButtons.length) {
+        return false;
+    }
+
+    if (normalizedButtons.length !== rawCount) {
         return false;
     }
 
     return expectedButtons.every((expectedButton, index) => {
-        const templateButton = templateButtons[index];
+        const templateButton = normalizedButtons[index];
         if (!templateButton) {
             return false;
         }

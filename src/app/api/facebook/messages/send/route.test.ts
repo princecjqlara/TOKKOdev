@@ -122,6 +122,22 @@ describe('templateMatchesRequestedButtons', () => {
 
         expect(templateMatchesRequestedButtons(template, requestedButtons)).toBe(true);
     });
+
+    it('rejects template buttons when button metadata is incomplete', () => {
+        const template = {
+            components: [
+                { type: 'BODY', text: '{{1}}' },
+                {
+                    type: 'BUTTONS',
+                    buttons: [
+                        { type: 'URL', text: 'View Details!' }
+                    ]
+                }
+            ]
+        };
+
+        expect(templateMatchesRequestedButtons(template, undefined)).toBe(false);
+    });
 });
 
 describe('resolveMessageParts', () => {
