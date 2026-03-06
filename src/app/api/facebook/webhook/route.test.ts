@@ -59,6 +59,11 @@ function createSupabaseMock(options?: {
         message_text: string;
         buttons: Array<{ type: string; text: string; url?: string; payload?: string }>;
     };
+    existingContact?: {
+        id: string;
+        name?: string | null;
+        profile_pic?: string | null;
+    } | null;
 }) {
     const pageSingle = vi.fn().mockResolvedValue({
         data: {
@@ -71,7 +76,7 @@ function createSupabaseMock(options?: {
     const pageSelect = vi.fn().mockReturnValue({ eq: pageEq });
 
     const existingContactMaybeSingle = vi.fn().mockResolvedValue({
-        data: null,
+        data: options?.existingContact ?? null,
         error: null
     });
     const existingContactEqPsid = vi.fn().mockReturnValue({ maybeSingle: existingContactMaybeSingle });
@@ -378,6 +383,41 @@ describe('POST /api/facebook/webhook', () => {
                 psid: 'contact_psid_1',
                 name: 'Jane Contact',
                 profile_pic: 'https://example.com/jane.jpg'
+            }),
+            {
+                onConflict: 'page_id,psid'
+            }
+        );
+    });
+
+    it('refreshes existing contacts that are missing names', async () => {
+        const supabase = createSupabaseMock({
+            existingContact: {
+                id: 'contact_row_1',
+                name: null,
+                profile_pic: null
+            }
+        });
+        mocks.getSupabaseAdmin.mockReturnValue(supabase);
+        mocks.getUserProfile.mockResolvedValue({
+            id: 'contact_psid_1',
+            name: 'Recovered Contact Name',
+            profile_pic: 'https://example.com/recovered.jpg'
+        });
+
+        const response = await POST(createWebhookRequest());
+        const body = await response.json();
+
+        expect(response.status).toBe(200);
+        expect(body.success).toBe(true);
+        expect(mocks.getUserProfile).toHaveBeenCalledWith('contact_psid_1', 'page_access_token_1');
+
+        expect(supabase.contactsUpsert).toHaveBeenCalledWith(
+            expect.objectContaining({
+                page_id: 'page_row_1',
+                psid: 'contact_psid_1',
+                name: 'Recovered Contact Name',
+                profile_pic: 'https://example.com/recovered.jpg'
             }),
             {
                 onConflict: 'page_id,psid'

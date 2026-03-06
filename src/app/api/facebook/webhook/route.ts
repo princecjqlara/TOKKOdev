@@ -3,6 +3,19 @@ import { getSupabaseAdmin } from '@/lib/supabase';
 import { verifyWebhookSignature, generateVerifyToken, sendMessage, getUserProfile } from '@/lib/facebook';
 import { replaceTemplateVariables } from '@/lib/placeholders';
 
+function hasUsableContactName(value: unknown): value is string {
+    if (typeof value !== 'string') {
+        return false;
+    }
+
+    const normalized = value.trim();
+    if (!normalized) {
+        return false;
+    }
+
+    return normalized.toLowerCase() !== 'unknown';
+}
+
 // GET /api/facebook/webhook - Verify webhook
 export async function GET(request: NextRequest) {
     const searchParams = request.nextUrl.searchParams;
@@ -259,7 +272,7 @@ export async function POST(request: NextRequest) {
                         // Check if contact exists BEFORE upsert (to detect new contacts)
                         const { data: existingContact, error: existingContactError } = await supabase
                             .from('contacts')
-                            .select('id')
+                            .select('id, name')
                             .eq('page_id', page.id)
                             .eq('psid', senderId)
                             .maybeSingle();
@@ -275,19 +288,23 @@ export async function POST(request: NextRequest) {
                         }
 
                         const isNewContact = !existingContact;
+                        const missingName = !hasUsableContactName(existingContact?.name);
+                        const shouldRefreshProfile = isNewContact || missingName;
 
                         let profileName: string | null = null;
                         let profilePic: string | null = null;
 
-                        if (isNewContact) {
+                        if (shouldRefreshProfile) {
                             try {
                                 const profile = await getUserProfile(senderId, page.access_token);
                                 profileName = profile.name || null;
                                 profilePic = profile.profile_pic || null;
                             } catch (profileError) {
-                                logWarn('Failed to fetch profile for new contact', {
+                                logWarn('Failed to fetch profile for contact enrichment', {
                                     pageId,
                                     senderId,
+                                    isNewContact,
+                                    missingName,
                                     error: (profileError as Error).message
                                 });
                             }
