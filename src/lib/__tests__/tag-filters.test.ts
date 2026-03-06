@@ -7,10 +7,10 @@ describe('buildNotInFilter', () => {
     });
 
     it('quotes values for PostgREST in filter syntax', () => {
-        expect(buildNotInFilter(['a', 'b'])).toBe("('a','b')");
+        expect(buildNotInFilter(['a', 'b'])).toBe('(\"a\",\"b\")');
     });
 
-    it('escapes embedded single quotes', () => {
-        expect(buildNotInFilter(["a'b"])).toBe("('a''b')");
+    it('escapes embedded double quotes', () => {
+        expect(buildNotInFilter(['a"b'])).toBe('(\"a\\"b\")');
     });
 });

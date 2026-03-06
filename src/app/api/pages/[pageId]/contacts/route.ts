@@ -127,13 +127,22 @@ export async function GET(
 
         // Apply include tag filter (OR logic — contacts with ANY of the selected tags)
         if (tagIds.length > 0) {
-            const { data: taggedContacts } = await supabase
+            const { data: taggedContacts, error: taggedContactsError } = await supabase
                 .from('contact_tags')
-                .select('contact_id')
-                .in('tag_id', tagIds);
+                .select('contact_id, contacts!inner(page_id)')
+                .in('tag_id', tagIds)
+                .eq('contacts.page_id', pageId);
+
+            if (taggedContactsError) throw taggedContactsError;
 
             // Deduplicate contact IDs (a contact may have multiple matching tags)
-            const contactIds = [...new Set(taggedContacts?.map(tc => tc.contact_id) || [])];
+            const contactIds = [
+                ...new Set(
+                    (taggedContacts || [])
+                        .map((tc) => tc.contact_id)
+                        .filter((contactId): contactId is string => typeof contactId === 'string' && contactId.trim() !== '')
+                )
+            ];
 
             if (contactIds.length > 0) {
                 query = query.in('id', contactIds);
@@ -159,12 +168,19 @@ export async function GET(
         if (excludeTagIds.length > 0) {
             const { data: excludedContacts, error: excludedError } = await supabase
                 .from('contact_tags')
-                .select('contact_id')
-                .in('tag_id', excludeTagIds);
+                .select('contact_id, contacts!inner(page_id)')
+                .in('tag_id', excludeTagIds)
+                .eq('contacts.page_id', pageId);
 
             if (excludedError) throw excludedError;
 
-            const excludedIds = [...new Set(excludedContacts?.map(tc => tc.contact_id) || [])];
+            const excludedIds = [
+                ...new Set(
+                    (excludedContacts || [])
+                        .map((tc) => tc.contact_id)
+                        .filter((contactId): contactId is string => typeof contactId === 'string' && contactId.trim() !== '')
+                )
+            ];
             const notInFilter = buildNotInFilter(excludedIds);
             if (notInFilter) {
                 query = query.not('id', 'in', notInFilter);
