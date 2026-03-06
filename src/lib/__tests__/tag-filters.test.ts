@@ -6,11 +6,11 @@ describe('buildNotInFilter', () => {
         expect(buildNotInFilter([])).toBeNull();
     });
 
-    it('formats values for PostgREST in filter syntax', () => {
-        expect(buildNotInFilter(['a', 'b'])).toBe('("a","b")');
+    it('quotes values for PostgREST in filter syntax', () => {
+        expect(buildNotInFilter(['a', 'b'])).toBe("('a','b')");
     });
 
-    it('escapes embedded double quotes', () => {
-        expect(buildNotInFilter(['a"b'])).toBe('("a\\"b")');
+    it('escapes embedded single quotes', () => {
+        expect(buildNotInFilter(["a'b"])).toBe("('a''b')");
     });
 });

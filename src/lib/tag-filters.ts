@@ -3,12 +3,7 @@ export function buildNotInFilter(_values: string[]): string | null {
     const sanitized = values
         .map(value => value?.trim())
         .filter((value): value is string => Boolean(value))
-        .map(value => {
-            const escaped = value
-                .replace(/\\/g, '\\\\')
-                .replace(/"/g, '\\"');
-            return `"${escaped}"`;
-        });
+        .map(value => `'${value.replace(/'/g, "''")}'`);
 
     if (sanitized.length === 0) return null;
 

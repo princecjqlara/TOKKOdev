@@ -174,7 +174,7 @@ describe('GET /api/pages/[pageId]/contacts', () => {
             }
         });
 
-        mocks.buildNotInFilter.mockReturnValue('(\"contact_2\")');
+        mocks.buildNotInFilter.mockReturnValue("('contact_2')");
         const supabase = createSupabaseMock({
             includeContactIds: ['contact_1', 'contact_2'],
             excludeContactIds: ['contact_2']
@@ -191,6 +191,6 @@ describe('GET /api/pages/[pageId]/contacts', () => {
         expect(supabase.contactTagsIn).toHaveBeenNthCalledWith(2, 'tag_id', ['tag_x']);
         expect(supabase.contactsIn).toHaveBeenCalledWith('id', ['contact_1', 'contact_2']);
         expect(mocks.buildNotInFilter).toHaveBeenCalledWith(['contact_2']);
-        expect(supabase.contactsNot).toHaveBeenCalledWith('id', 'in', '("contact_2")');
+        expect(supabase.contactsNot).toHaveBeenCalledWith('id', 'in', "('contact_2')");
     });
 });
