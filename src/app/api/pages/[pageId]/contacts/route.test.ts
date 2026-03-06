@@ -3,7 +3,8 @@ import type { NextRequest } from 'next/server';
 
 const mocks = vi.hoisted(() => ({
     getServerSession: vi.fn(),
-    getSupabaseAdmin: vi.fn()
+    getSupabaseAdmin: vi.fn(),
+    buildNotInFilter: vi.fn()
 }));
 
 vi.mock('next-auth', () => ({
@@ -19,7 +20,7 @@ vi.mock('@/lib/supabase', () => ({
 }));
 
 vi.mock('@/lib/tag-filters', () => ({
-    buildNotInFilter: vi.fn(() => null)
+    buildNotInFilter: mocks.buildNotInFilter
 }));
 
 import { GET } from './route';
@@ -30,7 +31,10 @@ function createRequest(url: string): NextRequest {
     return request;
 }
 
-function createSupabaseMock() {
+function createSupabaseMock(options?: {
+    includeContactIds?: string[];
+    excludeContactIds?: string[];
+}) {
     const userPageSingle = vi.fn().mockResolvedValue({ data: { page_id: 'page_1' }, error: null });
     const userPageEqPage = vi.fn().mockReturnValue({ single: userPageSingle });
     const userPageEqUser = vi.fn().mockReturnValue({ eq: userPageEqPage });
@@ -68,6 +72,8 @@ function createSupabaseMock() {
 
     const contactsBuilder = {
         eq: vi.fn(() => contactsBuilder),
+        in: vi.fn(() => contactsBuilder),
+        not: vi.fn(() => contactsBuilder),
         order: vi.fn(() => contactsBuilder),
         range: contactsRange
     };
@@ -85,6 +91,19 @@ function createSupabaseMock() {
         error: null
     });
     const usersSelect = vi.fn().mockReturnValue({ in: usersIn });
+
+    const includeContactIds = options?.includeContactIds ?? ['contact_1'];
+    const excludeContactIds = options?.excludeContactIds ?? ['contact_2'];
+    const contactTagsIn = vi.fn()
+        .mockResolvedValueOnce({
+            data: includeContactIds.map(contactId => ({ contact_id: contactId })),
+            error: null
+        })
+        .mockResolvedValueOnce({
+            data: excludeContactIds.map(contactId => ({ contact_id: contactId })),
+            error: null
+        });
+    const contactTagsSelect = vi.fn().mockReturnValue({ in: contactTagsIn });
 
     const from = vi.fn((table: string) => {
         if (table === 'user_pages') {
@@ -105,17 +124,27 @@ function createSupabaseMock() {
             };
         }
 
+        if (table === 'contact_tags') {
+            return {
+                select: contactTagsSelect
+            };
+        }
+
         throw new Error(`Unexpected table: ${table}`);
     });
 
     return {
-        from
+        from,
+        contactsIn: contactsBuilder.in,
+        contactsNot: contactsBuilder.not,
+        contactTagsIn
     };
 }
 
 describe('GET /api/pages/[pageId]/contacts', () => {
     beforeEach(() => {
         vi.clearAllMocks();
+        mocks.buildNotInFilter.mockReturnValue(null);
     });
 
     it('includes who added each tag in contact results', async () => {
@@ -136,5 +165,32 @@ describe('GET /api/pages/[pageId]/contacts', () => {
         expect(response.status).toBe(200);
         expect(body.items[0].tags[0].tagged_by_user_id).toBe('user_2');
         expect(body.items[0].tags[0].tagged_by_name).toBe('Teammate A');
+    });
+
+    it('applies include and exclude tag filters together', async () => {
+        mocks.getServerSession.mockResolvedValue({
+            user: {
+                id: 'user_1'
+            }
+        });
+
+        mocks.buildNotInFilter.mockReturnValue('(\"contact_2\")');
+        const supabase = createSupabaseMock({
+            includeContactIds: ['contact_1', 'contact_2'],
+            excludeContactIds: ['contact_2']
+        });
+        mocks.getSupabaseAdmin.mockReturnValue(supabase);
+
+        const response = await GET(
+            createRequest('http://localhost:3000/api/pages/page_1/contacts?page=1&pageSize=25&tagIds=tag_a,tag_b&excludeTagIds=tag_x'),
+            { params: Promise.resolve({ pageId: 'page_1' }) }
+        );
+
+        expect(response.status).toBe(200);
+        expect(supabase.contactTagsIn).toHaveBeenNthCalledWith(1, 'tag_id', ['tag_a', 'tag_b']);
+        expect(supabase.contactTagsIn).toHaveBeenNthCalledWith(2, 'tag_id', ['tag_x']);
+        expect(supabase.contactsIn).toHaveBeenCalledWith('id', ['contact_1', 'contact_2']);
+        expect(mocks.buildNotInFilter).toHaveBeenCalledWith(['contact_2']);
+        expect(supabase.contactsNot).toHaveBeenCalledWith('id', 'in', '("contact_2")');
     });
 });
