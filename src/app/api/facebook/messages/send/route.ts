@@ -9,6 +9,14 @@ import {
 } from '@/lib/facebook';
 import { chunkArray } from '@/lib/chunking';
 import { replaceTemplateVariablesForParts, ContactRecord } from '@/lib/placeholders';
+import {
+    buildUtilityBodyParameters,
+    normalizeRequestedButtons,
+    RequestedMessageButton,
+    resolveMessageParts,
+    templateMatchesRequestedButtons,
+    toRequestedButtons
+} from './helpers';
 import fs from 'fs';
 import path from 'path';
 
@@ -46,208 +54,6 @@ const AUTO_TEMPLATE_MAX_ATTEMPTS = 80;
 const AUTO_TEMPLATE_TIME_BUDGET_MS = 240000;
 const AUTO_TEMPLATE_MESSAGES = ['{{1}}'];
 const FACEBOOK_GRAPH_URL = 'https://graph.facebook.com/v21.0';
-
-type RequestedMessageButton = {
-    type?: string;
-    text: string;
-    url?: string;
-    payload?: string;
-};
-
-type NormalizedTemplateButton = {
-    type: 'URL' | 'QUICK_REPLY';
-    text: string;
-    value: string;
-};
-
-type ResolvedMessageParts = {
-    part1: string;
-    part2: string;
-    combined: string;
-    isTwoPart: boolean;
-};
-
-function normalizeTemplateButtonType(type: unknown): 'URL' | 'QUICK_REPLY' | null {
-    if (typeof type !== 'string') {
-        return null;
-    }
-
-    const normalizedType = type.trim().toUpperCase();
-    if (normalizedType === 'URL' || normalizedType === 'WEB_URL') {
-        return 'URL';
-    }
-
-    if (normalizedType === 'POSTBACK' || normalizedType === 'QUICK_REPLY') {
-        return 'QUICK_REPLY';
-    }
-
-    return null;
-}
-
-function normalizeButtonCandidate(button: RequestedMessageButton | Record<string, unknown>): NormalizedTemplateButton | null {
-    const type = normalizeTemplateButtonType(button.type);
-    const text = typeof button.text === 'string' ? button.text.trim() : '';
-
-    if (!type || !text) {
-        return null;
-    }
-
-    if (type === 'URL') {
-        const value = typeof button.url === 'string' ? button.url.trim() : '';
-        if (!value) {
-            return null;
-        }
-
-        return { type, text, value };
-    }
-
-    const payload =
-        typeof button.payload === 'string' && button.payload.trim().length > 0
-            ? button.payload.trim()
-            : text;
-
-    return { type, text, value: payload };
-}
-
-function extractTemplateButtons(template: Record<string, unknown>): {
-    rawCount: number;
-    normalizedButtons: NormalizedTemplateButton[];
-} {
-    const components = template.components;
-    if (!Array.isArray(components)) {
-        return { rawCount: 0, normalizedButtons: [] };
-    }
-
-    const buttonComponents = components.filter((component) => {
-        if (!component || typeof component !== 'object') return false;
-        const componentType = (component as Record<string, unknown>).type;
-        return typeof componentType === 'string' && componentType.trim().toUpperCase() === 'BUTTONS';
-    }) as Record<string, unknown>[];
-
-    if (buttonComponents.length === 0) {
-        return { rawCount: 0, normalizedButtons: [] };
-    }
-
-    const rawButtons = buttonComponents.flatMap((buttonComponent) => {
-        if (!Array.isArray(buttonComponent.buttons)) {
-            return [];
-        }
-
-        return buttonComponent.buttons;
-    });
-
-    const normalizedButtons = rawButtons
-        .map((button) => {
-            if (!button || typeof button !== 'object') {
-                return null;
-            }
-
-            return normalizeButtonCandidate(button as Record<string, unknown>);
-        })
-        .filter((button): button is NormalizedTemplateButton => button !== null);
-
-    return {
-        rawCount: rawButtons.length,
-        normalizedButtons
-    };
-}
-
-function normalizeRequestedButtons(buttons?: RequestedMessageButton[]): NormalizedTemplateButton[] {
-    if (!Array.isArray(buttons) || buttons.length === 0) {
-        return [];
-    }
-
-    return buttons
-        .map((button) => normalizeButtonCandidate(button))
-        .filter((button): button is NormalizedTemplateButton => button !== null);
-}
-
-function toRequestedButtons(buttons: NormalizedTemplateButton[]): RequestedMessageButton[] {
-    return buttons.map((button) => {
-        if (button.type === 'URL') {
-            return {
-                type: 'URL',
-                text: button.text,
-                url: button.value
-            };
-        }
-
-        return {
-            type: 'QUICK_REPLY',
-            text: button.text,
-            payload: button.value
-        };
-    });
-}
-
-export function resolveMessageParts(
-    rawMessageText?: string,
-    rawPart1?: string,
-    rawPart2?: string
-): ResolvedMessageParts {
-    const hasExplicitPart1 = typeof rawPart1 === 'string';
-    const hasExplicitPart2 = typeof rawPart2 === 'string';
-
-    if (hasExplicitPart1 || hasExplicitPart2) {
-        const part1 = hasExplicitPart1 ? rawPart1 || '' : '';
-        const part2 = hasExplicitPart2 ? rawPart2 || '' : '';
-        return {
-            part1,
-            part2,
-            combined: `${part1}|||${part2}`,
-            isTwoPart: part2.trim().length > 0
-        };
-    }
-
-    const source = typeof rawMessageText === 'string' ? rawMessageText : '';
-    const separatorIndex = source.indexOf('|||');
-    if (separatorIndex === -1) {
-        return {
-            part1: source,
-            part2: '',
-            combined: `${source}|||`,
-            isTwoPart: false
-        };
-    }
-
-    const part1 = source.slice(0, separatorIndex);
-    const part2 = source.slice(separatorIndex + 3);
-    return {
-        part1,
-        part2,
-        combined: `${part1}|||${part2}`,
-        isTwoPart: part2.trim().length > 0
-    };
-}
-
-export function templateMatchesRequestedButtons(
-    template: Record<string, unknown>,
-    requestedButtons?: RequestedMessageButton[]
-): boolean {
-    const expectedButtons = normalizeRequestedButtons(requestedButtons);
-    const { rawCount, normalizedButtons } = extractTemplateButtons(template);
-
-    if (rawCount !== expectedButtons.length) {
-        return false;
-    }
-
-    if (normalizedButtons.length !== rawCount) {
-        return false;
-    }
-
-    return expectedButtons.every((expectedButton, index) => {
-        const templateButton = normalizedButtons[index];
-        if (!templateButton) {
-            return false;
-        }
-
-        return (
-            expectedButton.type === templateButton.type &&
-            expectedButton.text === templateButton.text &&
-            expectedButton.value === templateButton.value
-        );
-    });
-}
 
 function normalizeTemplateStatus(status: unknown): string | null {
     if (typeof status !== 'string') return null;
@@ -339,58 +145,6 @@ function buildPageStatusHeadline(pageName?: string | null): string {
     }
 
     return normalized;
-}
-
-export function buildUtilityBodyParameters(
-    placeholderCount: number,
-    message: string,
-    contact: Pick<ContactRecord, 'id' | 'name'>,
-    templateBodyText: string
-): string[] {
-    if (placeholderCount <= 0) {
-        return [];
-    }
-
-    const parts = message.split('|||');
-    const part1 = parts[0] || '';
-    const part2 = parts[1] || '';
-    const isTwoPartMessage = part2.trim().length > 0;
-
-    const firstName = contact.name?.trim().split(/\s+/)[0] || 'there';
-    const contactReference = contact.id.replace(/-/g, '').slice(0, 8) || '00000000';
-    const normalizedBodyText = templateBodyText.toLowerCase().replace(/\s+/g, ' ').trim();
-    const isSupportTeamBody = /support\s*team/.test(normalizedBodyText);
-    const looksLikeOrderTemplate =
-        normalizedBodyText.includes('order') ||
-        normalizedBodyText.includes('delivery') ||
-        normalizedBodyText.includes('tracking');
-
-    if (placeholderCount === 1) {
-        // If it's a 1-placeholder template, check if the placeholder is likely for the name or message
-        // Usually it's better to send the message if there's only one.
-        return [part1];
-    }
-
-    if (placeholderCount === 2) {
-        if (isTwoPartMessage || isSupportTeamBody) {
-            return [part1, part2];
-        }
-
-        // For 2 placeholders, {{1}} is usually name and {{2}} is content in our "auto" templates
-        if (templateBodyText.includes('{{1}}') && templateBodyText.includes('{{2}}')) {
-            return [firstName, part1];
-        }
-        return [part1, part2];
-    }
-
-    const parameters = [firstName];
-    parameters.push(looksLikeOrderTemplate ? contactReference : part1);
-
-    for (let i = 2; i < placeholderCount; i += 1) {
-        parameters.push(part1);
-    }
-
-    return parameters;
 }
 
 function buildAutoTemplateName(baseIndex: number): string {

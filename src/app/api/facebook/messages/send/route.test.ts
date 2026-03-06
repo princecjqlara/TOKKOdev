@@ -1,32 +1,10 @@
-import { describe, expect, it, vi } from 'vitest';
-
-vi.mock('@/lib/get-session', () => ({
-    getSessionFromRequest: vi.fn()
-}));
-
-vi.mock('@/lib/supabase', () => ({
-    getSupabaseAdmin: vi.fn()
-}));
-
-vi.mock('@/lib/facebook', () => ({
-    createUtilityTemplate: vi.fn(),
-    getPageTemplates: vi.fn(),
-    sendMessage: vi.fn()
-}));
-
-vi.mock('@/lib/chunking', () => ({
-    chunkArray: vi.fn()
-}));
-
-vi.mock('@/lib/placeholders', () => ({
-    replaceTemplateVariablesForParts: vi.fn()
-}));
+import { describe, expect, it } from 'vitest';
 
 import {
     buildUtilityBodyParameters,
     resolveMessageParts,
     templateMatchesRequestedButtons
-} from './route';
+} from './helpers';
 
 describe('buildUtilityBodyParameters', () => {
     it('keeps support-team separator between message parts', () => {
