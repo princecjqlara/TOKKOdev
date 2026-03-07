@@ -71,33 +71,20 @@ function normalizeButtonUrlForUi(rawUrl: string): string | null {
 
 function getMessageButtonError(
     button: MessageButton,
-    index: number,
-    options: { usePart2AsButtonValue: boolean; messagePart2: string }
+    _index: number,
+    _options: { usePart2AsButtonValue: boolean; messagePart2: string }
 ): string | null {
-    const isDynamicFirstButton = options.usePart2AsButtonValue && index === 0;
-    const dynamicValue = options.messagePart2.trim();
-    const dynamicUrl = isDynamicFirstButton ? normalizeButtonUrlForUi(dynamicValue) : null;
-
     const text = button.text.trim();
     if (!text) {
-        if (isDynamicFirstButton && dynamicValue) {
-            return null;
-        }
         return 'Button text is required.';
     }
 
     if (button.type === 'URL') {
         if (!button.url.trim()) {
-            if (dynamicUrl) {
-                return null;
-            }
             return 'Link URL is required.';
         }
 
         if (!normalizeButtonUrlForUi(button.url)) {
-            if (dynamicUrl) {
-                return null;
-            }
             return 'Link must be a valid URL (e.g. https://example.com).';
         }
     }
@@ -107,19 +94,12 @@ function getMessageButtonError(
 
 function normalizeButtonsForSend(
     buttons: MessageButton[],
-    options: { usePart2AsButtonValue: boolean; messagePart2: string }
+    _options: { usePart2AsButtonValue: boolean; messagePart2: string }
 ): { buttons: MessageButton[]; errors: string[] } {
     const errors: string[] = [];
 
     const normalizedButtons = buttons.map((button, index) => {
-        const isDynamicFirstButton = options.usePart2AsButtonValue && index === 0;
-        const dynamicValue = options.messagePart2.trim();
-        const dynamicUrl = isDynamicFirstButton ? normalizeButtonUrlForUi(dynamicValue) : null;
-
-        let text = button.text.trim();
-        if (!text && isDynamicFirstButton && dynamicValue) {
-            text = dynamicUrl ? 'Open link' : dynamicValue;
-        }
+        const text = button.text.trim();
 
         if (!text) {
             errors.push(`Button ${index + 1}: text is required.`);
@@ -127,8 +107,7 @@ function normalizeButtonsForSend(
         }
 
         if (button.type === 'URL') {
-            const rawUrl = button.url.trim() || dynamicUrl || '';
-            const normalizedUrl = normalizeButtonUrlForUi(rawUrl);
+            const normalizedUrl = normalizeButtonUrlForUi(button.url.trim());
             if (!normalizedUrl) {
                 errors.push(`Button ${index + 1}: link URL is invalid.`);
                 return null;
@@ -210,8 +189,8 @@ export default function ContactsPage() {
             )
             .find((error): error is string => Boolean(error)) || null;
     const hasMessageButtonErrors = firstMessageButtonError !== null;
-    const missingPart2ForButtonValue =
-        usePart2AsButtonValue && messageButtons.length > 0 && !messagePart2.trim();
+    const dynamicModeMissingButton =
+        usePart2AsButtonValue && messageButtons.length === 0;
     const realtimeRefreshTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
     const realtimeFallbackIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
     const realtimeSubscribeTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -657,6 +636,11 @@ export default function ContactsPage() {
             return;
         }
 
+        if (usePart2AsButtonValue && normalizedMessageButtons.length === 0) {
+            alert('Dynamic button mode requires at least one button. Add a Link or Quick Reply button first.');
+            return;
+        }
+
         setActionLoading(true);
         try {
             setFailedContactIds([]);
@@ -757,7 +741,7 @@ export default function ContactsPage() {
                             messagePart2,
                             buttons: normalizedMessageButtons,
                             buttonMode: usePart2AsButtonValue ? 'RESPONSE_DYNAMIC' : 'TEMPLATE_STATIC',
-                            buttonPlaceholderMode: usePart2AsButtonValue
+                            buttonPlaceholderMode: false
                         })
                     });
 
@@ -854,7 +838,7 @@ export default function ContactsPage() {
                                             messagePart2,
                                             buttons: normalizedMessageButtons,
                                             buttonMode: usePart2AsButtonValue ? 'RESPONSE_DYNAMIC' : 'TEMPLATE_STATIC',
-                                            buttonPlaceholderMode: usePart2AsButtonValue
+                                            buttonPlaceholderMode: false
                                         })
                                     });
 
@@ -1133,6 +1117,11 @@ export default function ContactsPage() {
             return;
         }
 
+        if (usePart2AsButtonValue && normalizedMessageButtons.length === 0) {
+            alert('Dynamic button mode requires at least one button. Add a Link or Quick Reply button first.');
+            return;
+        }
+
         setActionLoading(true);
         try {
             const response = await fetch('/api/facebook/messages/send', {
@@ -1146,7 +1135,7 @@ export default function ContactsPage() {
                     messagePart2,
                     buttons: normalizedMessageButtons,
                     buttonMode: usePart2AsButtonValue ? 'RESPONSE_DYNAMIC' : 'TEMPLATE_STATIC',
-                    buttonPlaceholderMode: usePart2AsButtonValue
+                    buttonPlaceholderMode: false
                 })
             });
 
@@ -1955,19 +1944,26 @@ export default function ContactsPage() {
                             <input
                                 type="checkbox"
                                 checked={usePart2AsButtonValue}
-                                onChange={(e) => setUsePart2AsButtonValue(e.target.checked)}
+                                onChange={(e) => {
+                                    const checked = e.target.checked;
+                                    setUsePart2AsButtonValue(checked);
+
+                                    if (checked && messageButtons.length === 0) {
+                                        setMessageButtons([{ type: 'URL', text: '', url: '', payload: '' }]);
+                                    }
+                                }}
                                 className="h-3.5 w-3.5 border border-black"
                             />
-                            Use {'{{2}}'} as first button value (optional, not default)
+                            Enable dynamic first-button mode (optional, not default)
                         </label>
                         {usePart2AsButtonValue && (
                             <p className="text-[11px] text-amber-700 font-mono mb-2">
-                                When enabled, Message (Part 2) updates the first button at send-time: valid URL replaces link; otherwise it replaces button text.
+                                In this mode, the first button is sent in dynamic RESPONSE format. Fill button text and button content below.
                             </p>
                         )}
-                        {missingPart2ForButtonValue && (
+                        {dynamicModeMissingButton && (
                             <p className="text-[11px] text-red-700 font-mono mb-2">
-                                Add Message (Part 2) to use the dynamic first-button option.
+                                Add at least one button to use dynamic first-button mode.
                             </p>
                         )}
                         {messageButtons.length === 0 && (
@@ -2106,7 +2102,7 @@ export default function ContactsPage() {
                         {failedContactIds.length > 0 && (
                             <button
                                 onClick={handleResendToFailed}
-                                disabled={!messagePart1.trim() || actionLoading || hasMessageButtonErrors || missingPart2ForButtonValue}
+                                disabled={!messagePart1.trim() || actionLoading || hasMessageButtonErrors || dynamicModeMissingButton}
                                 className="btn-wireframe bg-yellow-600 text-white hover:bg-yellow-700"
                             >
                                 {actionLoading ? 'Resending...' : `Resend to ${failedContactIds.length} Failed`}
@@ -2114,7 +2110,7 @@ export default function ContactsPage() {
                         )}
                         <button
                             onClick={handleBulkMessage}
-                            disabled={!messagePart1.trim() || actionLoading || hasMessageButtonErrors || missingPart2ForButtonValue}
+                            disabled={!messagePart1.trim() || actionLoading || hasMessageButtonErrors || dynamicModeMissingButton}
                             className="btn-wireframe bg-black text-white hover:bg-gray-800"
                         >
                             {actionLoading ? 'Sending...' : failedContactIds.length > 0 ? 'Send to New Selection' : 'Send Now'}
