@@ -1,10 +1,19 @@
 import { describe, expect, it } from 'vitest';
 
 import {
+    buildSupportTeamTemplateBody,
     buildUtilityBodyParameters,
     resolveMessageParts,
     templateMatchesRequestedButtons
 } from './helpers';
+
+describe('buildSupportTeamTemplateBody', () => {
+    it('builds the support-team template in the required page-name format', () => {
+        expect(buildSupportTeamTemplateBody('Ares Media')).toBe(
+            '{{1}} - from Ares Media support team - {{2}}'
+        );
+    });
+});
 
 describe('buildUtilityBodyParameters', () => {
     it('keeps support-team separator between message parts', () => {

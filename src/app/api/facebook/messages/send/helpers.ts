@@ -20,6 +20,11 @@ export type ResolvedMessageParts = {
     isTwoPart: boolean;
 };
 
+export function buildSupportTeamTemplateBody(pageName: string): string {
+    const normalizedPageName = pageName.trim().replace(/\s+/g, ' ') || 'Page';
+    return `{{1}} - from ${normalizedPageName} support team - {{2}}`;
+}
+
 function normalizeTemplateButtonType(type: unknown): 'URL' | 'QUICK_REPLY' | null {
     if (typeof type !== 'string') {
         return null;

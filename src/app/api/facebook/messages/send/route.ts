@@ -10,6 +10,7 @@ import {
 import { chunkArray } from '@/lib/chunking';
 import { replaceTemplateVariablesForParts, ContactRecord } from '@/lib/placeholders';
 import {
+    buildSupportTeamTemplateBody,
     buildUtilityBodyParameters,
     normalizeRequestedButtons,
     RequestedMessageButton,
@@ -158,7 +159,7 @@ function buildAutoTemplateCandidate(
     pageName: string,
     buttons?: RequestedMessageButton[]
 ): UtilityTemplate {
-    const bodyText = `{{1}} — Message from ${pageName} support team — {{2}}`;
+    const bodyText = buildSupportTeamTemplateBody(pageName);
 
     const components: UtilityTemplate['components'] = [
         {
