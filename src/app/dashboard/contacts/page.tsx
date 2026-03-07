@@ -69,18 +69,35 @@ function normalizeButtonUrlForUi(rawUrl: string): string | null {
     return parsedUrl.toString();
 }
 
-function getMessageButtonError(button: MessageButton): string | null {
+function getMessageButtonError(
+    button: MessageButton,
+    index: number,
+    options: { usePart2AsButtonValue: boolean; messagePart2: string }
+): string | null {
+    const isDynamicFirstButton = options.usePart2AsButtonValue && index === 0;
+    const dynamicValue = options.messagePart2.trim();
+    const dynamicUrl = isDynamicFirstButton ? normalizeButtonUrlForUi(dynamicValue) : null;
+
     const text = button.text.trim();
     if (!text) {
+        if (isDynamicFirstButton && dynamicValue) {
+            return null;
+        }
         return 'Button text is required.';
     }
 
     if (button.type === 'URL') {
         if (!button.url.trim()) {
+            if (dynamicUrl) {
+                return null;
+            }
             return 'Link URL is required.';
         }
 
         if (!normalizeButtonUrlForUi(button.url)) {
+            if (dynamicUrl) {
+                return null;
+            }
             return 'Link must be a valid URL (e.g. https://example.com).';
         }
     }
@@ -88,18 +105,30 @@ function getMessageButtonError(button: MessageButton): string | null {
     return null;
 }
 
-function normalizeButtonsForSend(buttons: MessageButton[]): { buttons: MessageButton[]; errors: string[] } {
+function normalizeButtonsForSend(
+    buttons: MessageButton[],
+    options: { usePart2AsButtonValue: boolean; messagePart2: string }
+): { buttons: MessageButton[]; errors: string[] } {
     const errors: string[] = [];
 
     const normalizedButtons = buttons.map((button, index) => {
-        const text = button.text.trim();
+        const isDynamicFirstButton = options.usePart2AsButtonValue && index === 0;
+        const dynamicValue = options.messagePart2.trim();
+        const dynamicUrl = isDynamicFirstButton ? normalizeButtonUrlForUi(dynamicValue) : null;
+
+        let text = button.text.trim();
+        if (!text && isDynamicFirstButton && dynamicValue) {
+            text = dynamicUrl ? 'Open link' : dynamicValue;
+        }
+
         if (!text) {
             errors.push(`Button ${index + 1}: text is required.`);
             return null;
         }
 
         if (button.type === 'URL') {
-            const normalizedUrl = normalizeButtonUrlForUi(button.url);
+            const rawUrl = button.url.trim() || dynamicUrl || '';
+            const normalizedUrl = normalizeButtonUrlForUi(rawUrl);
             if (!normalizedUrl) {
                 errors.push(`Button ${index + 1}: link URL is invalid.`);
                 return null;
@@ -173,7 +202,12 @@ export default function ContactsPage() {
     const [lastSendResults, setLastSendResults] = useState<{ sent: number; failed: number } | null>(null);
     const firstMessageButtonError =
         messageButtons
-            .map((button) => getMessageButtonError(button))
+            .map((button, index) =>
+                getMessageButtonError(button, index, {
+                    usePart2AsButtonValue,
+                    messagePart2
+                })
+            )
             .find((error): error is string => Boolean(error)) || null;
     const hasMessageButtonErrors = firstMessageButtonError !== null;
     const missingPart2ForButtonValue =
@@ -614,7 +648,10 @@ export default function ContactsPage() {
         const {
             buttons: normalizedMessageButtons,
             errors: messageButtonErrors
-        } = normalizeButtonsForSend(messageButtons);
+        } = normalizeButtonsForSend(messageButtons, {
+            usePart2AsButtonValue,
+            messagePart2
+        });
         if (messageButtonErrors.length > 0) {
             alert(`Please fix button errors before sending:\n- ${messageButtonErrors.join('\n- ')}`);
             return;
@@ -1087,7 +1124,10 @@ export default function ContactsPage() {
         const {
             buttons: normalizedMessageButtons,
             errors: messageButtonErrors
-        } = normalizeButtonsForSend(messageButtons);
+        } = normalizeButtonsForSend(messageButtons, {
+            usePart2AsButtonValue,
+            messagePart2
+        });
         if (messageButtonErrors.length > 0) {
             alert(`Please fix button errors before sending:\n- ${messageButtonErrors.join('\n- ')}`);
             return;
@@ -2012,9 +2052,18 @@ export default function ContactsPage() {
                                                 className="input-wireframe w-full text-xs h-8"
                                             />
                                         )}
-                                        {getMessageButtonError(btn) && (
-                                            <p className="text-[11px] font-mono text-red-600">{getMessageButtonError(btn)}</p>
-                                        )}
+                                        {(() => {
+                                            const buttonError = getMessageButtonError(btn, idx, {
+                                                usePart2AsButtonValue,
+                                                messagePart2
+                                            });
+
+                                            if (!buttonError) {
+                                                return null;
+                                            }
+
+                                            return <p className="text-[11px] font-mono text-red-600">{buttonError}</p>;
+                                        })()}
                                     </div>
                                     <button
                                         type="button"
