@@ -280,9 +280,7 @@ export default function ContactsPage() {
             const pageSize = 1000;
             let hasMore = true;
 
-            // #region agent log
-            fetch('http://127.0.0.1:7242/ingest/6358f30b-ef0a-4ea4-8acc-50c08c025924', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ location: 'contacts/page.tsx:117', message: 'fetchAllContactIds started', data: { selectedPageId, search, selectedTagFilters: [...selectedTagFilters], excludedTagFilters: [...excludedTagFilters], excludedCount: excludedIds.size }, timestamp: Date.now(), sessionId: 'debug-session', runId: 'run1', hypothesisId: 'C' }) }).catch(() => { });
-            // #endregion
+
 
             while (hasMore) {
                 const params = new URLSearchParams({
@@ -299,9 +297,7 @@ export default function ContactsPage() {
                 const res = await fetch(`/api/pages/${selectedPageId}/contacts?${params}`);
                 const data: PaginatedResponse<Contact> = await res.json();
 
-                // #region agent log
-                fetch('http://127.0.0.1:7242/ingest/6358f30b-ef0a-4ea4-8acc-50c08c025924', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ location: 'contacts/page.tsx:134', message: 'Page fetched in fetchAllContactIds', data: { currentPage, pageSize, itemsCount: data.items?.length || 0, total: data.total || 0, allIdsCountSoFar: allIds.length }, timestamp: Date.now(), sessionId: 'debug-session', runId: 'run1', hypothesisId: 'C' }) }).catch(() => { });
-                // #endregion
+
 
                 if (data.items && data.items.length > 0) {
                     const pageIds = data.items.map(c => c.id);
@@ -322,16 +318,12 @@ export default function ContactsPage() {
                 allIds = allIds.filter(id => !excludedIds.has(id));
             }
 
-            // #region agent log
-            fetch('http://127.0.0.1:7242/ingest/6358f30b-ef0a-4ea4-8acc-50c08c025924', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ location: 'contacts/page.tsx:151', message: 'fetchAllContactIds completed', data: { totalPages: currentPage, beforeExcludeCount, afterExcludeCount: allIds.length, excludedCount: excludedIds.size, excludedTagFilters: [...excludedTagFilters], finalCount: allIds.length }, timestamp: Date.now(), sessionId: 'debug-session', runId: 'run1', hypothesisId: 'C' }) }).catch(() => { });
-            // #endregion
+
 
             return allIds;
         } catch (error) {
             console.error('Error fetching all contact IDs:', error);
-            // #region agent log
-            fetch('http://127.0.0.1:7242/ingest/6358f30b-ef0a-4ea4-8acc-50c08c025924', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ location: 'contacts/page.tsx:157', message: 'fetchAllContactIds error', data: { error: (error as Error).message }, timestamp: Date.now(), sessionId: 'debug-session', runId: 'run1', hypothesisId: 'C' }) }).catch(() => { });
-            // #endregion
+
             return [];
         }
     };
@@ -550,9 +542,7 @@ export default function ContactsPage() {
             const originalContactCount = allContactIds.length;
             console.log(`📤 Will attempt to send ${originalContactCount} contacts`);
 
-            // #region agent log
-            fetch('http://127.0.0.1:7242/ingest/6358f30b-ef0a-4ea4-8acc-50c08c025924', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ location: 'contacts/page.tsx:367', message: 'Bulk message send started', data: { originalContactCount, selectedPageId, selectAllMode, total: selectAllMode ? total : undefined, excludedCount: selectAllMode ? excludedIds.size : undefined, selectedCount: selectAllMode ? undefined : selectedIds.size }, timestamp: Date.now(), sessionId: 'debug-session', runId: 'run1', hypothesisId: 'A' }) }).catch(() => { });
-            // #endregion
+
 
             // Warn if selecting a very large number
             if (allContactIds.length > 1000) {
@@ -588,14 +578,10 @@ export default function ContactsPage() {
                 // Track that we're attempting to send these contacts
                 chunk.forEach(id => contactsAttempted.add(id));
 
-                // #region agent log
-                fetch('http://127.0.0.1:7242/ingest/6358f30b-ef0a-4ea4-8acc-50c08c025924', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ location: 'contacts/page.tsx:392', message: 'Chunk processing started', data: { chunkNumber, totalChunks, chunkSize: chunk.length, chunkStartIndex: i, chunkEndIndex: i + chunk.length - 1, contactsAttemptedSoFar: contactsAttempted.size }, timestamp: Date.now(), sessionId: 'debug-session', runId: 'run1', hypothesisId: 'B' }) }).catch(() => { });
-                // #endregion
+
 
                 try {
-                    // #region agent log
-                    fetch('http://127.0.0.1:7242/ingest/6358f30b-ef0a-4ea4-8acc-50c08c025924', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ location: 'contacts/page.tsx:403', message: 'API request about to be sent', data: { chunkNumber, chunkSize: chunk.length, pageId: selectedPageId, messageLength: messageText.trim().length }, timestamp: Date.now(), sessionId: 'debug-session', runId: 'run1', hypothesisId: 'C' }) }).catch(() => { });
-                    // #endregion
+
 
                     const response = await fetch('/api/facebook/messages/send', {
                         method: 'POST',
@@ -625,9 +611,7 @@ export default function ContactsPage() {
 
                     const data = await response.json();
 
-                    // #region agent log
-                    fetch('http://127.0.0.1:7242/ingest/6358f30b-ef0a-4ea4-8acc-50c08c025924', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ location: 'contacts/page.tsx:438', message: 'Chunk response received', data: { chunkNumber, chunkSize: chunk.length, success: data.success, partial: data.partial, remainingContactIdsCount: data.remainingContactIds?.length || 0, sent: data.results?.sent || 0, failed: data.results?.failed || 0, filtered: data.results?.filtered || 0, notFound: data.results?.notFound || 0, requested: data.results?.requested || chunk.length, valid: data.results?.valid || chunk.length }, timestamp: Date.now(), sessionId: 'debug-session', runId: 'run1', hypothesisId: 'B' }) }).catch(() => { });
-                    // #endregion
+
                     if (data.success) {
                         // Log response details immediately
                         console.log(`📥 Chunk ${chunkNumber} response:`, {
@@ -651,9 +635,7 @@ export default function ContactsPage() {
                         totalNotFound += notFoundCount; // Track not found separately
                         const totalChunkFiltered = filteredCount + notFoundCount;
 
-                        // #region agent log
-                        fetch('http://127.0.0.1:7242/ingest/6358f30b-ef0a-4ea4-8acc-50c08c025924', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ location: 'contacts/page.tsx:455', message: 'Chunk totals updated', data: { chunkNumber, totalSent, totalFailed, totalFiltered, totalNotFound, chunkFiltered: filteredCount, chunkNotFound: notFoundCount }, timestamp: Date.now(), sessionId: 'debug-session', runId: 'run1', hypothesisId: 'D' }) }).catch(() => { });
-                        // #endregion
+
 
                         if (totalChunkFiltered > 0) {
                             console.error(`❌❌❌ Chunk ${chunkNumber}: ${totalChunkFiltered} contacts CANNOT be sent!`);
@@ -676,9 +658,7 @@ export default function ContactsPage() {
 
                         // If partial (timeout), automatically retry remaining contacts in smaller chunks
                         if (data.partial && data.remainingContactIds?.length > 0) {
-                            // #region agent log
-                            fetch('http://127.0.0.1:7242/ingest/6358f30b-ef0a-4ea4-8acc-50c08c025924', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ location: 'contacts/page.tsx:388', message: 'Auto-retry triggered', data: { chunkNumber, remainingCount: data.remainingContactIds.length, processed: data.results?.processed || 0 }, timestamp: Date.now(), sessionId: 'debug-session', runId: 'run1', hypothesisId: 'B' }) }).catch(() => { });
-                            // #endregion
+
                             console.warn(`⚠️⚠️⚠️ TIMEOUT DETECTED: Chunk ${chunkNumber} timed out!`);
                             console.warn(`⚠️ Processed: ${data.results.processed}/${chunk.length} contacts`);
                             console.warn(`⚠️ Remaining: ${data.remainingContactIds.length} contacts need to be retried`);
@@ -694,9 +674,7 @@ export default function ContactsPage() {
                                 const retryChunk = remainingToRetry.slice(0, RETRY_CHUNK_SIZE);
                                 retryChunkIndex++;
 
-                                // #region agent log
-                                fetch('http://127.0.0.1:7242/ingest/6358f30b-ef0a-4ea4-8acc-50c08c025924', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ location: 'contacts/page.tsx:396', message: 'Retry loop iteration', data: { retryChunkIndex, retryChunkSize: retryChunk.length, remainingTotal: remainingToRetry.length }, timestamp: Date.now(), sessionId: 'debug-session', runId: 'run1', hypothesisId: 'C' }) }).catch(() => { });
-                                // #endregion
+
                                 console.log(`🔄 Auto-retry chunk ${retryChunkIndex} for ${retryChunk.length} contacts (${remainingToRetry.length} total remaining)`);
 
                                 try {
