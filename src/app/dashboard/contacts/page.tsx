@@ -26,6 +26,7 @@ import {
     SendError,
     summarizeSendErrors
 } from '@/lib/send-errors';
+import { createRequestGate } from '@/lib/request-gate';
 import { getSupabaseClient } from '@/lib/supabase';
 
 export default function ContactsPage() {
@@ -75,6 +76,7 @@ export default function ContactsPage() {
     const realtimeFallbackIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
     const realtimeSubscribeTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
     const webhookRefreshAttemptedRef = useRef<Set<string>>(new Set());
+    const contactsRequestGateRef = useRef(createRequestGate());
 
     useEffect(() => {
         fetchPages();
@@ -139,6 +141,8 @@ export default function ContactsPage() {
     const fetchContacts = useCallback(async ({ silent = false }: { silent?: boolean } = {}) => {
         if (!selectedPageId) return;
 
+        const requestToken = contactsRequestGateRef.current.next();
+
         if (!silent) {
             setLoading(true);
         }
@@ -156,9 +160,16 @@ export default function ContactsPage() {
             const res = await fetch(`/api/pages/${selectedPageId}/contacts?${params}`);
             const data: PaginatedResponse<Contact> = await res.json();
 
+            if (!contactsRequestGateRef.current.isLatest(requestToken)) {
+                return;
+            }
+
             setContacts(data.items || []);
             setTotal(data.total || 0);
         } catch (error) {
+            if (!contactsRequestGateRef.current.isLatest(requestToken)) {
+                return;
+            }
             console.error('Error fetching contacts:', error);
         } finally {
             if (!silent) {
