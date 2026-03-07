@@ -29,6 +29,104 @@ import {
 import { createRequestGate } from '@/lib/request-gate';
 import { getSupabaseClient } from '@/lib/supabase';
 
+type MessageButton = {
+    type: 'URL' | 'QUICK_REPLY';
+    text: string;
+    url: string;
+    payload: string;
+};
+
+const URL_SCHEME_REGEX = /^[a-z][a-z\d+\-.]*:/i;
+
+function normalizeButtonUrlForUi(rawUrl: string): string | null {
+    const trimmed = rawUrl.trim();
+    if (!trimmed) {
+        return null;
+    }
+
+    const withScheme = URL_SCHEME_REGEX.test(trimmed) ? trimmed : `https://${trimmed}`;
+
+    let parsedUrl: URL;
+    try {
+        parsedUrl = new URL(withScheme);
+    } catch {
+        return null;
+    }
+
+    if (parsedUrl.protocol !== 'http:' && parsedUrl.protocol !== 'https:') {
+        return null;
+    }
+
+    const hostname = parsedUrl.hostname.trim().toLowerCase();
+    if (!hostname) {
+        return null;
+    }
+
+    if (hostname !== 'localhost' && !hostname.includes('.')) {
+        return null;
+    }
+
+    return parsedUrl.toString();
+}
+
+function getMessageButtonError(button: MessageButton): string | null {
+    const text = button.text.trim();
+    if (!text) {
+        return 'Button text is required.';
+    }
+
+    if (button.type === 'URL') {
+        if (!button.url.trim()) {
+            return 'Link URL is required.';
+        }
+
+        if (!normalizeButtonUrlForUi(button.url)) {
+            return 'Link must be a valid URL (e.g. https://example.com).';
+        }
+    }
+
+    return null;
+}
+
+function normalizeButtonsForSend(buttons: MessageButton[]): { buttons: MessageButton[]; errors: string[] } {
+    const errors: string[] = [];
+
+    const normalizedButtons = buttons.map((button, index) => {
+        const text = button.text.trim();
+        if (!text) {
+            errors.push(`Button ${index + 1}: text is required.`);
+            return null;
+        }
+
+        if (button.type === 'URL') {
+            const normalizedUrl = normalizeButtonUrlForUi(button.url);
+            if (!normalizedUrl) {
+                errors.push(`Button ${index + 1}: link URL is invalid.`);
+                return null;
+            }
+
+            return {
+                type: 'URL' as const,
+                text,
+                url: normalizedUrl,
+                payload: ''
+            };
+        }
+
+        return {
+            type: 'QUICK_REPLY' as const,
+            text,
+            payload: button.payload.trim(),
+            url: ''
+        };
+    });
+
+    return {
+        buttons: normalizedButtons.filter((button): button is MessageButton => button !== null),
+        errors
+    };
+}
+
 export default function ContactsPage() {
     const { data: session } = useSession();
     const [pages, setPages] = useState<Page[]>([]);
@@ -65,13 +163,21 @@ export default function ContactsPage() {
     const [selectedTagIds, setSelectedTagIds] = useState<Set<string>>(new Set());
     const [messagePart1, setMessagePart1] = useState('');
     const [messagePart2, setMessagePart2] = useState('');
-    const [messageButtons, setMessageButtons] = useState<Array<{ type: 'URL' | 'QUICK_REPLY'; text: string; url: string; payload: string }>>([]);
+    const [messageButtons, setMessageButtons] = useState<MessageButton[]>([]);
+    const [usePart2AsButtonValue, setUsePart2AsButtonValue] = useState(false);
     const [actionLoading, setActionLoading] = useState(false);
 
     const messageText = `${messagePart1}|||${messagePart2}`;
     const [failedContactIds, setFailedContactIds] = useState<string[]>([]);
     const [failedContactErrors, setFailedContactErrors] = useState<SendError[]>([]);
     const [lastSendResults, setLastSendResults] = useState<{ sent: number; failed: number } | null>(null);
+    const firstMessageButtonError =
+        messageButtons
+            .map((button) => getMessageButtonError(button))
+            .find((error): error is string => Boolean(error)) || null;
+    const hasMessageButtonErrors = firstMessageButtonError !== null;
+    const missingPart2ForButtonValue =
+        usePart2AsButtonValue && messageButtons.length > 0 && !messagePart2.trim();
     const realtimeRefreshTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
     const realtimeFallbackIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
     const realtimeSubscribeTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -505,6 +611,15 @@ export default function ContactsPage() {
     const handleBulkMessage = async () => {
         if (getSelectionCount() === 0 || !messageText.trim() || !selectedPageId) return;
 
+        const {
+            buttons: normalizedMessageButtons,
+            errors: messageButtonErrors
+        } = normalizeButtonsForSend(messageButtons);
+        if (messageButtonErrors.length > 0) {
+            alert(`Please fix button errors before sending:\n- ${messageButtonErrors.join('\n- ')}`);
+            return;
+        }
+
         setActionLoading(true);
         try {
             setFailedContactIds([]);
@@ -603,7 +718,9 @@ export default function ContactsPage() {
                             messageText: messageText.trim(),
                             messagePart1,
                             messagePart2,
-                            buttons: messageButtons
+                            buttons: normalizedMessageButtons,
+                            buttonMode: usePart2AsButtonValue ? 'RESPONSE_DYNAMIC' : 'TEMPLATE_STATIC',
+                            buttonPlaceholderMode: usePart2AsButtonValue
                         })
                     });
 
@@ -698,7 +815,9 @@ export default function ContactsPage() {
                                             messageText: messageText.trim(),
                                             messagePart1,
                                             messagePart2,
-                                            buttons: messageButtons
+                                            buttons: normalizedMessageButtons,
+                                            buttonMode: usePart2AsButtonValue ? 'RESPONSE_DYNAMIC' : 'TEMPLATE_STATIC',
+                                            buttonPlaceholderMode: usePart2AsButtonValue
                                         })
                                     });
 
@@ -965,6 +1084,15 @@ export default function ContactsPage() {
     const handleResendToFailed = async () => {
         if (failedContactIds.length === 0 || !messageText.trim() || !selectedPageId) return;
 
+        const {
+            buttons: normalizedMessageButtons,
+            errors: messageButtonErrors
+        } = normalizeButtonsForSend(messageButtons);
+        if (messageButtonErrors.length > 0) {
+            alert(`Please fix button errors before sending:\n- ${messageButtonErrors.join('\n- ')}`);
+            return;
+        }
+
         setActionLoading(true);
         try {
             const response = await fetch('/api/facebook/messages/send', {
@@ -976,7 +1104,9 @@ export default function ContactsPage() {
                     messageText: messageText.trim(),
                     messagePart1,
                     messagePart2,
-                    buttons: messageButtons
+                    buttons: normalizedMessageButtons,
+                    buttonMode: usePart2AsButtonValue ? 'RESPONSE_DYNAMIC' : 'TEMPLATE_STATIC',
+                    buttonPlaceholderMode: usePart2AsButtonValue
                 })
             });
 
@@ -1669,6 +1799,7 @@ export default function ContactsPage() {
                         setFailedContactErrors([]);
                         setLastSendResults(null);
                         setMessageButtons([]);
+                        setUsePart2AsButtonValue(false);
                     }
                 }}
                 title="Send Message"
@@ -1780,8 +1911,32 @@ export default function ContactsPage() {
                                 </div>
                             )}
                         </div>
+                        <label className="mt-2 mb-2 flex items-center gap-2 text-[11px] font-mono text-gray-600">
+                            <input
+                                type="checkbox"
+                                checked={usePart2AsButtonValue}
+                                onChange={(e) => setUsePart2AsButtonValue(e.target.checked)}
+                                className="h-3.5 w-3.5 border border-black"
+                            />
+                            Use {'{{2}}'} as first button value (optional, not default)
+                        </label>
+                        {usePart2AsButtonValue && (
+                            <p className="text-[11px] text-amber-700 font-mono mb-2">
+                                When enabled, Message (Part 2) updates the first button at send-time: valid URL replaces link; otherwise it replaces button text.
+                            </p>
+                        )}
+                        {missingPart2ForButtonValue && (
+                            <p className="text-[11px] text-red-700 font-mono mb-2">
+                                Add Message (Part 2) to use the dynamic first-button option.
+                            </p>
+                        )}
                         {messageButtons.length === 0 && (
                             <p className="text-xs text-gray-400 font-mono">No buttons added. Add up to 3 link or quick reply buttons.</p>
+                        )}
+                        {messageButtons.length > 0 && (
+                            <p className="text-[11px] text-gray-500 font-mono mb-2">
+                                Link buttons accept `example.com` or `https://example.com`. We auto-format valid links.
+                            </p>
                         )}
                         <div className="space-y-2">
                             {messageButtons.map((btn, idx) => (
@@ -1831,6 +1986,16 @@ export default function ContactsPage() {
                                                     updated[idx] = { ...updated[idx], url: e.target.value };
                                                     setMessageButtons(updated);
                                                 }}
+                                                onBlur={() => {
+                                                    const normalizedUrl = normalizeButtonUrlForUi(btn.url);
+                                                    if (!normalizedUrl || normalizedUrl === btn.url) {
+                                                        return;
+                                                    }
+
+                                                    const updated = [...messageButtons];
+                                                    updated[idx] = { ...updated[idx], url: normalizedUrl };
+                                                    setMessageButtons(updated);
+                                                }}
                                                 placeholder="https://example.com"
                                                 className="input-wireframe w-full text-xs h-8"
                                             />
@@ -1847,6 +2012,9 @@ export default function ContactsPage() {
                                                 className="input-wireframe w-full text-xs h-8"
                                             />
                                         )}
+                                        {getMessageButtonError(btn) && (
+                                            <p className="text-[11px] font-mono text-red-600">{getMessageButtonError(btn)}</p>
+                                        )}
                                     </div>
                                     <button
                                         type="button"
@@ -1858,6 +2026,9 @@ export default function ContactsPage() {
                                 </div>
                             ))}
                         </div>
+                        {firstMessageButtonError && (
+                            <p className="mt-2 text-xs font-mono text-red-700">Fix button errors before sending.</p>
+                        )}
                     </div>
                     <div className="bg-gray-50 border border-gray-200 p-3 rounded text-xs">
                         <p className="font-bold text-gray-700 mb-1">💡 Personalize your message:</p>
@@ -1876,6 +2047,7 @@ export default function ContactsPage() {
                                 setFailedContactErrors([]);
                                 setLastSendResults(null);
                                 setMessageButtons([]);
+                                setUsePart2AsButtonValue(false);
                             }}
                             className="btn-wireframe bg-white"
                             disabled={actionLoading}
@@ -1885,7 +2057,7 @@ export default function ContactsPage() {
                         {failedContactIds.length > 0 && (
                             <button
                                 onClick={handleResendToFailed}
-                                disabled={!messagePart1.trim() || actionLoading}
+                                disabled={!messagePart1.trim() || actionLoading || hasMessageButtonErrors || missingPart2ForButtonValue}
                                 className="btn-wireframe bg-yellow-600 text-white hover:bg-yellow-700"
                             >
                                 {actionLoading ? 'Resending...' : `Resend to ${failedContactIds.length} Failed`}
@@ -1893,7 +2065,7 @@ export default function ContactsPage() {
                         )}
                         <button
                             onClick={handleBulkMessage}
-                            disabled={!messagePart1.trim() || actionLoading}
+                            disabled={!messagePart1.trim() || actionLoading || hasMessageButtonErrors || missingPart2ForButtonValue}
                             className="btn-wireframe bg-black text-white hover:bg-gray-800"
                         >
                             {actionLoading ? 'Sending...' : failedContactIds.length > 0 ? 'Send to New Selection' : 'Send Now'}

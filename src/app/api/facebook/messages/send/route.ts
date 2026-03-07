@@ -10,10 +10,13 @@ import {
 import { chunkArray } from '@/lib/chunking';
 import { replaceTemplateVariablesForParts, ContactRecord } from '@/lib/placeholders';
 import {
-    buildSupportTeamTemplateBodyCandidates,
+    applyDynamicButtonValue,
+    ButtonMode,
+    buildUtilityTemplateBodyCandidates,
     buildUtilityBodyParameters,
     normalizeRequestedButtons,
     RequestedMessageButton,
+    resolveButtonMode,
     resolveMessageParts,
     templateMatchesRequestedButtons,
     toRequestedButtons
@@ -30,7 +33,14 @@ import path from 'path';
 //     last_interaction_at: string | null;
 // }
 
-function getMessagingType(): 'UTILITY' {
+function getMessagingType(
+    buttonMode: ButtonMode,
+    requestedButtonsCount: number
+): 'UTILITY' | 'RESPONSE' {
+    if (buttonMode === 'RESPONSE_DYNAMIC' && requestedButtonsCount > 0) {
+        return 'RESPONSE';
+    }
+
     return 'UTILITY';
 }
 
@@ -305,7 +315,9 @@ export async function POST(request: NextRequest) {
             messageText: rawMessageText,
             messagePart1: rawMessagePart1,
             messagePart2: rawMessagePart2,
-            buttons: rawButtons
+            buttons: rawButtons,
+            buttonMode: rawButtonMode,
+            buttonPlaceholderMode: rawButtonPlaceholderMode
         } = body as {
             pageId?: string;
             contactIds?: string[];
@@ -313,6 +325,8 @@ export async function POST(request: NextRequest) {
             messagePart1?: string;
             messagePart2?: string;
             buttons?: RequestedMessageButton[];
+            buttonMode?: string;
+            buttonPlaceholderMode?: boolean;
         };
 
         const resolvedMessage = resolveMessageParts(rawMessageText, rawMessagePart1, rawMessagePart2);
@@ -341,7 +355,18 @@ export async function POST(request: NextRequest) {
         }
 
         const requestedButtons = toRequestedButtons(normalizedRequestedButtons);
-        const requiresSupportTeamTemplate = resolvedMessage.isTwoPart;
+        const buttonMode = resolveButtonMode(rawButtonMode);
+        const buttonPlaceholderMode =
+            buttonMode === 'RESPONSE_DYNAMIC' &&
+            rawButtonPlaceholderMode === true &&
+            requestedButtons.length > 0;
+        const messagingType = getMessagingType(buttonMode, requestedButtons.length);
+        const allowDualTemplateBodyModes =
+            messagingType === 'UTILITY' &&
+            resolvedMessage.isTwoPart &&
+            requestedButtons.length > 0;
+        const requiresSupportTeamTemplate =
+            resolvedMessage.isTwoPart && !allowDualTemplateBodyModes;
 
         // Log total contacts to send
         console.log(`📤 ========== API: MESSAGE SEND REQUEST ==========`);
@@ -784,9 +809,13 @@ export async function POST(request: NextRequest) {
                             return hasEditablePlaceholder(template) && matchesRequestedButtons(template);
                         });
 
+                        const onePlaceholderTemplate = sendableTemplates.find((template) => {
+                            return countPlaceholders(template) === 1 && matchesRequestedButtons(template);
+                        });
+
                         const selectedTemplate = requiresSupportTeamTemplate
-                            ? supportTeamTemplate
-                            : supportTeamTemplate || twoPlaceholderTemplate || anyApprovedWithPlaceholder;
+                            ? supportTeamTemplate || twoPlaceholderTemplate || anyApprovedWithPlaceholder
+                            : onePlaceholderTemplate || anyApprovedWithPlaceholder || twoPlaceholderTemplate;
 
                         if (!selectedTemplate) {
                             if (utilityTemplates.length > 0) {
@@ -840,7 +869,11 @@ export async function POST(request: NextRequest) {
             const languageCandidates = Array.from(
                 new Set([DEFAULT_UTILITY_TEMPLATE_LANGUAGE, 'en'])
             );
-            const bodyTemplateCandidates = buildSupportTeamTemplateBodyCandidates(pageStatusHeadline);
+            const bodyTemplateCandidates = buildUtilityTemplateBodyCandidates(
+                pageStatusHeadline,
+                requiresSupportTeamTemplate,
+                allowDualTemplateBodyModes
+            );
             const generationCandidates = bodyTemplateCandidates.flatMap((bodyTemplate) =>
                 languageCandidates.map((languageCandidate) => ({ bodyTemplate, languageCandidate }))
             );
@@ -984,7 +1017,7 @@ export async function POST(request: NextRequest) {
 
             const batch = allContacts.slice(i, i + SEND_BATCH_SIZE);
 
-            if (!utilityPermissionMissing && !utilityTemplateMissing) {
+            if (messagingType === 'UTILITY' && !utilityPermissionMissing && !utilityTemplateMissing) {
                 const utilityTemplateReadyInBatch = await ensureUtilityTemplateExists();
                 if (!utilityTemplateReadyInBatch && !utilityTemplateBootstrapError) {
                     utilityTemplateBootstrapError =
@@ -998,7 +1031,7 @@ export async function POST(request: NextRequest) {
 
             // Process batch in parallel - use allSettled to continue even if some fail
             const batchPromises = batch.map(async (contact) => {
-                const msgType = getMessagingType();
+                const msgType = messagingType;
 
                 if (msgType === 'UTILITY' && utilityPermissionMissing) {
                     return {
@@ -1026,6 +1059,10 @@ export async function POST(request: NextRequest) {
                     name: contact.name,
                     last_interaction_at: contact.last_interaction_at
                 });
+                const personalizedResolvedMessage = resolveMessageParts(personalizedMessage);
+                const runtimeButtons = buttonPlaceholderMode
+                    ? applyDynamicButtonValue(requestedButtons, personalizedResolvedMessage.part2)
+                    : requestedButtons;
 
                 try {
                     const utilityBodyParameters =
@@ -1034,25 +1071,35 @@ export async function POST(request: NextRequest) {
                                 utilityTemplateBodyPlaceholderCount,
                                 personalizedMessage,
                                 contact,
-                                utilityTemplateBodyText
+                                utilityTemplateBodyText,
+                                utilityTemplateBodyPlaceholderCount === 1 && resolvedMessage.isTwoPart
+                                    ? ` - from ${pageStatusHeadline} support team - `
+                                    : undefined
                             )
                             : undefined;
 
                     console.log(
                         `📤 Sending ${msgType} message to contact ${contact.id}. Template: ${utilityTemplateName} (${utilityTemplateLanguage}) params=${utilityBodyParameters?.length ?? 0}`
                     );
-                    const messageToSend = msgType === 'UTILITY'
-                        ? personalizedMessage.split('|||')[0] || personalizedMessage
-                        : personalizedMessage.split('|||')[0] || personalizedMessage;
-                    // Prepare button configs for utility messages
-                    const utilityButtons = msgType === 'UTILITY' && requestedButtons.length > 0
-                        ? requestedButtons.map(btn => {
-                            if (btn.type === 'QUICK_REPLY') {
-                                return { type: 'POSTBACK' as const, text: btn.text, payload: btn.payload || btn.text };
-                            }
-                            return { type: 'URL' as const, text: btn.text, url: btn.url || '' };
-                        })
-                        : undefined;
+                    const messageToSend =
+                        personalizedResolvedMessage.part1 || personalizedResolvedMessage.combined;
+                    const responseButtons =
+                        msgType === 'RESPONSE' && runtimeButtons.length > 0
+                            ? runtimeButtons.map((btn) => {
+                                if (btn.type === 'QUICK_REPLY') {
+                                    return {
+                                        type: 'POSTBACK' as const,
+                                        text: btn.text,
+                                        payload: btn.payload || btn.text
+                                    };
+                                }
+                                return {
+                                    type: 'URL' as const,
+                                    text: btn.text,
+                                    url: btn.url || ''
+                                };
+                            })
+                            : undefined;
 
                     await sendMessage(
                         page.fb_page_id,
@@ -1063,7 +1110,7 @@ export async function POST(request: NextRequest) {
                         msgType === 'UTILITY' ? utilityTemplateName : undefined,
                         utilityTemplateLanguage,
                         utilityBodyParameters,
-                        utilityButtons
+                        responseButtons
                     );
                     console.log(`✅ Successfully sent message to contact ${contact.id} (PSID: ${contact.psid})`);
 

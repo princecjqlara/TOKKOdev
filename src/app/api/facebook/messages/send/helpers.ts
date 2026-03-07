@@ -7,6 +7,8 @@ export type RequestedMessageButton = {
     payload?: string;
 };
 
+export type ButtonMode = 'TEMPLATE_STATIC' | 'RESPONSE_DYNAMIC';
+
 type NormalizedTemplateButton = {
     type: 'URL' | 'QUICK_REPLY';
     text: string;
@@ -14,6 +16,16 @@ type NormalizedTemplateButton = {
 };
 
 const URL_SCHEME_REGEX = /^[a-z][a-z\d+\-.]*:/i;
+
+export function resolveButtonMode(rawMode: unknown): ButtonMode {
+    if (typeof rawMode !== 'string') {
+        return 'TEMPLATE_STATIC';
+    }
+
+    return rawMode.trim().toUpperCase() === 'RESPONSE_DYNAMIC'
+        ? 'RESPONSE_DYNAMIC'
+        : 'TEMPLATE_STATIC';
+}
 
 export type ResolvedMessageParts = {
     part1: string;
@@ -36,6 +48,23 @@ export function buildSupportTeamTemplateBodyCandidates(pageName: string): string
     ];
 
     return Array.from(new Set(candidates));
+}
+
+export function buildUtilityTemplateBodyCandidates(
+    pageName: string,
+    requiresSupportTeamTemplate: boolean,
+    allowSinglePlaceholderOption = false
+): string[] {
+    if (requiresSupportTeamTemplate) {
+        const supportTeamCandidates = buildSupportTeamTemplateBodyCandidates(pageName);
+        if (allowSinglePlaceholderOption) {
+            return ['{{1}}', ...supportTeamCandidates];
+        }
+
+        return supportTeamCandidates;
+    }
+
+    return ['{{1}}'];
 }
 
 export function buildSupportTeamTemplateBody(pageName: string): string {
@@ -82,6 +111,42 @@ function normalizeButtonCandidate(button: RequestedMessageButton | Record<string
             : text;
 
     return { type, text, value: payload };
+}
+
+export function applyDynamicButtonValue(
+    buttons: RequestedMessageButton[],
+    dynamicValue: string
+): RequestedMessageButton[] {
+    if (!Array.isArray(buttons) || buttons.length === 0) {
+        return [];
+    }
+
+    const updatedButtons = buttons.map((button) => ({ ...button }));
+    const firstButton = updatedButtons[0];
+    if (!firstButton) {
+        return updatedButtons;
+    }
+
+    const normalizedDynamicValue = dynamicValue.trim();
+    if (!normalizedDynamicValue) {
+        return updatedButtons;
+    }
+
+    const buttonType = normalizeTemplateButtonType(firstButton.type);
+    if (buttonType === 'URL') {
+        const normalizedUrl = normalizeUrlButtonValue(normalizedDynamicValue);
+        if (normalizedUrl) {
+            firstButton.url = normalizedUrl;
+            return updatedButtons;
+        }
+
+        firstButton.text = normalizedDynamicValue;
+        return updatedButtons;
+    }
+
+    firstButton.text = normalizedDynamicValue;
+    firstButton.payload = normalizedDynamicValue;
+    return updatedButtons;
 }
 
 function normalizeUrlButtonValue(rawUrl: unknown): string | null {
@@ -263,7 +328,8 @@ export function buildUtilityBodyParameters(
     placeholderCount: number,
     message: string,
     contact: Pick<ContactRecord, 'id' | 'name'>,
-    templateBodyText: string
+    templateBodyText: string,
+    singlePlaceholderSeparator?: string
 ): string[] {
     if (placeholderCount <= 0) {
         return [];
@@ -284,6 +350,10 @@ export function buildUtilityBodyParameters(
         normalizedBodyText.includes('tracking');
 
     if (placeholderCount === 1) {
+        if (isTwoPartMessage && typeof singlePlaceholderSeparator === 'string') {
+            return [`${part1}${singlePlaceholderSeparator}${part2}`];
+        }
+
         return [part1];
     }
 

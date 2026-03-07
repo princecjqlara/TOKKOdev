@@ -1,10 +1,13 @@
 import { describe, expect, it } from 'vitest';
 
 import {
+    applyDynamicButtonValue,
     buildSupportTeamTemplateBodyCandidates,
     buildSupportTeamTemplateBody,
+    buildUtilityTemplateBodyCandidates,
     buildUtilityBodyParameters,
     normalizeRequestedButtons,
+    resolveButtonMode,
     resolveMessageParts,
     templateMatchesRequestedButtons
 } from './helpers';
@@ -26,6 +29,27 @@ describe('buildSupportTeamTemplateBodyCandidates', () => {
         expect(candidates).toContain('{{1}} - from Ares Media support team - {{2}}');
         expect(candidates.every((candidate) => candidate.includes('{{1}}'))).toBe(true);
         expect(candidates.every((candidate) => candidate.includes('{{2}}'))).toBe(true);
+    });
+});
+
+describe('buildUtilityTemplateBodyCandidates', () => {
+    it('uses single placeholder body for one-part utility sends', () => {
+        expect(buildUtilityTemplateBodyCandidates('Ares Media', false)).toEqual(['{{1}}']);
+    });
+
+    it('uses support-team variants for two-part utility sends', () => {
+        const candidates = buildUtilityTemplateBodyCandidates('Ares Media', true);
+
+        expect(candidates).toContain('{{1}} - from Ares Media support team - {{2}}');
+        expect(candidates.every((candidate) => candidate.includes('{{1}}'))).toBe(true);
+        expect(candidates.some((candidate) => candidate.includes('{{2}}'))).toBe(true);
+    });
+
+    it('allows single and support-team options when dual mode is enabled', () => {
+        const candidates = buildUtilityTemplateBodyCandidates('Ares Media', true, true);
+
+        expect(candidates).toContain('{{1}}');
+        expect(candidates).toContain('{{1}} - from Ares Media support team - {{2}}');
     });
 });
 
@@ -64,6 +88,18 @@ describe('buildUtilityBodyParameters', () => {
         );
 
         expect(parameters).toEqual(['Huy! Kikim still interested?', 'Don\'t worry there are 5 lots left']);
+    });
+
+    it('can collapse two-part text into one placeholder when separator is provided', () => {
+        const parameters = buildUtilityBodyParameters(
+            1,
+            'Part 1|||Part 2',
+            { id: 'contact-1234', name: 'Prince Doe' },
+            '{{1}}',
+            ' - from Ares Media support team - '
+        );
+
+        expect(parameters).toEqual(['Part 1 - from Ares Media support team - Part 2']);
     });
 });
 
@@ -182,6 +218,61 @@ describe('normalizeRequestedButtons', () => {
                 { type: 'URL', text: 'Join now', url: 'not a valid uri' }
             ])
         ).toEqual([]);
+    });
+});
+
+describe('resolveButtonMode', () => {
+    it('defaults to TEMPLATE_STATIC for unknown values', () => {
+        expect(resolveButtonMode(undefined)).toBe('TEMPLATE_STATIC');
+        expect(resolveButtonMode('anything')).toBe('TEMPLATE_STATIC');
+    });
+
+    it('accepts RESPONSE_DYNAMIC when explicitly requested', () => {
+        expect(resolveButtonMode('RESPONSE_DYNAMIC')).toBe('RESPONSE_DYNAMIC');
+    });
+});
+
+describe('applyDynamicButtonValue', () => {
+    it('replaces first URL button link when part2 is a valid URL', () => {
+        const updated = applyDynamicButtonValue(
+            [{ type: 'URL', text: 'Click here', url: 'https://example.com/start' }],
+            'instantmeeting.vercel.app/join/aresmedia'
+        );
+
+        expect(updated[0]).toEqual({
+            type: 'URL',
+            text: 'Click here',
+            url: 'https://instantmeeting.vercel.app/join/aresmedia',
+            payload: undefined
+        });
+    });
+
+    it('replaces first button text when part2 is not a URL', () => {
+        const updated = applyDynamicButtonValue(
+            [{ type: 'URL', text: 'Click here', url: 'https://example.com/start' }],
+            'Talk to support now'
+        );
+
+        expect(updated[0]).toEqual({
+            type: 'URL',
+            text: 'Talk to support now',
+            url: 'https://example.com/start',
+            payload: undefined
+        });
+    });
+
+    it('maps part2 to quick-reply text and payload', () => {
+        const updated = applyDynamicButtonValue(
+            [{ type: 'QUICK_REPLY', text: 'Old quick reply', payload: 'old_payload' }],
+            'Talk to sales'
+        );
+
+        expect(updated[0]).toEqual({
+            type: 'QUICK_REPLY',
+            text: 'Talk to sales',
+            payload: 'Talk to sales',
+            url: undefined
+        });
     });
 });
 
