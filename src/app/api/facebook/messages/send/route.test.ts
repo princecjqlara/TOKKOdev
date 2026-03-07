@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import {
+    buildSupportTeamTemplateBodyCandidates,
     buildSupportTeamTemplateBody,
     buildUtilityBodyParameters,
     resolveMessageParts,
@@ -12,6 +13,18 @@ describe('buildSupportTeamTemplateBody', () => {
         expect(buildSupportTeamTemplateBody('Ares Media')).toBe(
             '{{1}} - from Ares Media support team - {{2}}'
         );
+    });
+});
+
+describe('buildSupportTeamTemplateBodyCandidates', () => {
+    it('returns unique support-team variants with placeholders for auto-template retries', () => {
+        const candidates = buildSupportTeamTemplateBodyCandidates('Ares Media');
+
+        expect(candidates.length).toBeGreaterThan(1);
+        expect(new Set(candidates).size).toBe(candidates.length);
+        expect(candidates).toContain('{{1}} - from Ares Media support team - {{2}}');
+        expect(candidates.every((candidate) => candidate.includes('{{1}}'))).toBe(true);
+        expect(candidates.every((candidate) => candidate.includes('{{2}}'))).toBe(true);
     });
 });
 

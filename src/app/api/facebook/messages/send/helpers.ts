@@ -20,9 +20,24 @@ export type ResolvedMessageParts = {
     isTwoPart: boolean;
 };
 
+function normalizeSupportTeamPageName(pageName: string): string {
+    return pageName.trim().replace(/\s+/g, ' ') || 'Page';
+}
+
+export function buildSupportTeamTemplateBodyCandidates(pageName: string): string[] {
+    const normalizedPageName = normalizeSupportTeamPageName(pageName);
+    const candidates = [
+        `{{1}} - from ${normalizedPageName} support team - {{2}}`,
+        `{{1}} - update from ${normalizedPageName} support team - {{2}}`,
+        `{{1}} - message from ${normalizedPageName} support team - {{2}}`,
+        `{{1}} - ${normalizedPageName} support team update - {{2}}`
+    ];
+
+    return Array.from(new Set(candidates));
+}
+
 export function buildSupportTeamTemplateBody(pageName: string): string {
-    const normalizedPageName = pageName.trim().replace(/\s+/g, ' ') || 'Page';
-    return `{{1}} - from ${normalizedPageName} support team - {{2}}`;
+    return buildSupportTeamTemplateBodyCandidates(pageName)[0];
 }
 
 function normalizeTemplateButtonType(type: unknown): 'URL' | 'QUICK_REPLY' | null {

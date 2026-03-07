@@ -10,7 +10,7 @@ import {
 import { chunkArray } from '@/lib/chunking';
 import { replaceTemplateVariablesForParts, ContactRecord } from '@/lib/placeholders';
 import {
-    buildSupportTeamTemplateBody,
+    buildSupportTeamTemplateBodyCandidates,
     buildUtilityBodyParameters,
     normalizeRequestedButtons,
     RequestedMessageButton,
@@ -156,11 +156,9 @@ function buildAutoTemplateName(baseIndex: number): string {
 function buildAutoTemplateCandidate(
     name: string,
     language: string,
-    pageName: string,
+    bodyText: string,
     buttons?: RequestedMessageButton[]
 ): UtilityTemplate {
-    const bodyText = buildSupportTeamTemplateBody(pageName);
-
     const components: UtilityTemplate['components'] = [
         {
             type: 'BODY',
@@ -842,54 +840,56 @@ export async function POST(request: NextRequest) {
             const languageCandidates = Array.from(
                 new Set([DEFAULT_UTILITY_TEMPLATE_LANGUAGE, 'en'])
             );
+            const bodyTemplateCandidates = buildSupportTeamTemplateBodyCandidates(pageStatusHeadline);
+            const generationCandidates = bodyTemplateCandidates.flatMap((bodyTemplate) =>
+                languageCandidates.map((languageCandidate) => ({ bodyTemplate, languageCandidate }))
+            );
 
             while (
                 attempt < AUTO_TEMPLATE_MAX_ATTEMPTS &&
                 Date.now() - startedAt < AUTO_TEMPLATE_TIME_BUDGET_MS
             ) {
+                const candidate = generationCandidates[attempt % generationCandidates.length];
                 const templateName = buildAutoTemplateName(attempt + 1);
+                const templateCandidate = buildAutoTemplateCandidate(
+                    templateName,
+                    candidate.languageCandidate,
+                    candidate.bodyTemplate,
+                    requestedButtons
+                );
 
-                for (const languageCandidate of languageCandidates) {
-                    const templateCandidate = buildAutoTemplateCandidate(
-                        templateName,
-                        languageCandidate,
-                        pageStatusHeadline,
-                        requestedButtons
+                try {
+                    const createdTemplate = await createUtilityTemplate(
+                        page.fb_page_id,
+                        page.access_token,
+                        templateCandidate
                     );
 
-                    try {
-                        const createdTemplate = await createUtilityTemplate(
-                            page.fb_page_id,
-                            page.access_token,
-                            templateCandidate
-                        );
+                    const createdStatus = normalizeTemplateStatus(createdTemplate.status);
+                    if (createdStatus && SENDABLE_TEMPLATE_STATUSES.has(createdStatus)) {
+                        applySelectedUtilityTemplate({
+                            name: templateCandidate.name,
+                            language: candidate.languageCandidate,
+                            status: createdTemplate.status,
+                            category: 'UTILITY',
+                            components: templateCandidate.components
+                        });
+                        utilityTemplateBootstrapError = null;
+                        utilityTemplateLookupPromise = Promise.resolve(true);
+                        return true;
+                    }
 
-                        const createdStatus = normalizeTemplateStatus(createdTemplate.status);
-                        if (createdStatus && SENDABLE_TEMPLATE_STATUSES.has(createdStatus)) {
-                            applySelectedUtilityTemplate({
-                                name: templateCandidate.name,
-                                language: languageCandidate,
-                                status: createdTemplate.status,
-                                category: 'UTILITY',
-                                components: templateCandidate.components
-                            });
-                            utilityTemplateBootstrapError = null;
-                            utilityTemplateLookupPromise = Promise.resolve(true);
-                            return true;
-                        }
+                    utilityTemplateBootstrapError =
+                        `Generated template '${templateCandidate.name}' created with status '${createdTemplate.status}'`;
+                } catch (createError) {
+                    const createErrorMessage =
+                        (createError as Error).message ||
+                        'Failed to auto-generate utility template';
+                    utilityTemplateBootstrapError = createErrorMessage;
 
-                        utilityTemplateBootstrapError =
-                            `Generated template '${templateCandidate.name}' created with status '${createdTemplate.status}'`;
-                    } catch (createError) {
-                        const createErrorMessage =
-                            (createError as Error).message ||
-                            'Failed to auto-generate utility template';
-                        utilityTemplateBootstrapError = createErrorMessage;
-
-                        if (isUtilityPermissionError(createErrorMessage)) {
-                            utilityPermissionMissing = true;
-                            return false;
-                        }
+                    if (isUtilityPermissionError(createErrorMessage)) {
+                        utilityPermissionMissing = true;
+                        return false;
                     }
                 }
 
