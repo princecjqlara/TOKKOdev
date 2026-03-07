@@ -4,6 +4,7 @@ import {
     buildSupportTeamTemplateBodyCandidates,
     buildSupportTeamTemplateBody,
     buildUtilityBodyParameters,
+    normalizeRequestedButtons,
     resolveMessageParts,
     templateMatchesRequestedButtons
 } from './helpers';
@@ -67,6 +68,26 @@ describe('buildUtilityBodyParameters', () => {
 });
 
 describe('templateMatchesRequestedButtons', () => {
+    it('matches URL buttons when requested URL omits protocol', () => {
+        const template = {
+            components: [
+                { type: 'BODY', text: '{{1}}' },
+                {
+                    type: 'BUTTONS',
+                    buttons: [
+                        { type: 'URL', text: 'Join now', url: 'https://instantmeeting.vercel.app/join/aresmedia' }
+                    ]
+                }
+            ]
+        };
+
+        const requestedButtons = [
+            { type: 'URL', text: 'Join now', url: 'instantmeeting.vercel.app/join/aresmedia' }
+        ];
+
+        expect(templateMatchesRequestedButtons(template, requestedButtons)).toBe(true);
+    });
+
     it('rejects a template with stale URL button values', () => {
         const template = {
             components: [
@@ -137,6 +158,30 @@ describe('templateMatchesRequestedButtons', () => {
         };
 
         expect(templateMatchesRequestedButtons(template, undefined)).toBe(false);
+    });
+});
+
+describe('normalizeRequestedButtons', () => {
+    it('normalizes URL buttons to valid https links', () => {
+        expect(
+            normalizeRequestedButtons([
+                { type: 'URL', text: 'Join now', url: 'instantmeeting.vercel.app/join/aresmedia' }
+            ])
+        ).toEqual([
+            {
+                type: 'URL',
+                text: 'Join now',
+                value: 'https://instantmeeting.vercel.app/join/aresmedia'
+            }
+        ]);
+    });
+
+    it('drops URL buttons that cannot be parsed as valid URIs', () => {
+        expect(
+            normalizeRequestedButtons([
+                { type: 'URL', text: 'Join now', url: 'not a valid uri' }
+            ])
+        ).toEqual([]);
     });
 });
 

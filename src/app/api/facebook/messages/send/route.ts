@@ -334,7 +334,7 @@ export async function POST(request: NextRequest) {
             return NextResponse.json(
                 {
                     error: 'Bad Request',
-                    message: 'Invalid button payload. Each button needs type, text, and url/payload.'
+                    message: 'Invalid button payload. Each button needs type, text, and url/payload. Link buttons must use a valid URL such as https://example.com.'
                 },
                 { status: 400 }
             );

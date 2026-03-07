@@ -13,6 +13,8 @@ type NormalizedTemplateButton = {
     value: string;
 };
 
+const URL_SCHEME_REGEX = /^[a-z][a-z\d+\-.]*:/i;
+
 export type ResolvedMessageParts = {
     part1: string;
     part2: string;
@@ -66,7 +68,7 @@ function normalizeButtonCandidate(button: RequestedMessageButton | Record<string
     }
 
     if (type === 'URL') {
-        const value = typeof button.url === 'string' ? button.url.trim() : '';
+        const value = normalizeUrlButtonValue(button.url);
         if (!value) {
             return null;
         }
@@ -80,6 +82,41 @@ function normalizeButtonCandidate(button: RequestedMessageButton | Record<string
             : text;
 
     return { type, text, value: payload };
+}
+
+function normalizeUrlButtonValue(rawUrl: unknown): string | null {
+    if (typeof rawUrl !== 'string') {
+        return null;
+    }
+
+    const trimmed = rawUrl.trim();
+    if (!trimmed) {
+        return null;
+    }
+
+    const withScheme = URL_SCHEME_REGEX.test(trimmed) ? trimmed : `https://${trimmed}`;
+
+    let parsedUrl: URL;
+    try {
+        parsedUrl = new URL(withScheme);
+    } catch {
+        return null;
+    }
+
+    if (parsedUrl.protocol !== 'http:' && parsedUrl.protocol !== 'https:') {
+        return null;
+    }
+
+    const hostname = parsedUrl.hostname.trim().toLowerCase();
+    if (!hostname) {
+        return null;
+    }
+
+    if (hostname !== 'localhost' && !hostname.includes('.')) {
+        return null;
+    }
+
+    return parsedUrl.toString();
 }
 
 function extractTemplateButtons(template: Record<string, unknown>): {
