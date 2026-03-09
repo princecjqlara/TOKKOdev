@@ -399,7 +399,7 @@ export default function WelcomePage() {
                             <p className="font-bold mb-1">How it works:</p>
                             <ul className="list-disc pl-4 space-y-0.5">
                                 <li>Welcome message is sent only to <strong>brand new contacts</strong> when they first message your page</li>
-                                <li>Uses <strong>HUMAN_AGENT</strong> messaging type (works within 24-hour window)</li>
+                                <li>Uses <strong>RESPONSE</strong> messaging type right after the contact messages your page</li>
                                 <li>Each page has its own independent welcome message config</li>
                                 <li>The message is sent automatically — no manual action needed</li>
                             </ul>

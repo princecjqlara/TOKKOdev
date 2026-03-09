@@ -2,19 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getSupabaseAdmin } from '@/lib/supabase';
 import { verifyWebhookSignature, generateVerifyToken, sendMessage, getUserProfile } from '@/lib/facebook';
 import { replaceTemplateVariables } from '@/lib/placeholders';
-
-function hasUsableContactName(value: unknown): value is string {
-    if (typeof value !== 'string') {
-        return false;
-    }
-
-    const normalized = value.trim();
-    if (!normalized) {
-        return false;
-    }
-
-    return normalized.toLowerCase() !== 'unknown';
-}
+import { hasUsableContactName, normalizeContactName, pickPreferredContactName } from '../../../../lib/contact-names';
 
 // GET /api/facebook/webhook - Verify webhook
 export async function GET(request: NextRequest) {
@@ -297,8 +285,8 @@ export async function POST(request: NextRequest) {
                         if (shouldRefreshProfile) {
                             try {
                                 const profile = await getUserProfile(senderId, page.access_token);
-                                profileName = profile.name || null;
-                                profilePic = profile.profile_pic || null;
+                                profileName = normalizeContactName(profile.name);
+                                profilePic = typeof profile.profile_pic === 'string' ? profile.profile_pic.trim() || null : null;
                             } catch (profileError) {
                                 logWarn('Failed to fetch profile for contact enrichment', {
                                     pageId,
@@ -310,10 +298,12 @@ export async function POST(request: NextRequest) {
                             }
                         }
 
+                        const resolvedName = pickPreferredContactName(profileName, existingContact?.name);
+
                         const contactPayload: Record<string, unknown> = {
                             page_id: page.id,
                             psid: senderId,
-                            ...(profileName ? { name: profileName } : {}),
+                            ...(resolvedName ? { name: resolvedName } : {}),
                             ...(profilePic ? { profile_pic: profilePic } : {}),
                             last_interaction_at: interactionAt,
                             updated_at: new Date().toISOString(),
@@ -448,7 +438,7 @@ export async function POST(request: NextRequest) {
                                         .slice(0, 3)
                                     : [];
 
-                                const welcomeMessagingType = mappedWelcomeButtons.length > 0 ? 'RESPONSE' : 'HUMAN_AGENT';
+                                const welcomeMessagingType = 'RESPONSE';
 
                                 // Send welcome message (must await in serverless environment)
                                 try {

@@ -425,6 +425,32 @@ describe('POST /api/facebook/webhook', () => {
         );
     });
 
+    it('does not persist placeholder UNKNOWN name values from profile fetch', async () => {
+        const supabase = createSupabaseMock({
+            existingContact: {
+                id: 'contact_row_1',
+                name: null,
+                profile_pic: null
+            }
+        });
+        mocks.getSupabaseAdmin.mockReturnValue(supabase);
+        mocks.getUserProfile.mockResolvedValue({
+            id: 'contact_psid_1',
+            name: 'UNKNOWN',
+            profile_pic: 'https://example.com/recovered.jpg'
+        });
+
+        const response = await POST(createWebhookRequest());
+        const body = await response.json();
+
+        expect(response.status).toBe(200);
+        expect(body.success).toBe(true);
+
+        const payload = supabase.contactsUpsert.mock.calls[0][0] as Record<string, unknown>;
+        expect(payload).not.toHaveProperty('name');
+        expect(payload.profile_pic).toBe('https://example.com/recovered.jpg');
+    });
+
     it('retries contact upsert without first_interaction_at when schema is older', async () => {
         const supabase = createSupabaseMockWithFirstInteractionColumnFailure();
         mocks.getSupabaseAdmin.mockReturnValue(supabase);
@@ -533,5 +559,33 @@ describe('POST /api/facebook/webhook', () => {
             { type: 'URL', text: 'CLICK HERE!', url: 'https://meet.google.com/peh-jivc-tgx' },
             { type: 'POSTBACK', text: 'Talk to sales', payload: 'Talk to sales' }
         ]);
+    });
+
+    it('sends text-only welcome as RESPONSE for a new contact', async () => {
+        const supabase = createSupabaseMock({
+            welcomeConfig: {
+                enabled: true,
+                message_text: 'Hi {first_name}! Welcome to our page.',
+                buttons: []
+            }
+        });
+        mocks.getSupabaseAdmin.mockReturnValue(supabase);
+        mocks.getUserProfile.mockResolvedValue({
+            id: 'contact_psid_1',
+            name: 'Jane Contact',
+            profile_pic: 'https://example.com/jane.jpg'
+        });
+
+        const response = await POST(createWebhookRequest());
+        const body = await response.json();
+
+        expect(response.status).toBe(200);
+        expect(body.success).toBe(true);
+        expect(mocks.sendMessage).toHaveBeenCalledTimes(1);
+
+        const sendArgs = mocks.sendMessage.mock.calls[0];
+        expect(sendArgs[3]).toBe('Hi {first_name}! Welcome to our page.');
+        expect(sendArgs[4]).toBe('RESPONSE');
+        expect(sendArgs[8]).toBeUndefined();
     });
 });
