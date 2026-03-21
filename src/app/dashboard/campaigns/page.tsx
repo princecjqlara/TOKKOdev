@@ -61,6 +61,12 @@ export default function CampaignsPage() {
     const [tags, setTags] = useState<{ id: string; name: string; color: string }[]>([]);
     const [selectedTagFilter, setSelectedTagFilter] = useState('');
     const [isSelectAllMode, setIsSelectAllMode] = useState(false);
+    const [deliveryMode, setDeliveryMode] = useState<'now' | 'schedule'>('now');
+    const [scheduledAt, setScheduledAt] = useState('');
+    const [audienceMode, setAudienceMode] = useState<'specific' | 'dynamic'>('specific');
+    const [audienceStartDate, setAudienceStartDate] = useState('');
+    const [includedAudienceTagIds, setIncludedAudienceTagIds] = useState<Set<string>>(new Set());
+    const [excludedAudienceTagIds, setExcludedAudienceTagIds] = useState<Set<string>>(new Set());
 
     useEffect(() => {
         fetchPages();
@@ -173,6 +179,48 @@ export default function CampaignsPage() {
         }
     };
 
+    const toggleIncludedAudienceTag = (tagId: string) => {
+        setIncludedAudienceTagIds((current) => {
+            const next = new Set(current);
+            if (next.has(tagId)) {
+                next.delete(tagId);
+            } else {
+                next.add(tagId);
+            }
+            return next;
+        });
+
+        setExcludedAudienceTagIds((current) => {
+            if (!current.has(tagId)) {
+                return current;
+            }
+            const next = new Set(current);
+            next.delete(tagId);
+            return next;
+        });
+    };
+
+    const toggleExcludedAudienceTag = (tagId: string) => {
+        setExcludedAudienceTagIds((current) => {
+            const next = new Set(current);
+            if (next.has(tagId)) {
+                next.delete(tagId);
+            } else {
+                next.add(tagId);
+            }
+            return next;
+        });
+
+        setIncludedAudienceTagIds((current) => {
+            if (!current.has(tagId)) {
+                return current;
+            }
+            const next = new Set(current);
+            next.delete(tagId);
+            return next;
+        });
+    };
+
     const handleOpenCreateModal = async () => {
         setCampaignName('');
         setMessageText('');
@@ -183,13 +231,21 @@ export default function CampaignsPage() {
         setUseAiMessage(false);
         setSelectedTagFilter('');
         setIsSelectAllMode(false);
+        setDeliveryMode('now');
+        setScheduledAt('');
+        setAudienceMode('specific');
+        setAudienceStartDate('');
+        setIncludedAudienceTagIds(new Set());
+        setExcludedAudienceTagIds(new Set());
         await Promise.all([fetchContacts(), fetchTags()]);
         setShowCreateModal(true);
     };
 
     const handleCreate = async () => {
-        // Validation: need campaign name and recipients
-        const hasRecipients = isSelectAllMode ? contactsTotal > 0 : selectedContactIds.size > 0;
+        const usesDynamicAudience = !isLoop && audienceMode === 'dynamic';
+        const hasRecipients = usesDynamicAudience
+            ? true
+            : (isSelectAllMode ? contactsTotal > 0 : selectedContactIds.size > 0);
         if (!campaignName.trim() || !hasRecipients) return;
 
         // For loop campaigns, need aiPrompt
@@ -199,12 +255,19 @@ export default function CampaignsPage() {
         if (!isLoop && useAiMessage && !aiPrompt.trim()) return;
         if (!isLoop && !useAiMessage && !messageText.trim()) return;
 
+        const resolvedScheduledAt =
+            !isLoop && deliveryMode === 'schedule' && scheduledAt
+                ? new Date(scheduledAt).toISOString()
+                : null;
+
+        if (!isLoop && deliveryMode === 'schedule' && !resolvedScheduledAt) return;
+        if (usesDynamicAudience && deliveryMode !== 'schedule') return;
+
         setActionLoading(true);
         try {
-            // If selectAll mode, fetch all contact IDs
-            let contactIds = Array.from(selectedContactIds);
+            let contactIds = usesDynamicAudience ? [] : Array.from(selectedContactIds);
 
-            if (isSelectAllMode) {
+            if (!usesDynamicAudience && isSelectAllMode) {
                 // Fetch all contact IDs with the current filter
                 const params = new URLSearchParams({
                     page: '1',
@@ -218,7 +281,7 @@ export default function CampaignsPage() {
                 contactIds = data.items.map(c => c.id);
             }
 
-            await fetch('/api/campaigns', {
+            const response = await fetch('/api/campaigns', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
@@ -226,16 +289,29 @@ export default function CampaignsPage() {
                     name: campaignName.trim(),
                     messageText: (isLoop || useAiMessage) ? null : messageText.trim(),
                     contactIds,
+                    scheduledAt: resolvedScheduledAt,
+                    audienceMode: usesDynamicAudience ? 'dynamic' : 'specific',
+                    audienceRules: usesDynamicAudience ? {
+                        startDate: audienceStartDate || null,
+                        includeTagIds: [...includedAudienceTagIds],
+                        excludeTagIds: [...excludedAudienceTagIds]
+                    } : undefined,
                     isLoop,
                     useAiMessage, // New field for AI personalized regular campaigns
                     aiPrompt: (isLoop || useAiMessage) ? aiPrompt.trim() : null
                 })
             });
 
+            if (!response.ok) {
+                const errorData = await response.json().catch(() => ({}));
+                throw new Error(errorData.message || 'Failed to create campaign');
+            }
+
             setShowCreateModal(false);
             await fetchCampaigns();
         } catch (error) {
             console.error('Error creating campaign:', error);
+            alert((error as Error).message || 'Failed to create campaign');
         } finally {
             setActionLoading(false);
         }
@@ -338,9 +414,7 @@ export default function CampaignsPage() {
 
     // Get loop status badge
     const getLoopBadge = (campaign: Campaign) => {
-        // @ts-expect-error - is_loop field added by migration
         if (!campaign.is_loop) return null;
-        // @ts-expect-error - loop_status field added by migration
         const loopStatus = campaign.loop_status;
         const classes = "badge-wireframe text-xs ";
         switch (loopStatus) {
@@ -424,7 +498,6 @@ export default function CampaignsPage() {
                                         {getLoopBadge(campaign)}
                                     </div>
                                     <p className="text-sm font-mono text-gray-600 line-clamp-2 border-l-2 border-gray-200 pl-3">
-                                        {/* @ts-expect-error - is_loop/ai_prompt fields added by migration */}
                                         {campaign.is_loop ? `🤖 AI Prompt: "${campaign.ai_prompt}"` : `"${campaign.message_text}"`}
                                     </p>
                                     <div className="flex flex-wrap items-center gap-6 text-sm font-bold uppercase tracking-wider text-gray-500">
@@ -448,7 +521,25 @@ export default function CampaignsPage() {
                                             <Clock className="w-4 h-4" />
                                             {new Date(campaign.created_at).toLocaleDateString()}
                                         </span>
+                                        {campaign.scheduled_at && (
+                                            <span className="flex items-center gap-1 text-blue-700">
+                                                <Clock className="w-4 h-4" />
+                                                Schedules {new Date(campaign.scheduled_at).toLocaleString()}
+                                            </span>
+                                        )}
+                                        {campaign.audience_mode === 'dynamic' && (
+                                            <span className="text-blue-700">Dynamic audience</span>
+                                        )}
                                     </div>
+                                    {campaign.audience_mode === 'dynamic' && (
+                                        <p className="text-xs font-mono text-gray-500">
+                                            {campaign.audience_start_date ? `Start: ${campaign.audience_start_date}` : 'Start: any date'}
+                                            {' | '}
+                                            Include tags: {campaign.audience_include_tag_ids?.length || 0}
+                                            {' | '}
+                                            Exclude tags: {campaign.audience_exclude_tag_ids?.length || 0}
+                                        </p>
+                                    )}
                                 </div>
 
                                 <div className="flex items-center gap-2 w-full md:w-auto mt-2 md:mt-0">
@@ -561,6 +652,50 @@ export default function CampaignsPage() {
                         </label>
                     </div>
 
+                    {!isLoop && (
+                        <div className="space-y-4 border border-gray-200 p-4 bg-gray-50">
+                            <div>
+                                <label className="label-wireframe mb-2">Send Timing</label>
+                                <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
+                                    <button
+                                        type="button"
+                                        onClick={() => setDeliveryMode('now')}
+                                        className={`border px-3 py-3 text-left transition-colors ${deliveryMode === 'now' ? 'border-black bg-white' : 'border-gray-300 bg-transparent'
+                                            }`}
+                                    >
+                                        <p className="font-bold uppercase text-sm">Send Now</p>
+                                        <p className="text-xs text-gray-500 font-mono mt-1">
+                                            Start sending as soon as you launch the campaign.
+                                        </p>
+                                    </button>
+                                    <button
+                                        type="button"
+                                        onClick={() => setDeliveryMode('schedule')}
+                                        className={`border px-3 py-3 text-left transition-colors ${deliveryMode === 'schedule' ? 'border-black bg-white' : 'border-gray-300 bg-transparent'
+                                            }`}
+                                    >
+                                        <p className="font-bold uppercase text-sm">Schedule</p>
+                                        <p className="text-xs text-gray-500 font-mono mt-1">
+                                            Use cronjob.org to run the campaign at the chosen date and time.
+                                        </p>
+                                    </button>
+                                </div>
+                            </div>
+
+                            {deliveryMode === 'schedule' && (
+                                <div>
+                                    <label className="label-wireframe">Scheduled Time</label>
+                                    <input
+                                        type="datetime-local"
+                                        value={scheduledAt}
+                                        onChange={(e) => setScheduledAt(e.target.value)}
+                                        className="input-wireframe"
+                                    />
+                                </div>
+                            )}
+                        </div>
+                    )}
+
                     {isLoop ? (
                         <div>
                             <label className="label-wireframe">AI Prompt</label>
@@ -624,7 +759,106 @@ export default function CampaignsPage() {
                         </div>
                     )}
 
-                    <div>
+                    {!isLoop && (
+                        <div className="space-y-3 border border-gray-200 p-4 bg-gray-50">
+                            <div>
+                                <label className="label-wireframe mb-2">Audience Type</label>
+                                <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
+                                    <button
+                                        type="button"
+                                        onClick={() => setAudienceMode('specific')}
+                                        className={`border px-3 py-3 text-left transition-colors ${audienceMode === 'specific' ? 'border-black bg-white' : 'border-gray-300 bg-transparent'
+                                            }`}
+                                    >
+                                        <p className="font-bold uppercase text-sm">Specific Contacts</p>
+                                        <p className="text-xs text-gray-500 font-mono mt-1">
+                                            Pick the exact contacts to receive this campaign.
+                                        </p>
+                                    </button>
+                                    <button
+                                        type="button"
+                                        onClick={() => {
+                                            setAudienceMode('dynamic');
+                                            setDeliveryMode('schedule');
+                                        }}
+                                        className={`border px-3 py-3 text-left transition-colors ${audienceMode === 'dynamic' ? 'border-black bg-white' : 'border-gray-300 bg-transparent'
+                                            }`}
+                                    >
+                                        <p className="font-bold uppercase text-sm">Dynamic Audience</p>
+                                        <p className="text-xs text-gray-500 font-mono mt-1">
+                                            Resolve matching contacts at send time so new contacts can be included.
+                                        </p>
+                                    </button>
+                                </div>
+                            </div>
+
+                            {audienceMode === 'dynamic' && (
+                                <div className="border border-dashed border-black bg-white p-4 space-y-4">
+                                    <p className="text-xs font-mono text-gray-500">
+                                        cronjob.org will trigger the send and the audience will be resolved right before delivery.
+                                    </p>
+
+                                    <div>
+                                        <label className="label-wireframe">Starting Date</label>
+                                        <input
+                                            type="date"
+                                            value={audienceStartDate}
+                                            onChange={(e) => setAudienceStartDate(e.target.value)}
+                                            className="input-wireframe"
+                                        />
+                                        <p className="text-xs text-gray-400 font-mono mt-2">
+                                            Only contacts first seen on or after this date will be included.
+                                        </p>
+                                    </div>
+
+                                    <div className="space-y-2">
+                                        <label className="label-wireframe mb-0">Include Tags</label>
+                                        <div className="flex flex-wrap gap-2">
+                                            {tags.length === 0 ? (
+                                                <p className="text-xs text-gray-400 font-mono">No tags available yet.</p>
+                                            ) : tags.map((tag) => (
+                                                <button
+                                                    key={`include-${tag.id}`}
+                                                    type="button"
+                                                    onClick={() => toggleIncludedAudienceTag(tag.id)}
+                                                    className={`px-2.5 py-1.5 border text-xs font-bold uppercase ${includedAudienceTagIds.has(tag.id)
+                                                        ? 'border-black bg-black text-white'
+                                                        : 'border-gray-300 bg-white text-gray-700'
+                                                        }`}
+                                                >
+                                                    + {tag.name}
+                                                </button>
+                                            ))}
+                                        </div>
+                                    </div>
+
+                                    <div className="space-y-2">
+                                        <label className="label-wireframe mb-0">Exclude Tags</label>
+                                        <div className="flex flex-wrap gap-2">
+                                            {tags.length === 0 ? (
+                                                <p className="text-xs text-gray-400 font-mono">No tags available yet.</p>
+                                            ) : tags.map((tag) => (
+                                                <button
+                                                    key={`exclude-${tag.id}`}
+                                                    type="button"
+                                                    onClick={() => toggleExcludedAudienceTag(tag.id)}
+                                                    className={`px-2.5 py-1.5 border text-xs font-bold uppercase ${excludedAudienceTagIds.has(tag.id)
+                                                        ? 'border-red-600 bg-red-50 text-red-700'
+                                                        : 'border-gray-300 bg-white text-gray-700'
+                                                        }`}
+                                                >
+                                                    - {tag.name}
+                                                </button>
+                                            ))}
+                                        </div>
+                                    </div>
+                                </div>
+                            )}
+                        </div>
+                    )}
+
+                    {(isLoop || audienceMode === 'specific') && (
+                        <div>
                         <div className="flex items-center justify-between mb-3">
                             <label className="label-wireframe mb-0">
                                 Select Recipients ({isSelectAllMode ? contactsTotal : selectedContactIds.size})
@@ -719,7 +953,8 @@ export default function CampaignsPage() {
                                 </div>
                             </div>
                         )}
-                    </div>
+                        </div>
+                    )}
                 </div>
 
                 <div className="flex justify-end gap-3 pt-4 border-t border-black">
@@ -733,16 +968,26 @@ export default function CampaignsPage() {
                         onClick={handleCreate}
                         disabled={
                             !campaignName.trim() ||
-                            (!isSelectAllMode && selectedContactIds.size === 0) ||
-                            (isSelectAllMode && contactsTotal === 0) ||
                             actionLoading ||
                             (isLoop && !aiPrompt.trim()) ||
                             (!isLoop && useAiMessage && !aiPrompt.trim()) ||
-                            (!isLoop && !useAiMessage && !messageText.trim())
+                            (!isLoop && !useAiMessage && !messageText.trim()) ||
+                            ((isLoop || audienceMode === 'specific') &&
+                                ((!isSelectAllMode && selectedContactIds.size === 0) ||
+                                    (isSelectAllMode && contactsTotal === 0))) ||
+                            (!isLoop && audienceMode === 'dynamic' && (deliveryMode !== 'schedule' || !scheduledAt))
                         }
                         className="btn-wireframe bg-black text-white hover:bg-gray-800"
                     >
-                        {actionLoading ? 'Creating...' : (isLoop ? 'Create Loop Campaign' : (useAiMessage ? 'Create AI Campaign' : 'Create Campaign'))}
+                        {actionLoading
+                            ? 'Creating...'
+                            : isLoop
+                                ? 'Create Loop Campaign'
+                                : deliveryMode === 'schedule'
+                                    ? 'Create Scheduled Campaign'
+                                    : useAiMessage
+                                        ? 'Create AI Campaign'
+                                        : 'Create Campaign'}
                     </button>
                 </div>
             </Modal>

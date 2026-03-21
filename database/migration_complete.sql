@@ -3,7 +3,12 @@
 
 -- Core campaign scheduling columns
 ALTER TABLE campaigns ADD COLUMN IF NOT EXISTS scheduled_date TIMESTAMPTZ;
+ALTER TABLE campaigns ADD COLUMN IF NOT EXISTS scheduled_at TIMESTAMPTZ;
 ALTER TABLE campaigns ADD COLUMN IF NOT EXISTS use_best_time BOOLEAN DEFAULT FALSE;
+ALTER TABLE campaigns ADD COLUMN IF NOT EXISTS audience_mode TEXT DEFAULT 'specific';
+ALTER TABLE campaigns ADD COLUMN IF NOT EXISTS audience_start_date DATE;
+ALTER TABLE campaigns ADD COLUMN IF NOT EXISTS audience_include_tag_ids JSONB DEFAULT '[]';
+ALTER TABLE campaigns ADD COLUMN IF NOT EXISTS audience_exclude_tag_ids JSONB DEFAULT '[]';
 
 -- Loop campaign columns
 ALTER TABLE campaigns ADD COLUMN IF NOT EXISTS is_loop BOOLEAN DEFAULT FALSE;

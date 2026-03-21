@@ -4,6 +4,31 @@ import { authOptions } from '@/lib/auth';
 import { getSupabaseAdmin } from '@/lib/supabase';
 import { PaginatedResponse, Campaign } from '@/types';
 
+function normalizeStringArray(value: unknown): string[] {
+    if (!Array.isArray(value)) {
+        return [];
+    }
+
+    return [...new Set(
+        value
+            .map((item) => (typeof item === 'string' ? item.trim() : ''))
+            .filter(Boolean)
+    )];
+}
+
+function normalizeScheduledAt(value: unknown): string | null {
+    if (typeof value !== 'string' || value.trim() === '') {
+        return null;
+    }
+
+    const parsed = new Date(value);
+    if (Number.isNaN(parsed.getTime())) {
+        return null;
+    }
+
+    return parsed.toISOString();
+}
+
 // GET /api/campaigns - Get campaigns with pagination
 export async function GET(request: NextRequest) {
     try {
@@ -87,7 +112,28 @@ export async function POST(request: NextRequest) {
         }
 
         const body = await request.json();
-        const { pageId, name, messageText, contactIds, useBestTime, scheduledDate, isLoop, aiPrompt, useAiMessage } = body;
+        const {
+            pageId,
+            name,
+            messageText,
+            contactIds,
+            useBestTime,
+            scheduledDate,
+            isLoop,
+            aiPrompt,
+            useAiMessage,
+            scheduledAt: rawScheduledAt,
+            audienceMode: rawAudienceMode,
+            audienceRules: rawAudienceRules
+        } = body;
+        const scheduledAt = normalizeScheduledAt(rawScheduledAt);
+        const audienceMode = rawAudienceMode === 'dynamic' ? 'dynamic' : 'specific';
+        const audienceStartDate =
+            typeof rawAudienceRules?.startDate === 'string' && rawAudienceRules.startDate.trim() !== ''
+                ? rawAudienceRules.startDate.trim()
+                : null;
+        const audienceIncludeTagIds = normalizeStringArray(rawAudienceRules?.includeTagIds);
+        const audienceExcludeTagIds = normalizeStringArray(rawAudienceRules?.excludeTagIds);
 
         // For loop campaigns, messageText is optional (AI generates it), but aiPrompt is required
         if (!pageId || !name) {
@@ -121,6 +167,20 @@ export async function POST(request: NextRequest) {
             );
         }
 
+        if (rawScheduledAt && !scheduledAt) {
+            return NextResponse.json(
+                { error: 'Bad Request', message: 'scheduledAt must be a valid ISO date-time string' },
+                { status: 400 }
+            );
+        }
+
+        if (!isLoop && audienceMode === 'dynamic' && !scheduledAt) {
+            return NextResponse.json(
+                { error: 'Bad Request', message: 'scheduledAt is required for dynamic scheduled audiences' },
+                { status: 400 }
+            );
+        }
+
         // Validate scheduling params
         if (useBestTime && !scheduledDate && !isLoop) {
             return NextResponse.json(
@@ -149,7 +209,9 @@ export async function POST(request: NextRequest) {
         // Determine campaign status
         // Loop campaigns start as 'scheduled' with loop_status 'active'
         // Best time campaigns are 'scheduled', regular campaigns are 'draft'
-        const campaignStatus = isLoop || useBestTime ? 'scheduled' : 'draft';
+        const campaignStatus = isLoop || useBestTime || scheduledAt ? 'scheduled' : 'draft';
+        const shouldMaterializeRecipientsNow = audienceMode !== 'dynamic' || !scheduledAt;
+        const normalizedContactIds = Array.isArray(contactIds) ? contactIds : [];
 
         // Create campaign
         const { data: campaign, error: campaignError } = await supabase
@@ -159,11 +221,16 @@ export async function POST(request: NextRequest) {
                 name,
                 message_text: (isLoop || useAiMessage) ? null : messageText, // AI campaigns don't use pre-written message
                 status: campaignStatus,
-                total_recipients: contactIds?.length || 0,
+                scheduled_at: scheduledAt,
+                total_recipients: shouldMaterializeRecipientsNow ? normalizedContactIds.length : 0,
                 sent_count: 0,
                 created_by: session.user.id,
                 use_best_time: useBestTime || isLoop || false, // Loop always uses best time
                 scheduled_date: scheduledDate || null,
+                audience_mode: audienceMode,
+                audience_start_date: audienceStartDate,
+                audience_include_tag_ids: audienceIncludeTagIds,
+                audience_exclude_tag_ids: audienceExcludeTagIds,
                 // Loop campaign fields
                 is_loop: isLoop || false,
                 ai_prompt: (isLoop || useAiMessage) ? aiPrompt : null, // Store aiPrompt for AI campaigns
@@ -176,16 +243,16 @@ export async function POST(request: NextRequest) {
         if (campaignError) throw campaignError;
 
         // Add recipients if provided - batch inserts to avoid Supabase payload limits
-        if (contactIds?.length) {
+        if (shouldMaterializeRecipientsNow && normalizedContactIds.length > 0) {
             const BATCH_SIZE = 500; // Supabase recommends batching large inserts
-            console.log(`📤 Adding ${contactIds.length} recipients to campaign ${campaign.id}`);
+            console.log(`📤 Adding ${normalizedContactIds.length} recipients to campaign ${campaign.id}`);
 
             // If using best time, we need to fetch contacts' best_contact_hour
             let contactBestTimes: Map<string, number | null> = new Map();
             if (useBestTime) {
                 // Fetch best_contact_hour for all contacts
-                for (let i = 0; i < contactIds.length; i += 1000) {
-                    const batchIds = contactIds.slice(i, i + 1000);
+                for (let i = 0; i < normalizedContactIds.length; i += 1000) {
+                    const batchIds = normalizedContactIds.slice(i, i + 1000);
                     const { data: contacts } = await supabase
                         .from('contacts')
                         .select('id, best_contact_hour')
@@ -200,8 +267,8 @@ export async function POST(request: NextRequest) {
                 console.log(`📤 Fetched best times for ${contactBestTimes.size} contacts`);
             }
 
-            for (let i = 0; i < contactIds.length; i += BATCH_SIZE) {
-                const batchIds = contactIds.slice(i, i + BATCH_SIZE);
+            for (let i = 0; i < normalizedContactIds.length; i += BATCH_SIZE) {
+                const batchIds = normalizedContactIds.slice(i, i + BATCH_SIZE);
                 const recipients = batchIds.map((contactId: string) => {
                     let scheduledAt: string | null = null;
 

@@ -83,6 +83,7 @@ export interface Campaign {
   name: string;
   message_text: string | null;
   status: 'draft' | 'scheduled' | 'sending' | 'completed' | 'cancelled';
+  scheduled_at: string | null;
   total_recipients: number;
   sent_count: number;
   failed_count: number;
@@ -91,6 +92,14 @@ export interface Campaign {
   updated_at: string;
   use_best_time: boolean;
   scheduled_date: string | null;
+  audience_mode?: 'specific' | 'dynamic';
+  audience_start_date?: string | null;
+  audience_include_tag_ids?: string[];
+  audience_exclude_tag_ids?: string[];
+  is_loop?: boolean;
+  ai_prompt?: string | null;
+  loop_status?: 'active' | 'paused' | 'stopped';
+  use_ai_message?: boolean;
 }
 
 export interface CampaignRecipient {
@@ -100,6 +109,8 @@ export interface CampaignRecipient {
   status: 'pending' | 'sent' | 'failed';
   sent_at: string | null;
   error_message: string | null;
+  scheduled_at?: string | null;
+  next_scheduled_at?: string | null;
 }
 
 // API Response types

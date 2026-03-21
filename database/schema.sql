@@ -107,6 +107,10 @@
         message_text TEXT,
         status TEXT NOT NULL DEFAULT 'draft', -- 'draft', 'scheduled', 'sending', 'completed', 'cancelled'
         scheduled_at TIMESTAMPTZ,
+        audience_mode TEXT DEFAULT 'specific', -- 'specific' or 'dynamic'
+        audience_start_date DATE,
+        audience_include_tag_ids JSONB DEFAULT '[]',
+        audience_exclude_tag_ids JSONB DEFAULT '[]',
         started_at TIMESTAMPTZ,
         completed_at TIMESTAMPTZ,
         total_recipients INTEGER DEFAULT 0,
@@ -123,6 +127,8 @@
         campaign_id UUID NOT NULL REFERENCES campaigns(id) ON DELETE CASCADE,
         contact_id UUID NOT NULL REFERENCES contacts(id) ON DELETE CASCADE,
         status TEXT NOT NULL DEFAULT 'pending', -- 'pending', 'sent', 'failed'
+        scheduled_at TIMESTAMPTZ,
+        next_scheduled_at TIMESTAMPTZ,
         sent_at TIMESTAMPTZ,
         error_message TEXT,
         created_at TIMESTAMPTZ DEFAULT NOW(),
@@ -149,6 +155,7 @@
     CREATE INDEX IF NOT EXISTS idx_tag_shares_shared_with_user_id ON tag_shares(shared_with_user_id);
     CREATE INDEX IF NOT EXISTS idx_campaigns_page_id ON campaigns(page_id);
     CREATE INDEX IF NOT EXISTS idx_campaigns_status ON campaigns(status);
+    CREATE INDEX IF NOT EXISTS idx_campaigns_scheduled_at ON campaigns(scheduled_at);
     CREATE INDEX IF NOT EXISTS idx_campaign_recipients_campaign_id ON campaign_recipients(campaign_id);
     CREATE INDEX IF NOT EXISTS idx_campaign_recipients_contact_id ON campaign_recipients(contact_id);
     CREATE INDEX IF NOT EXISTS idx_campaign_recipients_status ON campaign_recipients(status);

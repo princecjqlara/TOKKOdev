@@ -1,0 +1,123 @@
+import { beforeEach, describe, expect, it, vi } from 'vitest';
+import type { NextRequest } from 'next/server';
+
+const mocks = vi.hoisted(() => ({
+    getServerSession: vi.fn(),
+    getSupabaseAdmin: vi.fn()
+}));
+
+vi.mock('next-auth', () => ({
+    getServerSession: mocks.getServerSession
+}));
+
+vi.mock('@/lib/auth', () => ({
+    authOptions: {}
+}));
+
+vi.mock('@/lib/supabase', () => ({
+    getSupabaseAdmin: mocks.getSupabaseAdmin
+}));
+
+import { POST } from './route';
+
+function createRequest(body: Record<string, unknown>): NextRequest {
+    return new Request('http://localhost:3000/api/campaigns', {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json'
+        },
+        body: JSON.stringify(body)
+    }) as NextRequest;
+}
+
+function createSupabaseMock() {
+    const userPageSingle = vi.fn().mockResolvedValue({
+        data: { page_id: 'page_1' },
+        error: null
+    });
+    const userPageEqPage = vi.fn().mockReturnValue({ single: userPageSingle });
+    const userPageEqUser = vi.fn().mockReturnValue({ eq: userPageEqPage });
+    const userPageSelect = vi.fn().mockReturnValue({ eq: userPageEqUser });
+
+    const campaignSingle = vi.fn().mockResolvedValue({
+        data: {
+            id: 'campaign_1',
+            page_id: 'page_1'
+        },
+        error: null
+    });
+    const campaignSelect = vi.fn().mockReturnValue({ single: campaignSingle });
+    const campaignsInsert = vi.fn().mockReturnValue({ select: campaignSelect });
+
+    const campaignRecipientsInsert = vi.fn().mockResolvedValue({ error: null });
+
+    const from = vi.fn((table: string) => {
+        if (table === 'user_pages') {
+            return {
+                select: userPageSelect
+            };
+        }
+
+        if (table === 'campaigns') {
+            return {
+                insert: campaignsInsert
+            };
+        }
+
+        if (table === 'campaign_recipients') {
+            return {
+                insert: campaignRecipientsInsert
+            };
+        }
+
+        throw new Error(`Unexpected table: ${table}`);
+    });
+
+    return {
+        from,
+        campaignsInsert,
+        campaignRecipientsInsert
+    };
+}
+
+describe('POST /api/campaigns', () => {
+    beforeEach(() => {
+        vi.clearAllMocks();
+        mocks.getServerSession.mockResolvedValue({
+            user: {
+                id: 'user_1'
+            }
+        });
+    });
+
+    it('stores scheduled dynamic audience rules without creating recipients yet', async () => {
+        const supabase = createSupabaseMock();
+        mocks.getSupabaseAdmin.mockReturnValue(supabase);
+
+        const response = await POST(createRequest({
+            pageId: 'page_1',
+            name: 'Spring Follow-up',
+            messageText: 'Hello there',
+            scheduledAt: '2026-03-22T10:30:00.000Z',
+            audienceMode: 'dynamic',
+            audienceRules: {
+                startDate: '2026-03-01',
+                includeTagIds: ['tag_a'],
+                excludeTagIds: ['tag_x']
+            }
+        }));
+
+        expect(response.status).toBe(200);
+        expect(supabase.campaignsInsert).toHaveBeenCalledWith(
+            expect.objectContaining({
+                status: 'scheduled',
+                scheduled_at: '2026-03-22T10:30:00.000Z',
+                audience_mode: 'dynamic',
+                audience_start_date: '2026-03-01',
+                audience_include_tag_ids: ['tag_a'],
+                audience_exclude_tag_ids: ['tag_x']
+            })
+        );
+        expect(supabase.campaignRecipientsInsert).not.toHaveBeenCalled();
+    });
+});
