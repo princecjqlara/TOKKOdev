@@ -12,6 +12,7 @@ import { replaceTemplateVariablesForParts, ContactRecord } from '@/lib/placehold
 import {
     applyDynamicButtonValue,
     ButtonMode,
+    buildUtilityTemplateBodyExample,
     buildUtilityTemplateBodyCandidates,
     buildUtilityBodyParameters,
     normalizeRequestedButtons,
@@ -169,13 +170,19 @@ function buildAutoTemplateCandidate(
     bodyText: string,
     buttons?: RequestedMessageButton[]
 ): UtilityTemplate {
+    const bodyExample = buildUtilityTemplateBodyExample(bodyText);
+
     const components: UtilityTemplate['components'] = [
         {
             type: 'BODY',
             text: bodyText,
-            example: {
-                body_text: [['Your order has shipped', 'Thank you for your purchase']]
-            }
+            ...(bodyExample
+                ? {
+                    example: {
+                        body_text: bodyExample
+                    }
+                }
+                : {})
         }
     ];
 

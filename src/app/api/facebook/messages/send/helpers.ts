@@ -67,6 +67,26 @@ export function buildUtilityTemplateBodyCandidates(
     return ['{{1}}'];
 }
 
+export function buildUtilityTemplateBodyExample(bodyText: string): string[][] | undefined {
+    const placeholderMatches = Array.from(bodyText.matchAll(/\{\{(\d+)\}\}/g));
+    if (placeholderMatches.length === 0) {
+        return undefined;
+    }
+
+    const uniquePlaceholderCount = new Set(placeholderMatches.map((match) => match[1])).size;
+    const exampleValues = [
+        'Your account update is ready.',
+        'Please review the latest details.',
+        'Tap below for more information.'
+    ];
+
+    const values = Array.from({ length: uniquePlaceholderCount }, (_, index) => {
+        return exampleValues[index] || `Sample value ${index + 1}`;
+    });
+
+    return [values];
+}
+
 export function buildSupportTeamTemplateBody(pageName: string): string {
     return buildSupportTeamTemplateBodyCandidates(pageName)[0];
 }

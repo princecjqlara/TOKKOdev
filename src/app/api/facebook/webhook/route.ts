@@ -286,6 +286,19 @@ export async function POST(request: NextRequest) {
                             try {
                                 const profile = await getUserProfile(senderId, page.access_token);
                                 profileName = normalizeContactName(profile.name);
+
+                                // Facebook often omits the combined `name` field for
+                                // page-scoped user IDs due to privacy restrictions, but
+                                // still returns first_name / last_name separately.
+                                if (!profileName) {
+                                    const first = typeof profile.first_name === 'string' ? profile.first_name.trim() : '';
+                                    const last = typeof profile.last_name === 'string' ? profile.last_name.trim() : '';
+                                    const composed = [first, last].filter(Boolean).join(' ');
+                                    if (composed) {
+                                        profileName = normalizeContactName(composed);
+                                    }
+                                }
+
                                 profilePic = typeof profile.profile_pic === 'string' ? profile.profile_pic.trim() || null : null;
                             } catch (profileError) {
                                 logWarn('Failed to fetch profile for contact enrichment', {

@@ -50,6 +50,12 @@ describe('mergeSendErrors', () => {
             categorizeSendError("(#551) This person isn't available right now.")
         ).toBe('recipient_unavailable');
 
+        expect(
+            categorizeSendError(
+                '(#10) This message is being sent outside the allowed window. Learn more about the new policy here: https://developers.facebook.com/docs/messenger-platform/policy-overview'
+            )
+        ).toBe('outside_messaging_window');
+
         expect(categorizeSendError('Network timeout')).toBe('other');
     });
 
@@ -63,6 +69,11 @@ describe('mergeSendErrors', () => {
             isRetryableSendError("Skipped: utility template not ready for this page. Template 'account_general_notification' exists but status is REJECTED, REJECTED")
         ).toBe(false);
         expect(isRetryableSendError("(#551) This person isn't available right now.")).toBe(false);
+        expect(
+            isRetryableSendError(
+                '(#10) This message is being sent outside the allowed window. Learn more about the new policy here: https://developers.facebook.com/docs/messenger-platform/policy-overview'
+            )
+        ).toBe(false);
     });
 
     it('summarizes send error categories', () => {
@@ -73,6 +84,10 @@ describe('mergeSendErrors', () => {
                 error: "Skipped: utility template not ready for this page. Template 'account_general_notification' exists but status is REJECTED, REJECTED"
             },
             { contactId: 'b', error: "(#551) This person isn't available right now." },
+            {
+                contactId: 'z',
+                error: '(#10) This message is being sent outside the allowed window. Learn more about the new policy here: https://developers.facebook.com/docs/messenger-platform/policy-overview'
+            },
             { contactId: 'c', error: 'Timeout' },
             { contactId: 'd', error: 'Requires pages_utility_messaging permission to manage the object' }
         ]);
@@ -81,6 +96,7 @@ describe('mergeSendErrors', () => {
             utilityPermissionMissing: 2,
             utilityTemplateMissing: 1,
             recipientUnavailable: 1,
+            outsideMessagingWindow: 1,
             other: 1
         });
     });

@@ -4,6 +4,7 @@ export type SendErrorCategory =
     | 'utility_permission_missing'
     | 'utility_template_missing'
     | 'recipient_unavailable'
+    | 'outside_messaging_window'
     | 'other';
 
 export function categorizeSendError(error: string): SendErrorCategory {
@@ -37,6 +38,15 @@ export function categorizeSendError(error: string): SendErrorCategory {
         return 'recipient_unavailable';
     }
 
+    if (
+        normalized.includes('(#10)') ||
+        normalized.includes('outside the allowed window') ||
+        normalized.includes('policy-overview') ||
+        normalized.includes('error_subcode: 2018278')
+    ) {
+        return 'outside_messaging_window';
+    }
+
     return 'other';
 }
 
@@ -49,12 +59,14 @@ export function summarizeSendErrors(errors: SendError[]): {
     utilityPermissionMissing: number;
     utilityTemplateMissing: number;
     recipientUnavailable: number;
+    outsideMessagingWindow: number;
     other: number;
 } {
     const summary = {
         utilityPermissionMissing: 0,
         utilityTemplateMissing: 0,
         recipientUnavailable: 0,
+        outsideMessagingWindow: 0,
         other: 0
     };
 
@@ -66,6 +78,8 @@ export function summarizeSendErrors(errors: SendError[]): {
             summary.utilityTemplateMissing += 1;
         } else if (category === 'recipient_unavailable') {
             summary.recipientUnavailable += 1;
+        } else if (category === 'outside_messaging_window') {
+            summary.outsideMessagingWindow += 1;
         } else {
             summary.other += 1;
         }

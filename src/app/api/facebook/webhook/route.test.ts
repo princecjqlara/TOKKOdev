@@ -451,6 +451,27 @@ describe('POST /api/facebook/webhook', () => {
         expect(payload.profile_pic).toBe('https://example.com/recovered.jpg');
     });
 
+    it('constructs contact name from first_name and last_name when combined name is missing', async () => {
+        const supabase = createSupabaseMock();
+        mocks.getSupabaseAdmin.mockReturnValue(supabase);
+        mocks.getUserProfile.mockResolvedValue({
+            id: 'contact_psid_1',
+            first_name: 'Maria',
+            last_name: 'Santos',
+            profile_pic: 'https://example.com/maria.jpg'
+        });
+
+        const response = await POST(createWebhookRequest());
+        const body = await response.json();
+
+        expect(response.status).toBe(200);
+        expect(body.success).toBe(true);
+        expect(mocks.getUserProfile).toHaveBeenCalledWith('contact_psid_1', 'page_access_token_1');
+
+        const payload = supabase.contactsUpsert.mock.calls[0][0] as Record<string, unknown>;
+        expect(payload.name).toBe('Maria Santos');
+    });
+
     it('retries contact upsert without first_interaction_at when schema is older', async () => {
         const supabase = createSupabaseMockWithFirstInteractionColumnFailure();
         mocks.getSupabaseAdmin.mockReturnValue(supabase);

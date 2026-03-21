@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getSessionFromRequest } from '@/lib/get-session';
 import { getSupabaseAdmin } from '@/lib/supabase';
 import { getPageConversations, getUserProfile, getConversationMessages, subscribePageToAppWebhook } from '@/lib/facebook';
+import { hasUsableContactName, normalizeContactName, pickPreferredContactName } from '../../../../../lib/contact-names';
 
 // Increase timeout for sync operations (up to 5 minutes)
 export const maxDuration = 300;
@@ -211,15 +212,30 @@ export async function POST(
 
         // Check which PSIDs are missing from database (deleted contacts)
         let restoredCount = 0;
+        const existingContactsByPsid = new Map<string, { name: string | null; profile_pic: string | null }>();
         if (conversationPsids.size > 0) {
             try {
                 const { data: existingContacts } = await supabase
                     .from('contacts')
-                    .select('psid')
+                    .select('psid,name,profile_pic')
                     .eq('page_id', pageId)
                     .in('psid', Array.from(conversationPsids));
 
-                const existingPsids = new Set((existingContacts || []).map(c => c.psid));
+                for (const existingContact of existingContacts || []) {
+                    if (typeof existingContact.psid !== 'string' || existingContact.psid.trim() === '') {
+                        continue;
+                    }
+
+                    existingContactsByPsid.set(existingContact.psid, {
+                        name: typeof existingContact.name === 'string' ? existingContact.name : null,
+                        profile_pic:
+                            typeof existingContact.profile_pic === 'string' && existingContact.profile_pic.trim() !== ''
+                                ? existingContact.profile_pic
+                                : null
+                    });
+                }
+
+                const existingPsids = new Set(existingContactsByPsid.keys());
                 const missingPsids = Array.from(conversationPsids).filter(psid => !existingPsids.has(psid));
 
                 if (missingPsids.length > 0) {
@@ -244,7 +260,7 @@ export async function POST(
         const SYNC_BATCH_SIZE = 15; // Process 15 contacts in parallel (increased for faster processing)
         const DELAY_BETWEEN_BATCHES = 20; // 20ms delay between batches (reduced for faster processing)
         const MAX_PROCESSING_TIME = 270000; // 4.5 minutes (leave 30 seconds buffer before 5 min timeout)
-        const PROFILE_FETCH_TIMEOUT = 2000; // 2 seconds max per profile fetch (reduced for faster processing)
+        const PROFILE_FETCH_TIMEOUT = 4000; // 4 seconds max per profile fetch for more reliable name enrichment
         const startTime = Date.now();
 
         logInfo('Beginning conversation processing', {
@@ -324,35 +340,45 @@ export async function POST(
                 }
 
                 try {
-                    let profilePic: string | undefined;
-                    let name = participant.name;
+                    const existingContact = existingContactsByPsid.get(participant.id);
+                    const existingName = normalizeContactName(existingContact?.name);
+                    const participantName = normalizeContactName(participant.name);
+
+                    let name = pickPreferredContactName(existingName, participantName);
+                    let profilePic = existingContact?.profile_pic || null;
 
                     // Try to fetch profile with timeout, but don't let it block the sync
-                    try {
-                        const profilePromise = getUserProfile(participant.id, page.access_token);
-                        const timeoutPromise = new Promise((_, reject) =>
-                            setTimeout(() => reject(new Error('Profile fetch timeout')), PROFILE_FETCH_TIMEOUT)
-                        );
+                    const shouldFetchProfile = !hasUsableContactName(name) || !profilePic;
+                    if (shouldFetchProfile) {
+                        try {
+                            const profilePromise = getUserProfile(participant.id, page.access_token);
+                            const timeoutPromise = new Promise((_, reject) =>
+                                setTimeout(() => reject(new Error('Profile fetch timeout')), PROFILE_FETCH_TIMEOUT)
+                            );
 
-                        const profile = await Promise.race([profilePromise, timeoutPromise]) as { name: string; profile_pic?: string };
-                        name = profile.name || name;
-                        profilePic = profile.profile_pic;
-                    } catch (profileError) {
-                        // Profile fetch failed or timed out, use basic info - continue anyway
-                        // These are common for users with privacy settings or invalid PSIDs
-                        // Only log if it's not a timeout or permission issue (reduce noise)
-                        const errorMsg = (profileError as Error).message || String(profileError);
-                        const isExpectedError =
-                            errorMsg.includes('timeout') ||
-                            errorMsg.includes('does not exist') ||
-                            errorMsg.includes('missing permissions') ||
-                            errorMsg.includes('does not support this operation');
+                            const profile = await Promise.race([profilePromise, timeoutPromise]) as { name: string; profile_pic?: string };
+                            name = pickPreferredContactName(profile.name, name);
+                            profilePic =
+                                typeof profile.profile_pic === 'string' && profile.profile_pic.trim().length > 0
+                                    ? profile.profile_pic.trim()
+                                    : profilePic;
+                        } catch (profileError) {
+                            // Profile fetch failed or timed out, use basic info - continue anyway
+                            // These are common for users with privacy settings or invalid PSIDs
+                            // Only log if it's not a timeout or permission issue (reduce noise)
+                            const errorMsg = (profileError as Error).message || String(profileError);
+                            const isExpectedError =
+                                errorMsg.includes('timeout') ||
+                                errorMsg.includes('does not exist') ||
+                                errorMsg.includes('missing permissions') ||
+                                errorMsg.includes('does not support this operation');
 
-                        if (!isExpectedError) {
-                            logWarn('Unexpected profile fetch error', {
-                                psid: participant.id,
-                                error: errorMsg
-                            });
+                            if (!isExpectedError) {
+                                logWarn('Unexpected profile fetch error', {
+                                    psid: participant.id,
+                                    error: errorMsg
+                                });
+                            }
                         }
                     }
 
@@ -442,8 +468,8 @@ export async function POST(
                         .upsert({
                             page_id: pageId,
                             psid: participant.id,
-                            name,
-                            profile_pic: profilePic,
+                            ...(name ? { name } : {}),
+                            ...(profilePic ? { profile_pic: profilePic } : {}),
                             last_interaction_at: conversation.updated_time,
                             best_contact_hour: bestContactHour,
                             best_contact_confidence: bestContactConfidence,
@@ -455,6 +481,13 @@ export async function POST(
                             onConflict: 'page_id,psid',
                             ignoreDuplicates: false
                         });
+
+                    if (!upsertError) {
+                        existingContactsByPsid.set(participant.id, {
+                            name: name || existingContact?.name || null,
+                            profile_pic: profilePic || existingContact?.profile_pic || null
+                        });
+                    }
 
                     if (upsertError) {
                         logError('Error upserting contact', {

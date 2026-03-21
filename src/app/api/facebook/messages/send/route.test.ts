@@ -4,6 +4,7 @@ import {
     applyDynamicButtonValue,
     buildSupportTeamTemplateBodyCandidates,
     buildSupportTeamTemplateBody,
+    buildUtilityTemplateBodyExample,
     buildUtilityTemplateBodyCandidates,
     buildUtilityBodyParameters,
     normalizeRequestedButtons,
@@ -50,6 +51,24 @@ describe('buildUtilityTemplateBodyCandidates', () => {
 
         expect(candidates).toContain('{{1}}');
         expect(candidates).toContain('{{1}} - from Ares Media support team - {{2}}');
+    });
+});
+
+describe('buildUtilityTemplateBodyExample', () => {
+    it('returns one example value for a single-placeholder body', () => {
+        expect(buildUtilityTemplateBodyExample('{{1}}')).toEqual([
+            ['Your account update is ready.']
+        ]);
+    });
+
+    it('returns matching example values for a two-placeholder body', () => {
+        expect(buildUtilityTemplateBodyExample('{{1}} - from Ares Media support team - {{2}}')).toEqual([
+            ['Your account update is ready.', 'Please review the latest details.']
+        ]);
+    });
+
+    it('returns undefined when body has no placeholders', () => {
+        expect(buildUtilityTemplateBodyExample('Hello there')).toBeUndefined();
     });
 });
 

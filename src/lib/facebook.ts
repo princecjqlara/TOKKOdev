@@ -131,9 +131,9 @@ export async function getPageConversations(
 export async function getUserProfile(
     psid: string,
     pageAccessToken: string
-): Promise<{ id: string; name: string; profile_pic?: string }> {
+): Promise<{ id: string; name?: string; first_name?: string; last_name?: string; profile_pic?: string }> {
     const response = await fetch(
-        `${FACEBOOK_GRAPH_URL}/${psid}?fields=id,name,profile_pic&access_token=${pageAccessToken}`
+        `${FACEBOOK_GRAPH_URL}/${psid}?fields=id,name,first_name,last_name,profile_pic&access_token=${pageAccessToken}`
     );
 
     if (!response.ok) {
