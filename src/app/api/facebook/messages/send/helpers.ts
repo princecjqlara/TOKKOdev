@@ -27,6 +27,17 @@ export function resolveButtonMode(rawMode: unknown): ButtonMode {
         : 'TEMPLATE_STATIC';
 }
 
+export function getMessagingType(
+    buttonMode: ButtonMode,
+    requestedButtonsCount: number
+): 'UTILITY' | 'RESPONSE' {
+    if (requestedButtonsCount > 0 || buttonMode === 'RESPONSE_DYNAMIC') {
+        return 'RESPONSE';
+    }
+
+    return 'UTILITY';
+}
+
 export type ResolvedMessageParts = {
     part1: string;
     part2: string;

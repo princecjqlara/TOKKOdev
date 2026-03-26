@@ -4,6 +4,7 @@ import {
     applyDynamicButtonValue,
     buildSupportTeamTemplateBodyCandidates,
     buildSupportTeamTemplateBody,
+    getMessagingType,
     buildUtilityTemplateBodyExample,
     buildUtilityTemplateBodyCandidates,
     buildUtilityBodyParameters,
@@ -248,6 +249,17 @@ describe('resolveButtonMode', () => {
 
     it('accepts RESPONSE_DYNAMIC when explicitly requested', () => {
         expect(resolveButtonMode('RESPONSE_DYNAMIC')).toBe('RESPONSE_DYNAMIC');
+    });
+});
+
+describe('getMessagingType', () => {
+    it('uses RESPONSE whenever buttons are present so sending does not depend on utility templates', () => {
+        expect(getMessagingType('TEMPLATE_STATIC', 1)).toBe('RESPONSE');
+        expect(getMessagingType('RESPONSE_DYNAMIC', 1)).toBe('RESPONSE');
+    });
+
+    it('keeps UTILITY for buttonless sends', () => {
+        expect(getMessagingType('TEMPLATE_STATIC', 0)).toBe('UTILITY');
     });
 });
 

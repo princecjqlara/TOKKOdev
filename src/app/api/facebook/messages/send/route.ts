@@ -15,6 +15,7 @@ import {
     buildUtilityTemplateBodyExample,
     buildUtilityTemplateBodyCandidates,
     buildUtilityBodyParameters,
+    getMessagingType,
     normalizeRequestedButtons,
     RequestedMessageButton,
     resolveButtonMode,
@@ -33,17 +34,6 @@ import path from 'path';
 //     name: string | null;
 //     last_interaction_at: string | null;
 // }
-
-function getMessagingType(
-    buttonMode: ButtonMode,
-    requestedButtonsCount: number
-): 'UTILITY' | 'RESPONSE' {
-    if (buttonMode === 'RESPONSE_DYNAMIC' && requestedButtonsCount > 0) {
-        return 'RESPONSE';
-    }
-
-    return 'UTILITY';
-}
 
 function isUtilityPermissionError(errorMessage: string): boolean {
     const normalized = errorMessage.toLowerCase();
