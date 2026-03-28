@@ -56,13 +56,13 @@ export async function sendCampaignById({
             }
         }
 
-        const allowedStatuses = new Set(allowScheduled ? ['draft', 'scheduled'] : ['draft']);
+        const allowedStatuses = new Set(allowScheduled ? ['draft', 'scheduled', 'sending'] : ['draft', 'sending']);
         if (!allowedStatuses.has(campaign.status)) {
             return {
                 status: 400,
                 body: {
                     error: 'Bad Request',
-                    message: 'Campaign has already been sent or is in progress'
+                    message: 'Campaign has already been completed or cancelled'
                 }
             };
         }
@@ -358,6 +358,21 @@ export async function sendCampaignById({
         };
     } catch (error) {
         console.error('Error sending campaign:', error);
+
+        // Reset campaign status back to draft so it can be retried
+        try {
+            await supabase
+                .from('campaigns')
+                .update({
+                    status: 'draft',
+                    updated_at: new Date().toISOString()
+                })
+                .eq('id', campaignId);
+            console.log(`🔄 Campaign ${campaignId} status reset to 'draft' after error`);
+        } catch (resetError) {
+            console.error(`❌ Failed to reset campaign ${campaignId} status:`, resetError);
+        }
+
         return {
             status: 500,
             body: { error: 'Failed to send campaign', message: (error as Error).message }

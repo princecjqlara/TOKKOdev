@@ -320,12 +320,30 @@ export default function CampaignsPage() {
     const handleSend = async (campaignId: string) => {
         setSendingCampaignId(campaignId);
         try {
-            await fetch(`/api/campaigns/${campaignId}/send`, {
+            const response = await fetch(`/api/campaigns/${campaignId}/send`, {
                 method: 'POST'
             });
+
+            const data = await response.json().catch(() => ({} as Record<string, unknown>));
+
+            if (!response.ok) {
+                const errorMessage = (data as any).message || `Failed to send campaign (HTTP ${response.status})`;
+                console.error('Error sending campaign:', errorMessage, data);
+                alert(`Failed to send campaign: ${errorMessage}`);
+            } else {
+                const sent = (data as any).sent ?? 0;
+                const failed = (data as any).failed ?? 0;
+                if (failed > 0) {
+                    alert(`Campaign sent with issues.\n\n✅ Sent: ${sent}\n❌ Failed: ${failed}`);
+                } else if (sent > 0) {
+                    alert(`✅ Campaign sent successfully! ${sent} messages delivered.`);
+                }
+            }
+
             await fetchCampaigns();
         } catch (error) {
             console.error('Error sending campaign:', error);
+            alert(`Error sending campaign: ${(error as Error).message}`);
         } finally {
             setSendingCampaignId(null);
         }
@@ -342,12 +360,24 @@ export default function CampaignsPage() {
     const handleCancel = async (campaignId: string) => {
         setCancellingCampaignId(campaignId);
         try {
-            await fetch(`/api/campaigns/${campaignId}/cancel`, {
+            const response = await fetch(`/api/campaigns/${campaignId}/cancel`, {
                 method: 'POST'
             });
+
+            const data = await response.json().catch(() => ({} as Record<string, unknown>));
+
+            if (!response.ok) {
+                const errorMessage = (data as any).message || `Failed to cancel campaign (HTTP ${response.status})`;
+                console.error('Error cancelling campaign:', errorMessage, data);
+                alert(`Failed to cancel campaign: ${errorMessage}`);
+            } else {
+                alert('Campaign cancelled successfully.');
+            }
+
             await fetchCampaigns();
         } catch (error) {
             console.error('Error cancelling campaign:', error);
+            alert(`Error cancelling campaign: ${(error as Error).message}`);
         } finally {
             setCancellingCampaignId(null);
         }
@@ -358,15 +388,23 @@ export default function CampaignsPage() {
 
         setActionLoading(true);
         try {
-            await fetch(`/api/campaigns?id=${editingCampaign.id}`, {
+            const response = await fetch(`/api/campaigns?id=${editingCampaign.id}`, {
                 method: 'DELETE'
             });
+
+            if (!response.ok) {
+                const data = await response.json().catch(() => ({} as Record<string, unknown>));
+                const errorMessage = (data as any).message || `Failed to delete campaign (HTTP ${response.status})`;
+                console.error('Error deleting campaign:', errorMessage, data);
+                alert(`Failed to delete campaign: ${errorMessage}`);
+            }
 
             setShowDeleteModal(false);
             setEditingCampaign(null);
             await fetchCampaigns();
         } catch (error) {
             console.error('Error deleting campaign:', error);
+            alert(`Error deleting campaign: ${(error as Error).message}`);
         } finally {
             setActionLoading(false);
         }
