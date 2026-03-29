@@ -198,6 +198,7 @@ export default function ContactsPage() {
     const [tags, setTags] = useState<TagType[]>([]);
     const [loading, setLoading] = useState(true);
     const [syncing, setSyncing] = useState(false);
+    const [availableTemplates, setAvailableTemplates] = useState<{name: string, status: string}[]>([]);
 
     // Pagination
     const [page, setPage] = useState(1);
@@ -263,6 +264,33 @@ export default function ContactsPage() {
             fetchTags();
         }
     }, [selectedPageId, page, pageSize, search, selectedTagFilters, excludedTagFilters, dateFrom, dateTo]);
+
+    useEffect(() => {
+        if (selectedPageId) {
+            const fetchTemplates = async () => {
+                try {
+                    const res = await fetch(`/api/facebook/templates/status?pageId=${selectedPageId}`);
+                    const data = await res.json();
+                    const templates = data.templates || [];
+                    setAvailableTemplates(templates);
+                    
+                    setEnvelopeWrapper(current => {
+                        if (current === 'template' || current === 'none') return current;
+                        const templateName = ENVELOPE_TEMPLATE_MAP[current];
+                        if (!templateName) return 'template';
+                        const isApproved = templates.some((t: any) => 
+                            t.name === templateName && (t.status === 'APPROVED' || t.status === 'ACTIVE')
+                        );
+                        return isApproved ? current : 'template';
+                    });
+                } catch (error) {
+                    console.error('Error fetching templates:', error);
+                    setAvailableTemplates([]);
+                }
+            };
+            fetchTemplates();
+        }
+    }, [selectedPageId]);
 
     useEffect(() => {
         if (!selectedPageId) return;
@@ -1914,25 +1942,66 @@ export default function ContactsPage() {
                             onChange={(e) => setEnvelopeWrapper(e.target.value)}
                         >
                             <option value="template">Original Template (Auto-select approved template)</option>
-                            <option disabled>────── Natural Conversations ──────</option>
-                            <option value="friendly_1">Friendly (Just wanted to let you know)</option>
-                            <option value="friendly_2">Friendly (Hi there)</option>
-                            <option value="friendly_3">Friendly (Quick heads up)</option>
-                            <option value="friendly_4">Friendly (Quick update)</option>
-                            <option value="friendly_5">Friendly (Keeping you in the loop)</option>
-                            <option value="friendly_6">Friendly (Thought you should know)</option>
-                            <option value="casual_1">Casual (Good news)</option>
-                            <option value="casual_2">Casual (Just checking in)</option>
-                            <option value="casual_3">Casual (Quick reminder)</option>
-                            <option value="simple_1">Simple (Just a note)</option>
-                            <option disabled>────── Legacy Wrappers ──────</option>
-                            <option value="msg">Standard Message (&quot;Message from our team: [Your Text]&quot;)</option>
-                            <option value="notice">System Notice (&quot;Important notice: [Your Text]&quot;)</option>
-                            <option value="alert">System Alert (&quot;[Your Text]. This is an automated notification.&quot;)</option>
-                            <option disabled>────── With Action Buttons ──────</option>
-                            <option value="btn_join">Join Meeting + [Join Meeting Button]</option>
-                            <option value="btn_details">Update Request + [View Details Button]</option>
-                            <option value="btn_book">New Notification + [Book Now Button]</option>
+                            
+                            {(() => {
+                                const isTemplateApproved = (wrapperKey: string) => {
+                                    if (wrapperKey === 'template' || wrapperKey === 'none') return true;
+                                    const templateName = ENVELOPE_TEMPLATE_MAP[wrapperKey];
+                                    if (!templateName) return false;
+                                    return availableTemplates.some(t => 
+                                        t.name === templateName && (t.status === 'APPROVED' || t.status === 'ACTIVE')
+                                    );
+                                };
+
+                                const naturalConversations = [
+                                    { value: 'friendly_1', label: 'Friendly (Just wanted to let you know)' },
+                                    { value: 'friendly_2', label: 'Friendly (Hi there)' },
+                                    { value: 'friendly_3', label: 'Friendly (Quick heads up)' },
+                                    { value: 'friendly_4', label: 'Friendly (Quick update)' },
+                                    { value: 'friendly_5', label: 'Friendly (Keeping you in the loop)' },
+                                    { value: 'friendly_6', label: 'Friendly (Thought you should know)' },
+                                    { value: 'casual_1', label: 'Casual (Good news)' },
+                                    { value: 'casual_2', label: 'Casual (Just checking in)' },
+                                    { value: 'casual_3', label: 'Casual (Quick reminder)' },
+                                    { value: 'simple_1', label: 'Simple (Just a note)' }
+                                ].filter(t => isTemplateApproved(t.value));
+                                
+                                const legacyWrappers = [
+                                    { value: 'msg', label: 'Standard Message ("Message from our team: [Your Text]")' },
+                                    { value: 'notice', label: 'System Notice ("Important notice: [Your Text]")' },
+                                    { value: 'alert', label: 'System Alert ("[Your Text]. This is an automated notification.")' }
+                                ].filter(t => isTemplateApproved(t.value));
+                                
+                                const actionButtons = [
+                                    { value: 'btn_join', label: 'Join Meeting + [Join Meeting Button]' },
+                                    { value: 'btn_details', label: 'Update Request + [View Details Button]' },
+                                    { value: 'btn_book', label: 'New Notification + [Book Now Button]' }
+                                ].filter(t => isTemplateApproved(t.value));
+                                
+                                return (
+                                    <>
+                                        {naturalConversations.length > 0 && (
+                                            <>
+                                                <option disabled>────── Natural Conversations ──────</option>
+                                                {naturalConversations.map(t => <option key={t.value} value={t.value}>{t.label}</option>)}
+                                            </>
+                                        )}
+                                        {legacyWrappers.length > 0 && (
+                                            <>
+                                                <option disabled>────── Legacy Wrappers ──────</option>
+                                                {legacyWrappers.map(t => <option key={t.value} value={t.value}>{t.label}</option>)}
+                                            </>
+                                        )}
+                                        {actionButtons.length > 0 && (
+                                            <>
+                                                <option disabled>────── With Action Buttons ──────</option>
+                                                {actionButtons.map(t => <option key={t.value} value={t.value}>{t.label}</option>)}
+                                            </>
+                                        )}
+                                    </>
+                                );
+                            })()}
+                            
                             <option disabled>─────────────────────────────────</option>
                             <option value="none">No Wrapper (Strict 24h limit applies!)</option>
                         </select>

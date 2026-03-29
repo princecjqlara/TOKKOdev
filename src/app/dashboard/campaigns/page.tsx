@@ -289,7 +289,30 @@ export default function CampaignsPage() {
         try {
             const res = await fetch(`/api/facebook/templates/status?pageId=${selectedPageId}`);
             const data = await res.json();
-            setAvailableTemplates(data.templates || []);
+            const templates = data.templates || [];
+            setAvailableTemplates(templates);
+            
+            // Auto-select first approved wrapper if current is not approved
+            setFreeformWrapper(current => {
+                if (current === 'none') return current;
+                const templateName = CAMPAIGN_ENVELOPE_MAP[current];
+                if (!templateName) return 'none';
+                const isApproved = templates.some((t: any) => 
+                    t.name === templateName && (t.status === 'APPROVED' || t.status === 'ACTIVE')
+                );
+                
+                if (isApproved) return current;
+                
+                // If the current wrapper is not approved, we find another one
+                const allWrappers = ['msg', 'friendly_1', 'friendly_2', 'friendly_3', 'friendly_4', 'friendly_5', 'friendly_6', 'casual_1', 'casual_2', 'casual_3', 'simple_1', 'notice', 'alert'];
+                for (const w of allWrappers) {
+                    const tName = CAMPAIGN_ENVELOPE_MAP[w];
+                    if (tName && templates.some((t: any) => t.name === tName && (t.status === 'APPROVED' || t.status === 'ACTIVE'))) {
+                        return w;
+                    }
+                }
+                return 'none';
+            });
         } catch (error) {
             console.error('Error fetching templates:', error);
             setAvailableTemplates([]);
@@ -992,25 +1015,65 @@ export default function CampaignsPage() {
                                                 value={freeformWrapper}
                                                 onChange={(e) => setFreeformWrapper(e.target.value)}
                                             >
-                                                <option disabled>────── Natural Conversations ──────</option>
-                                                <option value="friendly_1">Friendly (Just wanted to let you know)</option>
-                                                <option value="friendly_2">Friendly (Hi there)</option>
-                                                <option value="friendly_3">Friendly (Quick heads up)</option>
-                                                <option value="friendly_4">Friendly (Quick update)</option>
-                                                <option value="friendly_5">Friendly (Keeping you in the loop)</option>
-                                                <option value="friendly_6">Friendly (Thought you should know)</option>
-                                                <option value="casual_1">Casual (Good news)</option>
-                                                <option value="casual_2">Casual (Just checking in)</option>
-                                                <option value="casual_3">Casual (Quick reminder)</option>
-                                                <option value="simple_1">Simple (Just a note)</option>
-                                                <option disabled>────── Legacy Wrappers ──────</option>
-                                                <option value="msg">Standard Message (&quot;Message from our team: [Your Text]&quot;)</option>
-                                                <option value="notice">System Notice (&quot;Important notice: [Your Text]&quot;)</option>
-                                                <option value="alert">System Alert (&quot;[Your Text]. This is an automated notification.&quot;)</option>
-                                                <option disabled>────── With Action Buttons ──────</option>
-                                                <option value="btn_join">Join Meeting + [Join Meeting Button]</option>
-                                                <option value="btn_details">Update Request + [View Details Button]</option>
-                                                <option value="btn_book">New Notification + [Book Now Button]</option>
+                                                {(() => {
+                                                    const isCampaignTemplateApproved = (wrapperKey: string) => {
+                                                        if (wrapperKey === 'none') return true;
+                                                        const templateName = CAMPAIGN_ENVELOPE_MAP[wrapperKey];
+                                                        if (!templateName) return false;
+                                                        return availableTemplates.some(t => 
+                                                            t.name === templateName && (t.status === 'APPROVED' || t.status === 'ACTIVE')
+                                                        );
+                                                    };
+
+                                                    const naturalConversations = [
+                                                        { value: 'friendly_1', label: 'Friendly (Just wanted to let you know)' },
+                                                        { value: 'friendly_2', label: 'Friendly (Hi there)' },
+                                                        { value: 'friendly_3', label: 'Friendly (Quick heads up)' },
+                                                        { value: 'friendly_4', label: 'Friendly (Quick update)' },
+                                                        { value: 'friendly_5', label: 'Friendly (Keeping you in the loop)' },
+                                                        { value: 'friendly_6', label: 'Friendly (Thought you should know)' },
+                                                        { value: 'casual_1', label: 'Casual (Good news)' },
+                                                        { value: 'casual_2', label: 'Casual (Just checking in)' },
+                                                        { value: 'casual_3', label: 'Casual (Quick reminder)' },
+                                                        { value: 'simple_1', label: 'Simple (Just a note)' }
+                                                    ].filter(t => isCampaignTemplateApproved(t.value));
+                                                    
+                                                    const legacyWrappers = [
+                                                        { value: 'msg', label: 'Standard Message ("Message from our team: [Your Text]")' },
+                                                        { value: 'notice', label: 'System Notice ("Important notice: [Your Text]")' },
+                                                        { value: 'alert', label: 'System Alert ("[Your Text]. This is an automated notification.")' }
+                                                    ].filter(t => isCampaignTemplateApproved(t.value));
+                                                    
+                                                    const actionButtons = [
+                                                        { value: 'btn_join', label: 'Join Meeting + [Join Meeting Button]' },
+                                                        { value: 'btn_details', label: 'Update Request + [View Details Button]' },
+                                                        { value: 'btn_book', label: 'New Notification + [Book Now Button]' }
+                                                    ].filter(t => isCampaignTemplateApproved(t.value));
+                                                    
+                                                    return (
+                                                        <>
+                                                            {naturalConversations.length > 0 && (
+                                                                <>
+                                                                    <option disabled>────── Natural Conversations ──────</option>
+                                                                    {naturalConversations.map(t => <option key={t.value} value={t.value}>{t.label}</option>)}
+                                                                </>
+                                                            )}
+                                                            {legacyWrappers.length > 0 && (
+                                                                <>
+                                                                    <option disabled>────── Legacy Wrappers ──────</option>
+                                                                    {legacyWrappers.map(t => <option key={t.value} value={t.value}>{t.label}</option>)}
+                                                                </>
+                                                            )}
+                                                            {actionButtons.length > 0 && (
+                                                                <>
+                                                                    <option disabled>────── With Action Buttons ──────</option>
+                                                                    {actionButtons.map(t => <option key={t.value} value={t.value}>{t.label}</option>)}
+                                                                </>
+                                                            )}
+                                                        </>
+                                                    );
+                                                })()}
+                                                
                                                 <option disabled>─────────────────────────────────</option>
                                                 <option value="none">No Wrapper (Strict 24h limit applies!)</option>
                                             </select>
