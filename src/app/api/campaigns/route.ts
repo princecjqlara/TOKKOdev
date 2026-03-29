@@ -124,8 +124,12 @@ export async function POST(request: NextRequest) {
             useAiMessage,
             scheduledAt: rawScheduledAt,
             audienceMode: rawAudienceMode,
-            audienceRules: rawAudienceRules
+            audienceRules: rawAudienceRules,
+            templateName: rawTemplateName,
+            templateLanguage: rawTemplateLanguage
         } = body;
+        const templateName = typeof rawTemplateName === 'string' && rawTemplateName.trim() ? rawTemplateName.trim() : null;
+        const templateLanguage = typeof rawTemplateLanguage === 'string' && rawTemplateLanguage.trim() ? rawTemplateLanguage.trim() : null;
         const scheduledAt = normalizeScheduledAt(rawScheduledAt);
         const audienceMode = rawAudienceMode === 'dynamic' ? 'dynamic' : 'specific';
         const audienceStartDate =
@@ -235,7 +239,9 @@ export async function POST(request: NextRequest) {
                 is_loop: isLoop || false,
                 ai_prompt: (isLoop || useAiMessage) ? aiPrompt : null, // Store aiPrompt for AI campaigns
                 loop_status: isLoop ? 'active' : 'stopped',
-                use_ai_message: useAiMessage || false // New field for AI personalized regular campaigns
+                use_ai_message: useAiMessage || false,
+                template_name: (!isLoop && !useAiMessage) ? templateName : null,
+                template_language: (!isLoop && !useAiMessage && templateName) ? (templateLanguage || 'en_US') : null
             })
             .select()
             .single();

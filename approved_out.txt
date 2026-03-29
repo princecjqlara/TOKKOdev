@@ -1,0 +1,362 @@
+﻿=== APPROVED TEMPLATES IN DATABASE ===
+
+=== APPROVED TEMPLATES ON FACEBOOK ===
+
+Checking Facebook for page: Kalinaw Studios (505255682680407)
+  - booking_confirm_btn_v1 (en_US) [APPROVED]
+  - order_track_btn_v1 (en_US) [APPROVED]
+  - acct_update_btn_v1 (en_US) [APPROVED]
+  - acct_detail_2p_v2 (en_US) [APPROVED]
+  - order_update_2p_v1 (en_US) [APPROVED]
+  - general_msg_v3 (en_US) [APPROVED]
+  - acct_followup_v1 (en_US) [APPROVED]
+  - general_notice_v1 (en_US) [APPROVED]
+  - general_msg_v1 (en_US) [APPROVED]
+  - acct_reminder_v1 (en_US) [APPROVED]
+  - general_alert_v1 (en_US) [APPROVED]
+  - support_response_v1 (en_US) [APPROVED]
+  - booking_update_v1 (en_US) [APPROVED]
+  - payment_notice_v1 (en_US) [APPROVED]
+  - order_notification_v1 (en_US) [APPROVED]
+  - acct_info_notice_v1 (en_US) [APPROVED]
+  - acct_service_update_v1 (en_US) [APPROVED]
+  - account_feedback_request (en_US) [APPROVED]
+  - account_order_status_update (en_US) [APPROVED]
+  - account_appointment_reminder (en_US) [APPROVED]
+  - account_payment_confirmation (en_US) [APPROVED]
+  - account_billing_notice (en_US) [APPROVED]
+  - account_verification_alert (en_US) [APPROVED]
+  - account_update_notification (en_US) [APPROVED]
+  - account_security_alert (en_US) [APPROVED]
+  - account_general_notification (en_US) [APPROVED]
+  - offer_status_update_auto_20260220083121_1 (en_US) [APPROVED]
+  (12 other templates in status like: REJECTED)
+
+Checking Facebook for page: Malaya Studios (558841917314834)
+  - booking_confirm_btn_v1 (en_US) [APPROVED]
+  - order_track_btn_v1 (en_US) [APPROVED]
+  - acct_update_btn_v1 (en_US) [APPROVED]
+  - acct_detail_2p_v2 (en_US) [APPROVED]
+  - order_update_2p_v1 (en_US) [APPROVED]
+  - general_msg_v3 (en_US) [APPROVED]
+  - acct_followup_v1 (en_US) [APPROVED]
+  - general_notice_v1 (en_US) [APPROVED]
+  - general_msg_v1 (en_US) [APPROVED]
+  - acct_reminder_v1 (en_US) [APPROVED]
+  - general_alert_v1 (en_US) [APPROVED]
+  - support_response_v1 (en_US) [APPROVED]
+  - booking_update_v1 (en_US) [APPROVED]
+  - payment_notice_v1 (en_US) [APPROVED]
+  - order_notification_v1 (en_US) [APPROVED]
+  - acct_info_notice_v1 (en_US) [APPROVED]
+  - acct_service_update_v1 (en_US) [APPROVED]
+  - account_security_alert (en_US) [APPROVED]
+  - account_general_notification (en_US) [APPROVED]
+  (12 other templates in status like: REJECTED)
+
+Checking Facebook for page: Looking for VE (804493519408444)
+  API Error: Error validating access token: The session has been invalidated because the user changed their password or Facebook has changed the session for security reasons.
+
+Checking Facebook for page: Maharlika Studios (492160583990696)
+  - booking_confirm_btn_v1 (en_US) [APPROVED]
+  - order_track_btn_v1 (en_US) [APPROVED]
+  - acct_update_btn_v1 (en_US) [APPROVED]
+  - acct_detail_2p_v2 (en_US) [APPROVED]
+  - order_update_2p_v1 (en_US) [APPROVED]
+  - general_msg_v3 (en_US) [APPROVED]
+  - acct_followup_v1 (en_US) [APPROVED]
+  - general_notice_v1 (en_US) [APPROVED]
+  - general_msg_v1 (en_US) [APPROVED]
+  - acct_reminder_v1 (en_US) [APPROVED]
+  - general_alert_v1 (en_US) [APPROVED]
+  - support_response_v1 (en_US) [APPROVED]
+  - booking_update_v1 (en_US) [APPROVED]
+  - payment_notice_v1 (en_US) [APPROVED]
+  - order_notification_v1 (en_US) [APPROVED]
+  - acct_info_notice_v1 (en_US) [APPROVED]
+  - acct_service_update_v1 (en_US) [APPROVED]
+  - offer_status_update_auto_20260220091148_1 (en_US) [APPROVED]
+  (12 other templates in status like: REJECTED)
+
+Checking Facebook for page: SAMA KANA MEDIA (717828411409985)
+  - booking_confirm_btn_v1 (en_US) [APPROVED]
+  - order_track_btn_v1 (en_US) [APPROVED]
+  - acct_update_btn_v1 (en_US) [APPROVED]
+  - acct_detail_2p_v2 (en_US) [APPROVED]
+  - order_update_2p_v1 (en_US) [APPROVED]
+  - general_msg_v3 (en_US) [APPROVED]
+  - acct_followup_v1 (en_US) [APPROVED]
+  - general_notice_v1 (en_US) [APPROVED]
+  - general_msg_v1 (en_US) [APPROVED]
+  - acct_reminder_v1 (en_US) [APPROVED]
+  - general_alert_v1 (en_US) [APPROVED]
+  - support_response_v1 (en_US) [APPROVED]
+  - booking_update_v1 (en_US) [APPROVED]
+  - payment_notice_v1 (en_US) [APPROVED]
+  - order_notification_v1 (en_US) [APPROVED]
+  - acct_info_notice_v1 (en_US) [APPROVED]
+  - acct_service_update_v1 (en_US) [APPROVED]
+  - offer_status_update_auto_20260305094136_1 (en_US) [APPROVED]
+  (12 other templates in status like: REJECTED)
+
+Checking Facebook for page: Makata Studios (552094384656613)
+  - booking_confirm_btn_v1 (en_US) [APPROVED]
+  - order_track_btn_v1 (en_US) [APPROVED]
+  - acct_update_btn_v1 (en_US) [APPROVED]
+  - acct_detail_2p_v2 (en_US) [APPROVED]
+  - order_update_2p_v1 (en_US) [APPROVED]
+  - general_msg_v3 (en_US) [APPROVED]
+  - acct_followup_v1 (en_US) [APPROVED]
+  - general_notice_v1 (en_US) [APPROVED]
+  - general_msg_v1 (en_US) [APPROVED]
+  - acct_reminder_v1 (en_US) [APPROVED]
+  - general_alert_v1 (en_US) [APPROVED]
+  - support_response_v1 (en_US) [APPROVED]
+  - booking_update_v1 (en_US) [APPROVED]
+  - payment_notice_v1 (en_US) [APPROVED]
+  - order_notification_v1 (en_US) [APPROVED]
+  - acct_info_notice_v1 (en_US) [APPROVED]
+  - acct_service_update_v1 (en_US) [APPROVED]
+  - offer_status_update_auto_20260301221201_1 (en_US) [APPROVED]
+  (12 other templates in status like: REJECTED)
+
+Checking Facebook for page: Azshinari (656646850875530)
+  - booking_confirm_btn_v1 (en_US) [APPROVED]
+  - order_track_btn_v1 (en_US) [APPROVED]
+  - acct_update_btn_v1 (en_US) [APPROVED]
+  - acct_detail_2p_v2 (en_US) [APPROVED]
+  - order_update_2p_v1 (en_US) [APPROVED]
+  - general_msg_v3 (en_US) [APPROVED]
+  - acct_followup_v1 (en_US) [APPROVED]
+  - general_notice_v1 (en_US) [APPROVED]
+  - general_msg_v1 (en_US) [APPROVED]
+  - acct_reminder_v1 (en_US) [APPROVED]
+  - general_alert_v1 (en_US) [APPROVED]
+  - support_response_v1 (en_US) [APPROVED]
+  - booking_update_v1 (en_US) [APPROVED]
+  - payment_notice_v1 (en_US) [APPROVED]
+  - order_notification_v1 (en_US) [APPROVED]
+  - acct_info_notice_v1 (en_US) [APPROVED]
+  - acct_service_update_v1 (en_US) [APPROVED]
+  (12 other templates in status like: REJECTED)
+
+Checking Facebook for page: Manawari Studios (619355471260631)
+  - booking_confirm_btn_v1 (en_US) [APPROVED]
+  - order_track_btn_v1 (en_US) [APPROVED]
+  - acct_update_btn_v1 (en_US) [APPROVED]
+  - acct_detail_2p_v2 (en_US) [APPROVED]
+  - order_update_2p_v1 (en_US) [APPROVED]
+  - general_msg_v3 (en_US) [APPROVED]
+  - acct_followup_v1 (en_US) [APPROVED]
+  - general_notice_v1 (en_US) [APPROVED]
+  - general_msg_v1 (en_US) [APPROVED]
+  - acct_reminder_v1 (en_US) [APPROVED]
+  - general_alert_v1 (en_US) [APPROVED]
+  - support_response_v1 (en_US) [APPROVED]
+  - booking_update_v1 (en_US) [APPROVED]
+  - payment_notice_v1 (en_US) [APPROVED]
+  - order_notification_v1 (en_US) [APPROVED]
+  - acct_info_notice_v1 (en_US) [APPROVED]
+  - acct_service_update_v1 (en_US) [APPROVED]
+  - offer_status_update_auto_20260305100023_1 (en_US) [APPROVED]
+  (12 other templates in status like: REJECTED)
+
+Checking Facebook for page: Makata Studio (663521640185928)
+  - booking_confirm_btn_v1 (en_US) [APPROVED]
+  - order_track_btn_v1 (en_US) [APPROVED]
+  - acct_update_btn_v1 (en_US) [APPROVED]
+  - acct_detail_2p_v2 (en_US) [APPROVED]
+  - order_update_2p_v1 (en_US) [APPROVED]
+  - general_msg_v3 (en_US) [APPROVED]
+  - acct_followup_v1 (en_US) [APPROVED]
+  - general_notice_v1 (en_US) [APPROVED]
+  - general_msg_v1 (en_US) [APPROVED]
+  - acct_reminder_v1 (en_US) [APPROVED]
+  - general_alert_v1 (en_US) [APPROVED]
+  - support_response_v1 (en_US) [APPROVED]
+  - booking_update_v1 (en_US) [APPROVED]
+  - payment_notice_v1 (en_US) [APPROVED]
+  - order_notification_v1 (en_US) [APPROVED]
+  - acct_info_notice_v1 (en_US) [APPROVED]
+  - acct_service_update_v1 (en_US) [APPROVED]
+  - offer_status_update_auto_20260222230544_1 (en_US) [APPROVED]
+  (12 other templates in status like: REJECTED)
+
+Checking Facebook for page: Hiraya Studios (606945225824770)
+  - booking_confirm_btn_v1 (en_US) [APPROVED]
+  - order_track_btn_v1 (en_US) [APPROVED]
+  - acct_update_btn_v1 (en_US) [APPROVED]
+  - acct_detail_2p_v2 (en_US) [APPROVED]
+  - order_update_2p_v1 (en_US) [APPROVED]
+  - general_msg_v3 (en_US) [APPROVED]
+  - acct_followup_v1 (en_US) [APPROVED]
+  - general_notice_v1 (en_US) [APPROVED]
+  - general_msg_v1 (en_US) [APPROVED]
+  - acct_reminder_v1 (en_US) [APPROVED]
+  - general_alert_v1 (en_US) [APPROVED]
+  - support_response_v1 (en_US) [APPROVED]
+  - booking_update_v1 (en_US) [APPROVED]
+  - payment_notice_v1 (en_US) [APPROVED]
+  - order_notification_v1 (en_US) [APPROVED]
+  - acct_info_notice_v1 (en_US) [APPROVED]
+  - acct_service_update_v1 (en_US) [APPROVED]
+  - offer_status_update_auto_20260220070452_1 (en_US) [APPROVED]
+  (12 other templates in status like: REJECTED)
+
+Checking Facebook for page: Kanta mo, kwento mo (505302195998738)
+  API Error: (#200) Requires pages_utility_messaging permission to manage the object
+
+Checking Facebook for page: Strix Media Agency (704576816074341)
+  - booking_confirm_btn_v1 (en_US) [APPROVED]
+  - order_track_btn_v1 (en_US) [APPROVED]
+  - acct_update_btn_v1 (en_US) [APPROVED]
+  - acct_detail_2p_v2 (en_US) [APPROVED]
+  - order_update_2p_v1 (en_US) [APPROVED]
+  - general_msg_v3 (en_US) [APPROVED]
+  - acct_followup_v1 (en_US) [APPROVED]
+  - general_notice_v1 (en_US) [APPROVED]
+  - general_msg_v1 (en_US) [APPROVED]
+  - acct_reminder_v1 (en_US) [APPROVED]
+  - general_alert_v1 (en_US) [APPROVED]
+  - support_response_v1 (en_US) [APPROVED]
+  - booking_update_v1 (en_US) [APPROVED]
+  - payment_notice_v1 (en_US) [APPROVED]
+  - order_notification_v1 (en_US) [APPROVED]
+  - acct_info_notice_v1 (en_US) [APPROVED]
+  - acct_service_update_v1 (en_US) [APPROVED]
+  - offer_status_update_auto_20260305093336_1 (en_US) [APPROVED]
+  (12 other templates in status like: REJECTED)
+
+Checking Facebook for page: Whisperwalk Interior Incorporated (754512431281378)
+  - booking_confirm_btn_v1 (en_US) [APPROVED]
+  - order_track_btn_v1 (en_US) [APPROVED]
+  - acct_update_btn_v1 (en_US) [APPROVED]
+  - acct_detail_2p_v2 (en_US) [APPROVED]
+  - order_update_2p_v1 (en_US) [APPROVED]
+  - general_msg_v3 (en_US) [APPROVED]
+  - acct_followup_v1 (en_US) [APPROVED]
+  - general_notice_v1 (en_US) [APPROVED]
+  - general_msg_v1 (en_US) [APPROVED]
+  - acct_reminder_v1 (en_US) [APPROVED]
+  - general_alert_v1 (en_US) [APPROVED]
+  - support_response_v1 (en_US) [APPROVED]
+  - booking_update_v1 (en_US) [APPROVED]
+  - payment_notice_v1 (en_US) [APPROVED]
+  - order_notification_v1 (en_US) [APPROVED]
+  - acct_info_notice_v1 (en_US) [APPROVED]
+  - acct_service_update_v1 (en_US) [APPROVED]
+  - whisperwalk_interior_incorporated_support_1771528952726 (en_US) [APPROVED]
+  - whisperwalk_interior_incorporated_support_1771527882235 (en_US) [APPROVED]
+  (12 other templates in status like: REJECTED)
+
+Checking Facebook for page: Brand Beats Studio (540901085777059)
+  - booking_confirm_btn_v1 (en_US) [APPROVED]
+  - order_track_btn_v1 (en_US) [APPROVED]
+  - acct_update_btn_v1 (en_US) [APPROVED]
+  - acct_detail_2p_v2 (en_US) [APPROVED]
+  - order_update_2p_v1 (en_US) [APPROVED]
+  - general_msg_v3 (en_US) [APPROVED]
+  - acct_followup_v1 (en_US) [APPROVED]
+  - general_notice_v1 (en_US) [APPROVED]
+  - general_msg_v1 (en_US) [APPROVED]
+  - acct_reminder_v1 (en_US) [APPROVED]
+  - general_alert_v1 (en_US) [APPROVED]
+  - support_response_v1 (en_US) [APPROVED]
+  - booking_update_v1 (en_US) [APPROVED]
+  - payment_notice_v1 (en_US) [APPROVED]
+  - order_notification_v1 (en_US) [APPROVED]
+  - acct_info_notice_v1 (en_US) [APPROVED]
+  - acct_service_update_v1 (en_US) [APPROVED]
+  - offer_status_update_auto_20260220063531_1 (en_US) [APPROVED]
+  (12 other templates in status like: REJECTED)
+
+Checking Facebook for page: Habi Media Agency (763800046807356)
+  API Error: Any of the pages_read_engagement, pages_manage_metadata,
+        pages_read_user_content, pages_manage_ads, pages_show_list or
+        pages_messaging permission(s) must be granted before impersonating a
+        user's page.
+
+Checking Facebook for page: Hiraya Studio (697291860141214)
+  - booking_confirm_btn_v1 (en_US) [APPROVED]
+  - order_track_btn_v1 (en_US) [APPROVED]
+  - acct_update_btn_v1 (en_US) [APPROVED]
+  - acct_detail_2p_v2 (en_US) [APPROVED]
+  - order_update_2p_v1 (en_US) [APPROVED]
+  - general_msg_v3 (en_US) [APPROVED]
+  - acct_followup_v1 (en_US) [APPROVED]
+  - general_notice_v1 (en_US) [APPROVED]
+  - general_msg_v1 (en_US) [APPROVED]
+  - acct_reminder_v1 (en_US) [APPROVED]
+  - general_alert_v1 (en_US) [APPROVED]
+  - support_response_v1 (en_US) [APPROVED]
+  - booking_update_v1 (en_US) [APPROVED]
+  - payment_notice_v1 (en_US) [APPROVED]
+  - order_notification_v1 (en_US) [APPROVED]
+  - acct_info_notice_v1 (en_US) [APPROVED]
+  - acct_service_update_v1 (en_US) [APPROVED]
+  - offer_status_update_auto_20260220062538_1 (en_US) [APPROVED]
+  (12 other templates in status like: REJECTED)
+
+Checking Facebook for page: Salin Media Agency  (684350754769086)
+  API Error: Any of the pages_read_engagement, pages_manage_metadata,
+        pages_read_user_content, pages_manage_ads, pages_show_list or
+        pages_messaging permission(s) must be granted before impersonating a
+        user's page.
+
+Checking Facebook for page: Onset Media Agency (699579919911250)
+  API Error: Any of the pages_read_engagement, pages_manage_metadata,
+        pages_read_user_content, pages_manage_ads, pages_show_list or
+        pages_messaging permission(s) must be granted before impersonating a
+        user's page.
+
+Checking Facebook for page: Kundiman Studios (533584419840779)
+  - acct_detail_2p_v2 (en_US) [APPROVED]
+  - order_update_2p_v1 (en_US) [APPROVED]
+  - general_msg_v3 (en_US) [APPROVED]
+  - acct_followup_v1 (en_US) [APPROVED]
+  - general_notice_v1 (en_US) [APPROVED]
+  - general_msg_v1 (en_US) [APPROVED]
+  - acct_reminder_v1 (en_US) [APPROVED]
+  - general_alert_v1 (en_US) [APPROVED]
+  - support_response_v1 (en_US) [APPROVED]
+  - booking_update_v1 (en_US) [APPROVED]
+  - payment_notice_v1 (en_US) [APPROVED]
+  - order_notification_v1 (en_US) [APPROVED]
+  - acct_info_notice_v1 (en_US) [APPROVED]
+  - acct_service_update_v1 (en_US) [APPROVED]
+  - offer_status_update_auto_20260220071256_1 (en_US) [APPROVED]
+  (8 other templates in status like: REJECTED)
+
+Checking Facebook for page: Kampilan Studios (600867369770679)
+  - offer_status_update_auto_20260220084804_1 (en_US) [APPROVED]
+
+Checking Facebook for page: Serenata Studios (573992485795257)
+  - offer_status_update_auto_20260220084245_1 (en_US) [APPROVED]
+
+Checking Facebook for page: Paraluman Studios (551256468065614)
+  - offer_status_update_auto_20260220082009_1 (en_US) [APPROVED]
+
+Checking Facebook for page: Amihan Studios (565859379948159)
+  No approved templates found on Facebook for this page.
+
+Checking Facebook for page: JP Luxe Estate (108367935184677)
+  No approved templates found on Facebook for this page.
+  (100 other templates in status like: REJECTED)
+
+Checking Facebook for page: Customized Socks / Direct Manufacturer PH (298396420259444)
+  API Error: (#200) Requires pages_utility_messaging permission to manage the object
+
+Checking Facebook for page: Negosyo GPT (834334336429385)
+  API Error: Error validating access token: The session has been invalidated because the user changed their password or Facebook has changed the session for security reasons.
+
+Checking Facebook for page: Sam's Culture Gym (202478196278146)
+  API Error: (#200) Requires pages_utility_messaging permission to manage the object
+
+Checking Facebook for page: Ares Media (958393214018094)
+  - offer_status_update_auto_20260307015614_1 (en_US) [APPROVED]
+  - offer_status_update_auto_20260307014244_1 (en_US) [APPROVED]
+  (98 other templates in status like: REJECTED)
+
+Checking Facebook for page: Zues Media (988169284382823)
+  No approved templates found on Facebook for this page.
+  (100 other templates in status like: REJECTED)

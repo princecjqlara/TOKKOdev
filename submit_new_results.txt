@@ -1,0 +1,1421 @@
+﻿
+======================================================================
+PAGE: Kalinaw Studios (FB: 505255682680407)
+======================================================================
+
+  ≡ƒôï Total existing templates: 19
+    Γ£à acct_reminder_v1 ΓÇö APPROVED (UTILITY)
+    Γ¥î general_alert_v2 ΓÇö REJECTED (UTILITY)
+    Γ£à general_alert_v1 ΓÇö APPROVED (UTILITY)
+    Γ£à support_response_v1 ΓÇö APPROVED (UTILITY)
+    Γ£à booking_update_v1 ΓÇö APPROVED (UTILITY)
+    Γ£à payment_notice_v1 ΓÇö APPROVED (UTILITY)
+    Γ£à order_notification_v1 ΓÇö APPROVED (UTILITY)
+    Γ£à acct_info_notice_v1 ΓÇö APPROVED (UTILITY)
+    Γ£à acct_service_update_v1 ΓÇö APPROVED (UTILITY)
+    Γ£à account_feedback_request ΓÇö APPROVED (UTILITY)
+    Γ£à account_order_status_update ΓÇö APPROVED (UTILITY)
+    Γ£à account_appointment_reminder ΓÇö APPROVED (UTILITY)
+    Γ£à account_payment_confirmation ΓÇö APPROVED (UTILITY)
+    Γ£à account_billing_notice ΓÇö APPROVED (UTILITY)
+    Γ£à account_verification_alert ΓÇö APPROVED (UTILITY)
+    Γ£à account_update_notification ΓÇö APPROVED (UTILITY)
+    Γ£à account_security_alert ΓÇö APPROVED (UTILITY)
+    Γ£à account_general_notification ΓÇö APPROVED (UTILITY)
+    Γ£à offer_status_update_auto_20260220083121_1 ΓÇö APPROVED (UTILITY)
+
+  ≡ƒùæ∩╕Å Deleting 1 rejected templates...
+    Γ£à DELETE general_alert_v2: success
+
+  ≡ƒôñ Submitting 29 templates...
+    ΓÅ¡∩╕Å  SKIP acct_service_update_v1 ΓÇö exists (APPROVED)
+    ΓÅ¡∩╕Å  SKIP acct_info_notice_v1 ΓÇö exists (APPROVED)
+    ΓÅ¡∩╕Å  SKIP order_notification_v1 ΓÇö exists (APPROVED)
+    ΓÅ¡∩╕Å  SKIP payment_notice_v1 ΓÇö exists (APPROVED)
+    ΓÅ¡∩╕Å  SKIP booking_update_v1 ΓÇö exists (APPROVED)
+    ΓÅ¡∩╕Å  SKIP support_response_v1 ΓÇö exists (APPROVED)
+    ΓÅ¡∩╕Å  SKIP general_alert_v1 ΓÇö exists (APPROVED)
+    Γ¥î OK   general_alert_v2: id=26468372856186803, status=REJECTED
+    ΓÅ¡∩╕Å  SKIP acct_reminder_v1 ΓÇö exists (APPROVED)
+    Γ£à OK   general_msg_v1: id=26102179042797783, status=APPROVED
+    Γ£à OK   general_notice_v1: id=27014574634811590, status=APPROVED
+    Γ£à OK   acct_followup_v1: id=35165152213069915, status=APPROVED
+    Γ¥î OK   general_msg_v2: id=26257112367272339, status=REJECTED
+    Γ£à OK   general_msg_v3: id=35070498862541072, status=APPROVED
+    Γ¥î OK   acct_update_2p_v1: id=26754792640810846, status=REJECTED
+    Γ¥î OK   service_notice_2p_v1: id=25907945992240539, status=REJECTED
+    Γ£à OK   order_update_2p_v1: id=34609536788691253, status=APPROVED
+    Γ¥î OK   acct_greeting_2p_v1: id=26135507039466323, status=REJECTED
+    Γ¥î OK   acct_greeting_2p_v2: id=34552196091061645, status=REJECTED
+    Γ¥î OK   acct_detail_2p_v1: id=25974927415536237, status=REJECTED
+    Γ£à OK   acct_detail_2p_v2: id=26179286588360436, status=APPROVED
+    Γ¥î OK   delivery_info_2p_v1: id=26444341148554163, status=REJECTED
+    Γ¥î OK   quick_update_2p_v1: id=26173162278988950, status=REJECTED
+    Γ¥î OK   quick_notice_2p_v1: id=26778732191732269, status=REJECTED
+    Γ£à OK   acct_update_btn_v1: id=26321308660864967, status=APPROVED
+    Γ£à OK   order_track_btn_v1: id=26808553692063127, status=APPROVED
+    Γ£à OK   booking_confirm_btn_v1: id=25858012513877105, status=APPROVED
+    Γ¥î OK   service_update_btn_2p_v1: id=26706247879063015, status=REJECTED
+    Γ¥î OK   promo_notice_btn_2p_v1: id=34619939444317713, status=REJECTED
+
+  ≡ƒôè Results: 21 submitted, 8 skipped, 0 failed
+
+  --- Final Template Status ---
+    Γ¥î promo_notice_btn_2p_v1 ΓÇö REJECTED
+    Γ¥î service_update_btn_2p_v1 ΓÇö REJECTED
+    Γ£à booking_confirm_btn_v1 ΓÇö APPROVED
+    Γ£à order_track_btn_v1 ΓÇö APPROVED
+    Γ£à acct_update_btn_v1 ΓÇö APPROVED
+    Γ¥î quick_notice_2p_v1 ΓÇö REJECTED
+    Γ¥î quick_update_2p_v1 ΓÇö REJECTED
+    Γ¥î delivery_info_2p_v1 ΓÇö REJECTED
+    Γ£à acct_detail_2p_v2 ΓÇö APPROVED
+    Γ¥î acct_detail_2p_v1 ΓÇö REJECTED
+    Γ¥î acct_greeting_2p_v2 ΓÇö REJECTED
+    Γ¥î acct_greeting_2p_v1 ΓÇö REJECTED
+    Γ£à order_update_2p_v1 ΓÇö APPROVED
+    Γ¥î service_notice_2p_v1 ΓÇö REJECTED
+    Γ¥î acct_update_2p_v1 ΓÇö REJECTED
+    Γ£à general_msg_v3 ΓÇö APPROVED
+    Γ¥î general_msg_v2 ΓÇö REJECTED
+    Γ£à acct_followup_v1 ΓÇö APPROVED
+    Γ£à general_notice_v1 ΓÇö APPROVED
+    Γ£à general_msg_v1 ΓÇö APPROVED
+    Γ¥î general_alert_v2 ΓÇö REJECTED
+    Γ£à acct_reminder_v1 ΓÇö APPROVED
+    Γ£à general_alert_v1 ΓÇö APPROVED
+    Γ£à support_response_v1 ΓÇö APPROVED
+    Γ£à booking_update_v1 ΓÇö APPROVED
+    Γ£à payment_notice_v1 ΓÇö APPROVED
+    Γ£à order_notification_v1 ΓÇö APPROVED
+    Γ£à acct_info_notice_v1 ΓÇö APPROVED
+    Γ£à acct_service_update_v1 ΓÇö APPROVED
+    Γ£à account_feedback_request ΓÇö APPROVED
+    Γ£à account_order_status_update ΓÇö APPROVED
+    Γ£à account_appointment_reminder ΓÇö APPROVED
+    Γ£à account_payment_confirmation ΓÇö APPROVED
+    Γ£à account_billing_notice ΓÇö APPROVED
+    Γ£à account_verification_alert ΓÇö APPROVED
+    Γ£à account_update_notification ΓÇö APPROVED
+    Γ£à account_security_alert ΓÇö APPROVED
+    Γ£à account_general_notification ΓÇö APPROVED
+    Γ£à offer_status_update_auto_20260220083121_1 ΓÇö APPROVED
+
+  Summary: 27 APPROVED, 0 PENDING, 12 REJECTED
+
+======================================================================
+PAGE: Malaya Studios (FB: 558841917314834)
+======================================================================
+
+  ≡ƒôï Total existing templates: 2
+    Γ£à account_security_alert ΓÇö APPROVED (UTILITY)
+    Γ£à account_general_notification ΓÇö APPROVED (UTILITY)
+
+  ≡ƒôñ Submitting 29 templates...
+    Γ£à OK   acct_service_update_v1: id=25288673117475345, status=APPROVED
+    Γ£à OK   acct_info_notice_v1: id=34831546923126601, status=APPROVED
+    Γ£à OK   order_notification_v1: id=26578270935130993, status=APPROVED
+    Γ£à OK   payment_notice_v1: id=26211419508515988, status=APPROVED
+    Γ£à OK   booking_update_v1: id=25975429455489377, status=APPROVED
+    Γ£à OK   support_response_v1: id=26202768589379375, status=APPROVED
+    Γ£à OK   general_alert_v1: id=26422338120734717, status=APPROVED
+    Γ¥î OK   general_alert_v2: id=25507700885569959, status=REJECTED
+    Γ£à OK   acct_reminder_v1: id=34729328853382063, status=APPROVED
+    Γ£à OK   general_msg_v1: id=27198314913104562, status=APPROVED
+    Γ£à OK   general_notice_v1: id=26896655339927210, status=APPROVED
+    Γ£à OK   acct_followup_v1: id=34445225681789381, status=APPROVED
+    Γ¥î OK   general_msg_v2: id=27211875631745973, status=REJECTED
+    Γ£à OK   general_msg_v3: id=26244262038528570, status=APPROVED
+    Γ¥î OK   acct_update_2p_v1: id=26711569198447736, status=REJECTED
+    Γ¥î OK   service_notice_2p_v1: id=34614860238129701, status=REJECTED
+    Γ£à OK   order_update_2p_v1: id=26373542682285330, status=APPROVED
+    Γ¥î OK   acct_greeting_2p_v1: id=26499712133050731, status=REJECTED
+    Γ¥î OK   acct_greeting_2p_v2: id=26702719246001748, status=REJECTED
+    Γ¥î OK   acct_detail_2p_v1: id=35093778306872180, status=REJECTED
+    Γ£à OK   acct_detail_2p_v2: id=35776337251965411, status=APPROVED
+    Γ¥î OK   delivery_info_2p_v1: id=27479872648269821, status=REJECTED
+    Γ¥î OK   quick_update_2p_v1: id=35054473047484551, status=REJECTED
+    Γ¥î OK   quick_notice_2p_v1: id=26316449807965003, status=REJECTED
+    Γ£à OK   acct_update_btn_v1: id=34675019128809200, status=APPROVED
+    Γ£à OK   order_track_btn_v1: id=26183795697957470, status=APPROVED
+    Γ£à OK   booking_confirm_btn_v1: id=34630696913244729, status=APPROVED
+    Γ¥î OK   service_update_btn_2p_v1: id=26645633781727627, status=REJECTED
+    Γ¥î OK   promo_notice_btn_2p_v1: id=26820587904205868, status=REJECTED
+
+  ≡ƒôè Results: 29 submitted, 0 skipped, 0 failed
+
+  --- Final Template Status ---
+    Γ¥î promo_notice_btn_2p_v1 ΓÇö REJECTED
+    Γ¥î service_update_btn_2p_v1 ΓÇö REJECTED
+    Γ£à booking_confirm_btn_v1 ΓÇö APPROVED
+    Γ£à order_track_btn_v1 ΓÇö APPROVED
+    Γ£à acct_update_btn_v1 ΓÇö APPROVED
+    Γ¥î quick_notice_2p_v1 ΓÇö REJECTED
+    Γ¥î quick_update_2p_v1 ΓÇö REJECTED
+    Γ¥î delivery_info_2p_v1 ΓÇö REJECTED
+    Γ£à acct_detail_2p_v2 ΓÇö APPROVED
+    Γ¥î acct_detail_2p_v1 ΓÇö REJECTED
+    Γ¥î acct_greeting_2p_v2 ΓÇö REJECTED
+    Γ¥î acct_greeting_2p_v1 ΓÇö REJECTED
+    Γ£à order_update_2p_v1 ΓÇö APPROVED
+    Γ¥î service_notice_2p_v1 ΓÇö REJECTED
+    Γ¥î acct_update_2p_v1 ΓÇö REJECTED
+    Γ£à general_msg_v3 ΓÇö APPROVED
+    Γ¥î general_msg_v2 ΓÇö REJECTED
+    Γ£à acct_followup_v1 ΓÇö APPROVED
+    Γ£à general_notice_v1 ΓÇö APPROVED
+    Γ£à general_msg_v1 ΓÇö APPROVED
+    Γ£à acct_reminder_v1 ΓÇö APPROVED
+    Γ¥î general_alert_v2 ΓÇö REJECTED
+    Γ£à general_alert_v1 ΓÇö APPROVED
+    Γ£à support_response_v1 ΓÇö APPROVED
+    Γ£à booking_update_v1 ΓÇö APPROVED
+    Γ£à payment_notice_v1 ΓÇö APPROVED
+    Γ£à order_notification_v1 ΓÇö APPROVED
+    Γ£à acct_info_notice_v1 ΓÇö APPROVED
+    Γ£à acct_service_update_v1 ΓÇö APPROVED
+    Γ£à account_security_alert ΓÇö APPROVED
+    Γ£à account_general_notification ΓÇö APPROVED
+
+  Summary: 19 APPROVED, 0 PENDING, 12 REJECTED
+
+======================================================================
+PAGE: Looking for VE (FB: 804493519408444)
+======================================================================
+  ΓÜá∩╕Å Cannot access templates: Error validating access token: The session has been invalidated because the user changed their password or Facebook has changed the session for security reasons.
+
+======================================================================
+PAGE: Maharlika Studios (FB: 492160583990696)
+======================================================================
+
+  ≡ƒôï Total existing templates: 1
+    Γ£à offer_status_update_auto_20260220091148_1 ΓÇö APPROVED (UTILITY)
+
+  ≡ƒôñ Submitting 29 templates...
+    Γ£à OK   acct_service_update_v1: id=26468333046131345, status=APPROVED
+    Γ£à OK   acct_info_notice_v1: id=34779126631703115, status=APPROVED
+    Γ£à OK   order_notification_v1: id=25936924316010615, status=APPROVED
+    Γ£à OK   payment_notice_v1: id=26313694354906080, status=APPROVED
+    Γ£à OK   booking_update_v1: id=26454069060898175, status=APPROVED
+    Γ£à OK   support_response_v1: id=26189872104029911, status=APPROVED
+    Γ£à OK   general_alert_v1: id=26735920986011516, status=APPROVED
+    Γ¥î OK   general_alert_v2: id=26880778248175231, status=REJECTED
+    Γ£à OK   acct_reminder_v1: id=34547679521545694, status=APPROVED
+    Γ£à OK   general_msg_v1: id=34438427435804366, status=APPROVED
+    Γ£à OK   general_notice_v1: id=34459620487019976, status=APPROVED
+    Γ£à OK   acct_followup_v1: id=26197520889871198, status=APPROVED
+    Γ¥î OK   general_msg_v2: id=25834269136269979, status=REJECTED
+    Γ£à OK   general_msg_v3: id=27096385923297357, status=APPROVED
+    Γ¥î OK   acct_update_2p_v1: id=26464522186512180, status=REJECTED
+    Γ¥î OK   service_notice_2p_v1: id=26991481247111270, status=REJECTED
+    Γ£à OK   order_update_2p_v1: id=26413397685019704, status=APPROVED
+    Γ¥î OK   acct_greeting_2p_v1: id=26089074677431251, status=REJECTED
+    Γ¥î OK   acct_greeting_2p_v2: id=26288186004135716, status=REJECTED
+    Γ¥î OK   acct_detail_2p_v1: id=25740165008994579, status=REJECTED
+    Γ£à OK   acct_detail_2p_v2: id=26643619098609034, status=APPROVED
+    Γ¥î OK   delivery_info_2p_v1: id=26139144279077651, status=REJECTED
+    Γ¥î OK   quick_update_2p_v1: id=26187888904171355, status=REJECTED
+    Γ¥î OK   quick_notice_2p_v1: id=34503567545954264, status=REJECTED
+    Γ£à OK   acct_update_btn_v1: id=26601823252774840, status=APPROVED
+    Γ£à OK   order_track_btn_v1: id=26269030696110769, status=APPROVED
+    Γ£à OK   booking_confirm_btn_v1: id=26222363350747132, status=APPROVED
+    Γ¥î OK   service_update_btn_2p_v1: id=26157496147244359, status=REJECTED
+    Γ¥î OK   promo_notice_btn_2p_v1: id=27301611666095198, status=REJECTED
+
+  ≡ƒôè Results: 29 submitted, 0 skipped, 0 failed
+
+  --- Final Template Status ---
+    Γ¥î promo_notice_btn_2p_v1 ΓÇö REJECTED
+    Γ£à booking_confirm_btn_v1 ΓÇö APPROVED
+    Γ¥î service_update_btn_2p_v1 ΓÇö REJECTED
+    Γ£à order_track_btn_v1 ΓÇö APPROVED
+    Γ£à acct_update_btn_v1 ΓÇö APPROVED
+    Γ¥î quick_notice_2p_v1 ΓÇö REJECTED
+    Γ¥î quick_update_2p_v1 ΓÇö REJECTED
+    Γ¥î delivery_info_2p_v1 ΓÇö REJECTED
+    Γ£à acct_detail_2p_v2 ΓÇö APPROVED
+    Γ¥î acct_detail_2p_v1 ΓÇö REJECTED
+    Γ¥î acct_greeting_2p_v2 ΓÇö REJECTED
+    Γ¥î acct_greeting_2p_v1 ΓÇö REJECTED
+    Γ£à order_update_2p_v1 ΓÇö APPROVED
+    Γ¥î service_notice_2p_v1 ΓÇö REJECTED
+    Γ¥î acct_update_2p_v1 ΓÇö REJECTED
+    Γ£à general_msg_v3 ΓÇö APPROVED
+    Γ¥î general_msg_v2 ΓÇö REJECTED
+    Γ£à acct_followup_v1 ΓÇö APPROVED
+    Γ£à general_notice_v1 ΓÇö APPROVED
+    Γ£à general_msg_v1 ΓÇö APPROVED
+    Γ£à acct_reminder_v1 ΓÇö APPROVED
+    Γ¥î general_alert_v2 ΓÇö REJECTED
+    Γ£à general_alert_v1 ΓÇö APPROVED
+    Γ£à support_response_v1 ΓÇö APPROVED
+    Γ£à booking_update_v1 ΓÇö APPROVED
+    Γ£à payment_notice_v1 ΓÇö APPROVED
+    Γ£à order_notification_v1 ΓÇö APPROVED
+    Γ£à acct_info_notice_v1 ΓÇö APPROVED
+    Γ£à acct_service_update_v1 ΓÇö APPROVED
+    Γ£à offer_status_update_auto_20260220091148_1 ΓÇö APPROVED
+
+  Summary: 18 APPROVED, 0 PENDING, 12 REJECTED
+
+======================================================================
+PAGE: SAMA KANA MEDIA (FB: 717828411409985)
+======================================================================
+
+  ≡ƒôï Total existing templates: 1
+    Γ£à offer_status_update_auto_20260305094136_1 ΓÇö APPROVED (UTILITY)
+
+  ≡ƒôñ Submitting 29 templates...
+    Γ£à OK   acct_service_update_v1: id=26414565414829611, status=APPROVED
+    Γ£à OK   acct_info_notice_v1: id=26836743345930457, status=APPROVED
+    Γ£à OK   order_notification_v1: id=26698316633096521, status=APPROVED
+    Γ£à OK   payment_notice_v1: id=26057633757212020, status=APPROVED
+    Γ£à OK   booking_update_v1: id=26322338560764074, status=APPROVED
+    Γ£à OK   support_response_v1: id=25357072343969308, status=APPROVED
+    Γ£à OK   general_alert_v1: id=26312223905116756, status=APPROVED
+    Γ¥î OK   general_alert_v2: id=26125081770435025, status=REJECTED
+    Γ£à OK   acct_reminder_v1: id=26390435250596515, status=APPROVED
+    Γ£à OK   general_msg_v1: id=26289480540735595, status=APPROVED
+    Γ£à OK   general_notice_v1: id=34664582779855235, status=APPROVED
+    Γ£à OK   acct_followup_v1: id=26184499417879316, status=APPROVED
+    Γ¥î OK   general_msg_v2: id=26866734152932968, status=REJECTED
+    Γ£à OK   general_msg_v3: id=26445973125014176, status=APPROVED
+    Γ¥î OK   acct_update_2p_v1: id=26880803481506041, status=REJECTED
+    Γ¥î OK   service_notice_2p_v1: id=25707931962220165, status=REJECTED
+    Γ£à OK   order_update_2p_v1: id=27583303574593572, status=APPROVED
+    Γ¥î OK   acct_greeting_2p_v1: id=26561235493506990, status=REJECTED
+    Γ¥î OK   acct_greeting_2p_v2: id=26784540461142956, status=REJECTED
+    Γ¥î OK   acct_detail_2p_v1: id=26211266465208352, status=REJECTED
+    Γ£à OK   acct_detail_2p_v2: id=35024319800515141, status=APPROVED
+    Γ¥î OK   delivery_info_2p_v1: id=25631894209821294, status=REJECTED
+    Γ¥î OK   quick_update_2p_v1: id=27341799738756034, status=REJECTED
+    Γ¥î OK   quick_notice_2p_v1: id=26632299249735073, status=REJECTED
+    Γ£à OK   acct_update_btn_v1: id=26061709063529150, status=APPROVED
+    Γ£à OK   order_track_btn_v1: id=26156807507307978, status=APPROVED
+    Γ£à OK   booking_confirm_btn_v1: id=26324580053840119, status=APPROVED
+    Γ¥î OK   service_update_btn_2p_v1: id=26302432669391065, status=REJECTED
+    Γ¥î OK   promo_notice_btn_2p_v1: id=35094933420120035, status=REJECTED
+
+  ≡ƒôè Results: 29 submitted, 0 skipped, 0 failed
+
+  --- Final Template Status ---
+    Γ¥î promo_notice_btn_2p_v1 ΓÇö REJECTED
+    Γ£à booking_confirm_btn_v1 ΓÇö APPROVED
+    Γ¥î service_update_btn_2p_v1 ΓÇö REJECTED
+    Γ£à order_track_btn_v1 ΓÇö APPROVED
+    Γ£à acct_update_btn_v1 ΓÇö APPROVED
+    Γ¥î quick_notice_2p_v1 ΓÇö REJECTED
+    Γ¥î quick_update_2p_v1 ΓÇö REJECTED
+    Γ¥î delivery_info_2p_v1 ΓÇö REJECTED
+    Γ£à acct_detail_2p_v2 ΓÇö APPROVED
+    Γ¥î acct_detail_2p_v1 ΓÇö REJECTED
+    Γ¥î acct_greeting_2p_v2 ΓÇö REJECTED
+    Γ¥î acct_greeting_2p_v1 ΓÇö REJECTED
+    Γ£à order_update_2p_v1 ΓÇö APPROVED
+    Γ¥î service_notice_2p_v1 ΓÇö REJECTED
+    Γ¥î acct_update_2p_v1 ΓÇö REJECTED
+    Γ£à general_msg_v3 ΓÇö APPROVED
+    Γ¥î general_msg_v2 ΓÇö REJECTED
+    Γ£à acct_followup_v1 ΓÇö APPROVED
+    Γ£à general_notice_v1 ΓÇö APPROVED
+    Γ£à general_msg_v1 ΓÇö APPROVED
+    Γ£à acct_reminder_v1 ΓÇö APPROVED
+    Γ¥î general_alert_v2 ΓÇö REJECTED
+    Γ£à general_alert_v1 ΓÇö APPROVED
+    Γ£à support_response_v1 ΓÇö APPROVED
+    Γ£à booking_update_v1 ΓÇö APPROVED
+    Γ£à payment_notice_v1 ΓÇö APPROVED
+    Γ£à order_notification_v1 ΓÇö APPROVED
+    Γ£à acct_info_notice_v1 ΓÇö APPROVED
+    Γ£à acct_service_update_v1 ΓÇö APPROVED
+    Γ£à offer_status_update_auto_20260305094136_1 ΓÇö APPROVED
+
+  Summary: 18 APPROVED, 0 PENDING, 12 REJECTED
+
+======================================================================
+PAGE: Makata Studios (FB: 552094384656613)
+======================================================================
+
+  ≡ƒôï Total existing templates: 1
+    Γ£à offer_status_update_auto_20260301221201_1 ΓÇö APPROVED (UTILITY)
+
+  ≡ƒôñ Submitting 29 templates...
+    Γ£à OK   acct_service_update_v1: id=26327599140233116, status=APPROVED
+    Γ£à OK   acct_info_notice_v1: id=26086199424341005, status=APPROVED
+    Γ£à OK   order_notification_v1: id=25876617398683214, status=APPROVED
+    Γ£à OK   payment_notice_v1: id=34657036177244926, status=APPROVED
+    Γ£à OK   booking_update_v1: id=34824280987185649, status=APPROVED
+    Γ£à OK   support_response_v1: id=34587133804263389, status=APPROVED
+    Γ£à OK   general_alert_v1: id=27151312141138685, status=APPROVED
+    Γ¥î OK   general_alert_v2: id=26342782001999198, status=REJECTED
+    Γ£à OK   acct_reminder_v1: id=26727955100172719, status=APPROVED
+    Γ£à OK   general_msg_v1: id=34482682134712658, status=APPROVED
+    Γ£à OK   general_notice_v1: id=26511095908514647, status=APPROVED
+    Γ£à OK   acct_followup_v1: id=26420304964272540, status=APPROVED
+    Γ¥î OK   general_msg_v2: id=34591123740534152, status=REJECTED
+    Γ£à OK   general_msg_v3: id=26343457688609958, status=APPROVED
+    Γ¥î OK   acct_update_2p_v1: id=26647692524835786, status=REJECTED
+    Γ¥î OK   service_notice_2p_v1: id=26746593351603185, status=REJECTED
+    Γ£à OK   order_update_2p_v1: id=26195556296762263, status=APPROVED
+    Γ¥î OK   acct_greeting_2p_v1: id=35806491198941616, status=REJECTED
+    Γ¥î OK   acct_greeting_2p_v2: id=26279110345050054, status=REJECTED
+    Γ¥î OK   acct_detail_2p_v1: id=26425637540403189, status=REJECTED
+    Γ£à OK   acct_detail_2p_v2: id=26362977196703660, status=APPROVED
+    Γ¥î OK   delivery_info_2p_v1: id=26574905028809299, status=REJECTED
+    Γ¥î OK   quick_update_2p_v1: id=25904277532588499, status=REJECTED
+    Γ¥î OK   quick_notice_2p_v1: id=26020052171031125, status=REJECTED
+    Γ£à OK   acct_update_btn_v1: id=26191545727140844, status=APPROVED
+    Γ£à OK   order_track_btn_v1: id=26176852691987151, status=APPROVED
+    Γ£à OK   booking_confirm_btn_v1: id=26150671761293906, status=APPROVED
+    Γ¥î OK   service_update_btn_2p_v1: id=25759728510372303, status=REJECTED
+    Γ¥î OK   promo_notice_btn_2p_v1: id=26539351729036194, status=REJECTED
+
+  ≡ƒôè Results: 29 submitted, 0 skipped, 0 failed
+
+  --- Final Template Status ---
+    Γ¥î promo_notice_btn_2p_v1 ΓÇö REJECTED
+    Γ¥î service_update_btn_2p_v1 ΓÇö REJECTED
+    Γ£à booking_confirm_btn_v1 ΓÇö APPROVED
+    Γ£à order_track_btn_v1 ΓÇö APPROVED
+    Γ£à acct_update_btn_v1 ΓÇö APPROVED
+    Γ¥î quick_notice_2p_v1 ΓÇö REJECTED
+    Γ¥î quick_update_2p_v1 ΓÇö REJECTED
+    Γ¥î delivery_info_2p_v1 ΓÇö REJECTED
+    Γ£à acct_detail_2p_v2 ΓÇö APPROVED
+    Γ¥î acct_detail_2p_v1 ΓÇö REJECTED
+    Γ¥î acct_greeting_2p_v2 ΓÇö REJECTED
+    Γ¥î acct_greeting_2p_v1 ΓÇö REJECTED
+    Γ£à order_update_2p_v1 ΓÇö APPROVED
+    Γ¥î service_notice_2p_v1 ΓÇö REJECTED
+    Γ¥î acct_update_2p_v1 ΓÇö REJECTED
+    Γ£à general_msg_v3 ΓÇö APPROVED
+    Γ¥î general_msg_v2 ΓÇö REJECTED
+    Γ£à acct_followup_v1 ΓÇö APPROVED
+    Γ£à general_notice_v1 ΓÇö APPROVED
+    Γ£à general_msg_v1 ΓÇö APPROVED
+    Γ£à acct_reminder_v1 ΓÇö APPROVED
+    Γ¥î general_alert_v2 ΓÇö REJECTED
+    Γ£à general_alert_v1 ΓÇö APPROVED
+    Γ£à support_response_v1 ΓÇö APPROVED
+    Γ£à booking_update_v1 ΓÇö APPROVED
+    Γ£à payment_notice_v1 ΓÇö APPROVED
+    Γ£à order_notification_v1 ΓÇö APPROVED
+    Γ£à acct_info_notice_v1 ΓÇö APPROVED
+    Γ£à acct_service_update_v1 ΓÇö APPROVED
+    Γ£à offer_status_update_auto_20260301221201_1 ΓÇö APPROVED
+
+  Summary: 18 APPROVED, 0 PENDING, 12 REJECTED
+
+======================================================================
+PAGE: Azshinari (FB: 656646850875530)
+======================================================================
+
+  ≡ƒôï Total existing templates: 80
+    Γ¥î offer_status_update_auto_20260322062318_80 ΓÇö REJECTED (UTILITY)
+    Γ¥î offer_status_update_auto_20260322062317_79 ΓÇö REJECTED (UTILITY)
+    Γ¥î offer_status_update_auto_20260322062316_78 ΓÇö REJECTED (UTILITY)
+    Γ¥î offer_status_update_auto_20260322062315_77 ΓÇö REJECTED (UTILITY)
+    Γ¥î offer_status_update_auto_20260322062314_76 ΓÇö REJECTED (UTILITY)
+    Γ¥î offer_status_update_auto_20260322062313_75 ΓÇö REJECTED (UTILITY)
+    Γ¥î offer_status_update_auto_20260322062312_74 ΓÇö REJECTED (UTILITY)
+    Γ¥î offer_status_update_auto_20260322062311_73 ΓÇö REJECTED (UTILITY)
+    Γ¥î offer_status_update_auto_20260322062310_71 ΓÇö REJECTED (UTILITY)
+    Γ¥î offer_status_update_auto_20260322062310_72 ΓÇö REJECTED (UTILITY)
+    Γ¥î offer_status_update_auto_20260322062309_70 ΓÇö REJECTED (UTILITY)
+    Γ¥î offer_status_update_auto_20260322062308_69 ΓÇö REJECTED (UTILITY)
+    Γ¥î offer_status_update_auto_20260322062307_68 ΓÇö REJECTED (UTILITY)
+    Γ¥î offer_status_update_auto_20260322062307_67 ΓÇö REJECTED (UTILITY)
+    Γ¥î offer_status_update_auto_20260322062259_66 ΓÇö REJECTED (UTILITY)
+    Γ¥î offer_status_update_auto_20260322062258_65 ΓÇö REJECTED (UTILITY)
+    Γ¥î offer_status_update_auto_20260322062257_64 ΓÇö REJECTED (UTILITY)
+    Γ¥î offer_status_update_auto_20260322062257_63 ΓÇö REJECTED (UTILITY)
+    Γ¥î offer_status_update_auto_20260322062255_62 ΓÇö REJECTED (UTILITY)
+    Γ¥î offer_status_update_auto_20260322062254_61 ΓÇö REJECTED (UTILITY)
+    Γ¥î offer_status_update_auto_20260322062253_60 ΓÇö REJECTED (UTILITY)
+    Γ¥î offer_status_update_auto_20260322062252_58 ΓÇö REJECTED (UTILITY)
+    Γ¥î offer_status_update_auto_20260322062253_59 ΓÇö REJECTED (UTILITY)
+    Γ¥î offer_status_update_auto_20260322062251_57 ΓÇö REJECTED (UTILITY)
+    Γ¥î offer_status_update_auto_20260322062250_56 ΓÇö REJECTED (UTILITY)
+    Γ¥î offer_status_update_auto_20260322062249_55 ΓÇö REJECTED (UTILITY)
+    Γ¥î offer_status_update_auto_20260322062248_54 ΓÇö REJECTED (UTILITY)
+    Γ¥î offer_status_update_auto_20260322062246_53 ΓÇö REJECTED (UTILITY)
+    Γ¥î offer_status_update_auto_20260322062245_52 ΓÇö REJECTED (UTILITY)
+    Γ¥î offer_status_update_auto_20260322062244_51 ΓÇö REJECTED (UTILITY)
+    Γ¥î offer_status_update_auto_20260322062244_50 ΓÇö REJECTED (UTILITY)
+    Γ¥î offer_status_update_auto_20260322062243_49 ΓÇö REJECTED (UTILITY)
+    Γ¥î offer_status_update_auto_20260322062242_48 ΓÇö REJECTED (UTILITY)
+    Γ¥î offer_status_update_auto_20260322062241_47 ΓÇö REJECTED (UTILITY)
+    Γ¥î offer_status_update_auto_20260322062230_46 ΓÇö REJECTED (UTILITY)
+    Γ¥î offer_status_update_auto_20260322062229_45 ΓÇö REJECTED (UTILITY)
+    Γ¥î offer_status_update_auto_20260322062228_44 ΓÇö REJECTED (UTILITY)
+    Γ¥î offer_status_update_auto_20260322062227_43 ΓÇö REJECTED (UTILITY)
+    Γ¥î offer_status_update_auto_20260322062217_42 ΓÇö REJECTED (UTILITY)
+    Γ¥î offer_status_update_auto_20260322062216_41 ΓÇö REJECTED (UTILITY)
+    Γ¥î offer_status_update_auto_20260322062215_40 ΓÇö REJECTED (UTILITY)
+    Γ¥î offer_status_update_auto_20260322062214_39 ΓÇö REJECTED (UTILITY)
+    Γ¥î offer_status_update_auto_20260322062213_38 ΓÇö REJECTED (UTILITY)
+    Γ¥î offer_status_update_auto_20260322062212_37 ΓÇö REJECTED (UTILITY)
+    Γ¥î offer_status_update_auto_20260322062211_36 ΓÇö REJECTED (UTILITY)
+    Γ¥î offer_status_update_auto_20260322062210_35 ΓÇö REJECTED (UTILITY)
+    Γ¥î offer_status_update_auto_20260322062208_33 ΓÇö REJECTED (UTILITY)
+    Γ¥î offer_status_update_auto_20260322062209_34 ΓÇö REJECTED (UTILITY)
+    Γ¥î offer_status_update_auto_20260322062207_32 ΓÇö REJECTED (UTILITY)
+    Γ¥î offer_status_update_auto_20260322062206_31 ΓÇö REJECTED (UTILITY)
+    Γ¥î offer_status_update_auto_20260322062205_30 ΓÇö REJECTED (UTILITY)
+    Γ¥î offer_status_update_auto_20260322062204_29 ΓÇö REJECTED (UTILITY)
+    Γ¥î offer_status_update_auto_20260322062203_28 ΓÇö REJECTED (UTILITY)
+    Γ¥î offer_status_update_auto_20260322062202_27 ΓÇö REJECTED (UTILITY)
+    Γ¥î offer_status_update_auto_20260322062202_26 ΓÇö REJECTED (UTILITY)
+    Γ¥î offer_status_update_auto_20260322062200_25 ΓÇö REJECTED (UTILITY)
+    Γ¥î offer_status_update_auto_20260322062152_24 ΓÇö REJECTED (UTILITY)
+    Γ¥î offer_status_update_auto_20260322062151_23 ΓÇö REJECTED (UTILITY)
+    Γ¥î offer_status_update_auto_20260322062150_22 ΓÇö REJECTED (UTILITY)
+    Γ¥î offer_status_update_auto_20260322062149_20 ΓÇö REJECTED (UTILITY)
+    Γ¥î offer_status_update_auto_20260322062149_21 ΓÇö REJECTED (UTILITY)
+    Γ¥î offer_status_update_auto_20260322062146_19 ΓÇö REJECTED (UTILITY)
+    Γ¥î offer_status_update_auto_20260322062145_18 ΓÇö REJECTED (UTILITY)
+    Γ¥î offer_status_update_auto_20260322062144_17 ΓÇö REJECTED (UTILITY)
+    Γ¥î offer_status_update_auto_20260322062143_16 ΓÇö REJECTED (UTILITY)
+    Γ¥î offer_status_update_auto_20260322062142_15 ΓÇö REJECTED (UTILITY)
+    Γ¥î offer_status_update_auto_20260322062141_14 ΓÇö REJECTED (UTILITY)
+    Γ¥î offer_status_update_auto_20260322062140_13 ΓÇö REJECTED (UTILITY)
+    Γ¥î offer_status_update_auto_20260322062139_12 ΓÇö REJECTED (UTILITY)
+    Γ¥î offer_status_update_auto_20260322062138_11 ΓÇö REJECTED (UTILITY)
+    Γ¥î offer_status_update_auto_20260322062138_10 ΓÇö REJECTED (UTILITY)
+    Γ¥î offer_status_update_auto_20260322062137_9 ΓÇö REJECTED (UTILITY)
+    Γ¥î offer_status_update_auto_20260322062136_8 ΓÇö REJECTED (UTILITY)
+    Γ¥î offer_status_update_auto_20260322062135_7 ΓÇö REJECTED (UTILITY)
+    Γ¥î offer_status_update_auto_20260322062134_6 ΓÇö REJECTED (UTILITY)
+    Γ¥î offer_status_update_auto_20260322062133_5 ΓÇö REJECTED (UTILITY)
+    Γ¥î offer_status_update_auto_20260322062132_3 ΓÇö REJECTED (UTILITY)
+    Γ¥î offer_status_update_auto_20260322062133_4 ΓÇö REJECTED (UTILITY)
+    Γ¥î offer_status_update_auto_20260322062131_2 ΓÇö REJECTED (UTILITY)
+    Γ¥î offer_status_update_auto_20260322062124_1 ΓÇö REJECTED (UTILITY)
+
+  ≡ƒùæ∩╕Å Deleting 80 rejected templates...
+    Γ£à DELETE offer_status_update_auto_20260322062318_80: success
+    Γ£à DELETE offer_status_update_auto_20260322062317_79: success
+    Γ£à DELETE offer_status_update_auto_20260322062316_78: success
+    Γ£à DELETE offer_status_update_auto_20260322062315_77: success
+    Γ£à DELETE offer_status_update_auto_20260322062314_76: success
+    Γ£à DELETE offer_status_update_auto_20260322062313_75: success
+    Γ£à DELETE offer_status_update_auto_20260322062312_74: success
+    Γ£à DELETE offer_status_update_auto_20260322062311_73: success
+    Γ£à DELETE offer_status_update_auto_20260322062310_71: success
+    Γ£à DELETE offer_status_update_auto_20260322062310_72: success
+    Γ£à DELETE offer_status_update_auto_20260322062309_70: success
+    Γ£à DELETE offer_status_update_auto_20260322062308_69: success
+    Γ£à DELETE offer_status_update_auto_20260322062307_68: success
+    Γ£à DELETE offer_status_update_auto_20260322062307_67: success
+    Γ£à DELETE offer_status_update_auto_20260322062259_66: success
+    Γ£à DELETE offer_status_update_auto_20260322062258_65: success
+    Γ£à DELETE offer_status_update_auto_20260322062257_64: success
+    Γ£à DELETE offer_status_update_auto_20260322062257_63: success
+    Γ£à DELETE offer_status_update_auto_20260322062255_62: success
+    Γ£à DELETE offer_status_update_auto_20260322062254_61: success
+    Γ£à DELETE offer_status_update_auto_20260322062253_60: success
+    Γ£à DELETE offer_status_update_auto_20260322062252_58: success
+    Γ£à DELETE offer_status_update_auto_20260322062253_59: success
+    Γ£à DELETE offer_status_update_auto_20260322062251_57: success
+    Γ£à DELETE offer_status_update_auto_20260322062250_56: success
+    Γ£à DELETE offer_status_update_auto_20260322062249_55: success
+    Γ£à DELETE offer_status_update_auto_20260322062248_54: success
+    Γ£à DELETE offer_status_update_auto_20260322062246_53: success
+    Γ£à DELETE offer_status_update_auto_20260322062245_52: success
+    Γ£à DELETE offer_status_update_auto_20260322062244_51: success
+    Γ£à DELETE offer_status_update_auto_20260322062244_50: success
+    Γ£à DELETE offer_status_update_auto_20260322062243_49: success
+    Γ£à DELETE offer_status_update_auto_20260322062242_48: success
+    Γ£à DELETE offer_status_update_auto_20260322062241_47: success
+    Γ£à DELETE offer_status_update_auto_20260322062230_46: success
+    Γ£à DELETE offer_status_update_auto_20260322062229_45: success
+    Γ£à DELETE offer_status_update_auto_20260322062228_44: success
+    Γ£à DELETE offer_status_update_auto_20260322062227_43: success
+    Γ£à DELETE offer_status_update_auto_20260322062217_42: success
+    Γ£à DELETE offer_status_update_auto_20260322062216_41: success
+    Γ£à DELETE offer_status_update_auto_20260322062215_40: success
+    Γ£à DELETE offer_status_update_auto_20260322062214_39: success
+    Γ£à DELETE offer_status_update_auto_20260322062213_38: success
+    Γ£à DELETE offer_status_update_auto_20260322062212_37: success
+    Γ£à DELETE offer_status_update_auto_20260322062211_36: success
+    Γ£à DELETE offer_status_update_auto_20260322062210_35: success
+    Γ£à DELETE offer_status_update_auto_20260322062208_33: success
+    Γ£à DELETE offer_status_update_auto_20260322062209_34: success
+    Γ£à DELETE offer_status_update_auto_20260322062207_32: success
+    Γ£à DELETE offer_status_update_auto_20260322062206_31: success
+    Γ£à DELETE offer_status_update_auto_20260322062205_30: success
+    Γ£à DELETE offer_status_update_auto_20260322062204_29: success
+    Γ£à DELETE offer_status_update_auto_20260322062203_28: success
+    Γ£à DELETE offer_status_update_auto_20260322062202_27: success
+    Γ£à DELETE offer_status_update_auto_20260322062202_26: success
+    Γ£à DELETE offer_status_update_auto_20260322062200_25: success
+    Γ£à DELETE offer_status_update_auto_20260322062152_24: success
+    Γ£à DELETE offer_status_update_auto_20260322062151_23: success
+    Γ£à DELETE offer_status_update_auto_20260322062150_22: success
+    Γ£à DELETE offer_status_update_auto_20260322062149_20: success
+    Γ£à DELETE offer_status_update_auto_20260322062149_21: success
+    Γ£à DELETE offer_status_update_auto_20260322062146_19: success
+    Γ£à DELETE offer_status_update_auto_20260322062145_18: success
+    Γ£à DELETE offer_status_update_auto_20260322062144_17: success
+    Γ£à DELETE offer_status_update_auto_20260322062143_16: success
+    Γ£à DELETE offer_status_update_auto_20260322062142_15: success
+    Γ£à DELETE offer_status_update_auto_20260322062141_14: success
+    Γ£à DELETE offer_status_update_auto_20260322062140_13: success
+    Γ£à DELETE offer_status_update_auto_20260322062139_12: success
+    Γ£à DELETE offer_status_update_auto_20260322062138_11: success
+    Γ£à DELETE offer_status_update_auto_20260322062138_10: success
+    Γ£à DELETE offer_status_update_auto_20260322062137_9: success
+    Γ£à DELETE offer_status_update_auto_20260322062136_8: success
+    Γ£à DELETE offer_status_update_auto_20260322062135_7: success
+    Γ£à DELETE offer_status_update_auto_20260322062134_6: success
+    Γ£à DELETE offer_status_update_auto_20260322062133_5: success
+    Γ£à DELETE offer_status_update_auto_20260322062132_3: success
+    Γ£à DELETE offer_status_update_auto_20260322062133_4: success
+    Γ£à DELETE offer_status_update_auto_20260322062131_2: success
+    Γ£à DELETE offer_status_update_auto_20260322062124_1: success
+
+  ≡ƒôñ Submitting 29 templates...
+    Γ£à OK   acct_service_update_v1: id=26954451514148068, status=APPROVED
+    Γ£à OK   acct_info_notice_v1: id=26127816396889306, status=APPROVED
+    Γ£à OK   order_notification_v1: id=24281431144887804, status=APPROVED
+    Γ£à OK   payment_notice_v1: id=26825462500405602, status=APPROVED
+    Γ£à OK   booking_update_v1: id=26197118436617807, status=APPROVED
+    Γ£à OK   support_response_v1: id=26468811066063966, status=APPROVED
+    Γ£à OK   general_alert_v1: id=26165241953097710, status=APPROVED
+    Γ¥î OK   general_alert_v2: id=26786650607593698, status=REJECTED
+    Γ£à OK   acct_reminder_v1: id=26529038263358219, status=APPROVED
+    Γ£à OK   general_msg_v1: id=26672176832400238, status=APPROVED
+    Γ£à OK   general_notice_v1: id=26212327078426475, status=APPROVED
+    Γ£à OK   acct_followup_v1: id=26707261188892647, status=APPROVED
+    Γ¥î OK   general_msg_v2: id=27044397551819241, status=REJECTED
+    Γ£à OK   general_msg_v3: id=26268864229418922, status=APPROVED
+    Γ¥î OK   acct_update_2p_v1: id=26515332944728723, status=REJECTED
+    Γ¥î OK   service_notice_2p_v1: id=26125068443862181, status=REJECTED
+    Γ£à OK   order_update_2p_v1: id=34619893967626589, status=APPROVED
+    Γ¥î OK   acct_greeting_2p_v1: id=34520040880972570, status=REJECTED
+    Γ¥î OK   acct_greeting_2p_v2: id=26202628139379251, status=REJECTED
+    Γ¥î OK   acct_detail_2p_v1: id=26167681776231427, status=REJECTED
+    Γ£à OK   acct_detail_2p_v2: id=26236199706045367, status=APPROVED
+    Γ¥î OK   delivery_info_2p_v1: id=26258561870478847, status=REJECTED
+    Γ¥î OK   quick_update_2p_v1: id=34839515298995754, status=REJECTED
+    Γ¥î OK   quick_notice_2p_v1: id=26729435509973220, status=REJECTED
+    Γ£à OK   acct_update_btn_v1: id=26349896121288175, status=APPROVED
+    Γ£à OK   order_track_btn_v1: id=26170859809248319, status=APPROVED
+    Γ£à OK   booking_confirm_btn_v1: id=34912229041724039, status=APPROVED
+    Γ¥î OK   service_update_btn_2p_v1: id=26472403385724642, status=REJECTED
+    Γ¥î OK   promo_notice_btn_2p_v1: id=26528871000071447, status=REJECTED
+
+  ≡ƒôè Results: 29 submitted, 0 skipped, 0 failed
+
+  --- Final Template Status ---
+    Γ¥î promo_notice_btn_2p_v1 ΓÇö REJECTED
+    Γ¥î service_update_btn_2p_v1 ΓÇö REJECTED
+    Γ£à booking_confirm_btn_v1 ΓÇö APPROVED
+    Γ£à order_track_btn_v1 ΓÇö APPROVED
+    Γ£à acct_update_btn_v1 ΓÇö APPROVED
+    Γ¥î quick_notice_2p_v1 ΓÇö REJECTED
+    Γ¥î quick_update_2p_v1 ΓÇö REJECTED
+    Γ¥î delivery_info_2p_v1 ΓÇö REJECTED
+    Γ£à acct_detail_2p_v2 ΓÇö APPROVED
+    Γ¥î acct_detail_2p_v1 ΓÇö REJECTED
+    Γ¥î acct_greeting_2p_v2 ΓÇö REJECTED
+    Γ¥î acct_greeting_2p_v1 ΓÇö REJECTED
+    Γ£à order_update_2p_v1 ΓÇö APPROVED
+    Γ¥î service_notice_2p_v1 ΓÇö REJECTED
+    Γ¥î acct_update_2p_v1 ΓÇö REJECTED
+    Γ£à general_msg_v3 ΓÇö APPROVED
+    Γ¥î general_msg_v2 ΓÇö REJECTED
+    Γ£à acct_followup_v1 ΓÇö APPROVED
+    Γ£à general_notice_v1 ΓÇö APPROVED
+    Γ£à general_msg_v1 ΓÇö APPROVED
+    Γ£à acct_reminder_v1 ΓÇö APPROVED
+    Γ¥î general_alert_v2 ΓÇö REJECTED
+    Γ£à general_alert_v1 ΓÇö APPROVED
+    Γ£à support_response_v1 ΓÇö APPROVED
+    Γ£à booking_update_v1 ΓÇö APPROVED
+    Γ£à payment_notice_v1 ΓÇö APPROVED
+    Γ£à order_notification_v1 ΓÇö APPROVED
+    Γ£à acct_info_notice_v1 ΓÇö APPROVED
+    Γ£à acct_service_update_v1 ΓÇö APPROVED
+
+  Summary: 17 APPROVED, 0 PENDING, 12 REJECTED
+
+======================================================================
+PAGE: Manawari Studios (FB: 619355471260631)
+======================================================================
+
+  ≡ƒôï Total existing templates: 14
+    Γ¥î offer_status_update_auto_20260324031033_13 ΓÇö REJECTED (UTILITY)
+    Γ¥î offer_status_update_auto_20260324031032_12 ΓÇö REJECTED (UTILITY)
+    Γ¥î offer_status_update_auto_20260324031031_11 ΓÇö REJECTED (UTILITY)
+    Γ¥î offer_status_update_auto_20260324031030_9 ΓÇö REJECTED (UTILITY)
+    Γ¥î offer_status_update_auto_20260324031031_10 ΓÇö REJECTED (UTILITY)
+    Γ¥î offer_status_update_auto_20260324031029_8 ΓÇö REJECTED (UTILITY)
+    Γ¥î offer_status_update_auto_20260324031028_6 ΓÇö REJECTED (UTILITY)
+    Γ¥î offer_status_update_auto_20260324031028_7 ΓÇö REJECTED (UTILITY)
+    Γ¥î offer_status_update_auto_20260324031026_5 ΓÇö REJECTED (UTILITY)
+    Γ¥î offer_status_update_auto_20260324031025_3 ΓÇö REJECTED (UTILITY)
+    Γ¥î offer_status_update_auto_20260324031025_4 ΓÇö REJECTED (UTILITY)
+    Γ¥î offer_status_update_auto_20260324031024_2 ΓÇö REJECTED (UTILITY)
+    Γ¥î offer_status_update_auto_20260324031023_1 ΓÇö REJECTED (UTILITY)
+    Γ£à offer_status_update_auto_20260305100023_1 ΓÇö APPROVED (UTILITY)
+
+  ≡ƒùæ∩╕Å Deleting 13 rejected templates...
+    Γ£à DELETE offer_status_update_auto_20260324031033_13: success
+    Γ£à DELETE offer_status_update_auto_20260324031032_12: success
+    Γ£à DELETE offer_status_update_auto_20260324031031_11: success
+    Γ£à DELETE offer_status_update_auto_20260324031030_9: success
+    Γ£à DELETE offer_status_update_auto_20260324031031_10: success
+    Γ£à DELETE offer_status_update_auto_20260324031029_8: success
+    Γ£à DELETE offer_status_update_auto_20260324031028_6: success
+    Γ£à DELETE offer_status_update_auto_20260324031028_7: success
+    Γ£à DELETE offer_status_update_auto_20260324031026_5: success
+    Γ£à DELETE offer_status_update_auto_20260324031025_3: success
+    Γ£à DELETE offer_status_update_auto_20260324031025_4: success
+    Γ£à DELETE offer_status_update_auto_20260324031024_2: success
+    Γ£à DELETE offer_status_update_auto_20260324031023_1: success
+
+  ≡ƒôñ Submitting 29 templates...
+    Γ£à OK   acct_service_update_v1: id=26852880170984466, status=APPROVED
+    Γ£à OK   acct_info_notice_v1: id=27521094064157702, status=APPROVED
+    Γ£à OK   order_notification_v1: id=25624577043882815, status=APPROVED
+    Γ£à OK   payment_notice_v1: id=35577539758512165, status=APPROVED
+    Γ£à OK   booking_update_v1: id=26994995126774067, status=APPROVED
+    Γ£à OK   support_response_v1: id=26346049195025377, status=APPROVED
+    Γ£à OK   general_alert_v1: id=26199409783053795, status=APPROVED
+    Γ¥î OK   general_alert_v2: id=26062017156809379, status=REJECTED
+    Γ£à OK   acct_reminder_v1: id=26037766069252605, status=APPROVED
+    Γ£à OK   general_msg_v1: id=26730042146601359, status=APPROVED
+    Γ£à OK   general_notice_v1: id=27238415112428672, status=APPROVED
+    Γ£à OK   acct_followup_v1: id=26476405888664075, status=APPROVED
+    Γ¥î OK   general_msg_v2: id=27415964474659744, status=REJECTED
+    Γ£à OK   general_msg_v3: id=25302685909408045, status=APPROVED
+    Γ¥î OK   acct_update_2p_v1: id=27133426686244117, status=REJECTED
+    Γ¥î OK   service_notice_2p_v1: id=26386420307688194, status=REJECTED
+    Γ£à OK   order_update_2p_v1: id=25948351984867775, status=APPROVED
+    Γ¥î OK   acct_greeting_2p_v1: id=26168843042785365, status=REJECTED
+    Γ¥î OK   acct_greeting_2p_v2: id=26328672276801391, status=REJECTED
+    Γ¥î OK   acct_detail_2p_v1: id=26668062649463978, status=REJECTED
+    Γ£à OK   acct_detail_2p_v2: id=25976297218737623, status=APPROVED
+    Γ¥î OK   delivery_info_2p_v1: id=26852226021049188, status=REJECTED
+    Γ¥î OK   quick_update_2p_v1: id=26531393653165154, status=REJECTED
+    Γ¥î OK   quick_notice_2p_v1: id=26362388806735047, status=REJECTED
+    Γ£à OK   acct_update_btn_v1: id=26099875029712886, status=APPROVED
+    Γ£à OK   order_track_btn_v1: id=26507945072179535, status=APPROVED
+    Γ£à OK   booking_confirm_btn_v1: id=27595815716675838, status=APPROVED
+    Γ¥î OK   service_update_btn_2p_v1: id=27102674202667658, status=REJECTED
+    Γ¥î OK   promo_notice_btn_2p_v1: id=26201604972825599, status=REJECTED
+
+  ≡ƒôè Results: 29 submitted, 0 skipped, 0 failed
+
+  --- Final Template Status ---
+    Γ¥î promo_notice_btn_2p_v1 ΓÇö REJECTED
+    Γ¥î service_update_btn_2p_v1 ΓÇö REJECTED
+    Γ£à booking_confirm_btn_v1 ΓÇö APPROVED
+    Γ£à order_track_btn_v1 ΓÇö APPROVED
+    Γ£à acct_update_btn_v1 ΓÇö APPROVED
+    Γ¥î quick_notice_2p_v1 ΓÇö REJECTED
+    Γ¥î quick_update_2p_v1 ΓÇö REJECTED
+    Γ¥î delivery_info_2p_v1 ΓÇö REJECTED
+    Γ£à acct_detail_2p_v2 ΓÇö APPROVED
+    Γ¥î acct_detail_2p_v1 ΓÇö REJECTED
+    Γ¥î acct_greeting_2p_v2 ΓÇö REJECTED
+    Γ¥î acct_greeting_2p_v1 ΓÇö REJECTED
+    Γ£à order_update_2p_v1 ΓÇö APPROVED
+    Γ¥î service_notice_2p_v1 ΓÇö REJECTED
+    Γ¥î acct_update_2p_v1 ΓÇö REJECTED
+    Γ£à general_msg_v3 ΓÇö APPROVED
+    Γ¥î general_msg_v2 ΓÇö REJECTED
+    Γ£à acct_followup_v1 ΓÇö APPROVED
+    Γ£à general_notice_v1 ΓÇö APPROVED
+    Γ£à general_msg_v1 ΓÇö APPROVED
+    Γ£à acct_reminder_v1 ΓÇö APPROVED
+    Γ¥î general_alert_v2 ΓÇö REJECTED
+    Γ£à general_alert_v1 ΓÇö APPROVED
+    Γ£à support_response_v1 ΓÇö APPROVED
+    Γ£à booking_update_v1 ΓÇö APPROVED
+    Γ£à payment_notice_v1 ΓÇö APPROVED
+    Γ£à order_notification_v1 ΓÇö APPROVED
+    Γ£à acct_info_notice_v1 ΓÇö APPROVED
+    Γ£à acct_service_update_v1 ΓÇö APPROVED
+    Γ£à offer_status_update_auto_20260305100023_1 ΓÇö APPROVED
+
+  Summary: 18 APPROVED, 0 PENDING, 12 REJECTED
+
+======================================================================
+PAGE: Makata Studio (FB: 663521640185928)
+======================================================================
+
+  ≡ƒôï Total existing templates: 1
+    Γ£à offer_status_update_auto_20260222230544_1 ΓÇö APPROVED (UTILITY)
+
+  ≡ƒôñ Submitting 29 templates...
+    Γ£à OK   acct_service_update_v1: id=25749928524686046, status=APPROVED
+    Γ£à OK   acct_info_notice_v1: id=26866366999626005, status=APPROVED
+    Γ£à OK   order_notification_v1: id=34418967557747076, status=APPROVED
+    Γ£à OK   payment_notice_v1: id=25847583574924685, status=APPROVED
+    Γ£à OK   booking_update_v1: id=26195047880153127, status=APPROVED
+    Γ£à OK   support_response_v1: id=26171959225820964, status=APPROVED
+    Γ£à OK   general_alert_v1: id=25891979553817847, status=APPROVED
+    Γ¥î OK   general_alert_v2: id=26234760372844754, status=REJECTED
+    Γ£à OK   acct_reminder_v1: id=26903545895896731, status=APPROVED
+    Γ£à OK   general_msg_v1: id=26416676671294659, status=APPROVED
+    Γ£à OK   general_notice_v1: id=26505454575715498, status=APPROVED
+    Γ£à OK   acct_followup_v1: id=35179047878345595, status=APPROVED
+    Γ¥î OK   general_msg_v2: id=25941531232214891, status=REJECTED
+    Γ£à OK   general_msg_v3: id=27445835095009297, status=APPROVED
+    Γ¥î OK   acct_update_2p_v1: id=26718305281096532, status=REJECTED
+    Γ¥î OK   service_notice_2p_v1: id=34670991549215197, status=REJECTED
+    Γ£à OK   order_update_2p_v1: id=26805314042394144, status=APPROVED
+    Γ¥î OK   acct_greeting_2p_v1: id=34532666133048250, status=REJECTED
+    Γ¥î OK   acct_greeting_2p_v2: id=26257436873912211, status=REJECTED
+    Γ¥î OK   acct_detail_2p_v1: id=26520809567578815, status=REJECTED
+    Γ£à OK   acct_detail_2p_v2: id=25924738080541747, status=APPROVED
+    Γ¥î OK   delivery_info_2p_v1: id=26496852469911144, status=REJECTED
+    Γ¥î OK   quick_update_2p_v1: id=24185570661140149, status=REJECTED
+    Γ¥î OK   quick_notice_2p_v1: id=25909202835447200, status=REJECTED
+    Γ£à OK   acct_update_btn_v1: id=26863661119892457, status=APPROVED
+    Γ£à OK   order_track_btn_v1: id=26154584217537522, status=APPROVED
+    Γ£à OK   booking_confirm_btn_v1: id=26737663209171446, status=APPROVED
+    Γ¥î OK   service_update_btn_2p_v1: id=26823541880585062, status=REJECTED
+    Γ¥î OK   promo_notice_btn_2p_v1: id=26445296071795332, status=REJECTED
+
+  ≡ƒôè Results: 29 submitted, 0 skipped, 0 failed
+
+  --- Final Template Status ---
+    Γ¥î promo_notice_btn_2p_v1 ΓÇö REJECTED
+    Γ¥î service_update_btn_2p_v1 ΓÇö REJECTED
+    Γ£à booking_confirm_btn_v1 ΓÇö APPROVED
+    Γ£à order_track_btn_v1 ΓÇö APPROVED
+    Γ£à acct_update_btn_v1 ΓÇö APPROVED
+    Γ¥î quick_notice_2p_v1 ΓÇö REJECTED
+    Γ¥î quick_update_2p_v1 ΓÇö REJECTED
+    Γ¥î delivery_info_2p_v1 ΓÇö REJECTED
+    Γ£à acct_detail_2p_v2 ΓÇö APPROVED
+    Γ¥î acct_detail_2p_v1 ΓÇö REJECTED
+    Γ¥î acct_greeting_2p_v2 ΓÇö REJECTED
+    Γ¥î acct_greeting_2p_v1 ΓÇö REJECTED
+    Γ£à order_update_2p_v1 ΓÇö APPROVED
+    Γ¥î service_notice_2p_v1 ΓÇö REJECTED
+    Γ¥î acct_update_2p_v1 ΓÇö REJECTED
+    Γ£à general_msg_v3 ΓÇö APPROVED
+    Γ¥î general_msg_v2 ΓÇö REJECTED
+    Γ£à acct_followup_v1 ΓÇö APPROVED
+    Γ£à general_notice_v1 ΓÇö APPROVED
+    Γ£à general_msg_v1 ΓÇö APPROVED
+    Γ£à acct_reminder_v1 ΓÇö APPROVED
+    Γ¥î general_alert_v2 ΓÇö REJECTED
+    Γ£à general_alert_v1 ΓÇö APPROVED
+    Γ£à support_response_v1 ΓÇö APPROVED
+    Γ£à booking_update_v1 ΓÇö APPROVED
+    Γ£à payment_notice_v1 ΓÇö APPROVED
+    Γ£à order_notification_v1 ΓÇö APPROVED
+    Γ£à acct_info_notice_v1 ΓÇö APPROVED
+    Γ£à acct_service_update_v1 ΓÇö APPROVED
+    Γ£à offer_status_update_auto_20260222230544_1 ΓÇö APPROVED
+
+  Summary: 18 APPROVED, 0 PENDING, 12 REJECTED
+
+======================================================================
+PAGE: Hiraya Studios (FB: 606945225824770)
+======================================================================
+
+  ≡ƒôï Total existing templates: 1
+    Γ£à offer_status_update_auto_20260220070452_1 ΓÇö APPROVED (UTILITY)
+
+  ≡ƒôñ Submitting 29 templates...
+    Γ£à OK   acct_service_update_v1: id=34905637442383258, status=APPROVED
+    Γ£à OK   acct_info_notice_v1: id=34683689187944431, status=APPROVED
+    Γ£à OK   order_notification_v1: id=26164951859865980, status=APPROVED
+    Γ£à OK   payment_notice_v1: id=26726492083621530, status=APPROVED
+    Γ£à OK   booking_update_v1: id=34525523073757648, status=APPROVED
+    Γ£à OK   support_response_v1: id=26771657712466237, status=APPROVED
+    Γ£à OK   general_alert_v1: id=35369783422608679, status=APPROVED
+    Γ¥î OK   general_alert_v2: id=25901551899544122, status=REJECTED
+    Γ£à OK   acct_reminder_v1: id=26857061943900566, status=APPROVED
+    Γ£à OK   general_msg_v1: id=26385221411143315, status=APPROVED
+    Γ£à OK   general_notice_v1: id=26455231030739962, status=APPROVED
+    Γ£à OK   acct_followup_v1: id=26628222563468043, status=APPROVED
+    Γ¥î OK   general_msg_v2: id=26905980235655161, status=REJECTED
+    Γ£à OK   general_msg_v3: id=26176445128677228, status=APPROVED
+    Γ¥î OK   acct_update_2p_v1: id=26467687572921015, status=REJECTED
+    Γ¥î OK   service_notice_2p_v1: id=26465837593033064, status=REJECTED
+    Γ£à OK   order_update_2p_v1: id=26368471552818123, status=APPROVED
+    Γ¥î OK   acct_greeting_2p_v1: id=26423272303979338, status=REJECTED
+    Γ¥î OK   acct_greeting_2p_v2: id=26243883935269933, status=REJECTED
+    Γ¥î OK   acct_detail_2p_v1: id=26537771469243532, status=REJECTED
+    Γ£à OK   acct_detail_2p_v2: id=26333232956333444, status=APPROVED
+    Γ¥î OK   delivery_info_2p_v1: id=25977227708640074, status=REJECTED
+    Γ¥î OK   quick_update_2p_v1: id=25916519154716131, status=REJECTED
+    Γ¥î OK   quick_notice_2p_v1: id=26347392288248135, status=REJECTED
+    Γ£à OK   acct_update_btn_v1: id=34575972468715712, status=APPROVED
+    Γ£à OK   order_track_btn_v1: id=26262022510124864, status=APPROVED
+    Γ£à OK   booking_confirm_btn_v1: id=26685856127739261, status=APPROVED
+    Γ¥î OK   service_update_btn_2p_v1: id=26057805520571607, status=REJECTED
+    Γ¥î OK   promo_notice_btn_2p_v1: id=26174473638861684, status=REJECTED
+
+  ≡ƒôè Results: 29 submitted, 0 skipped, 0 failed
+
+  --- Final Template Status ---
+    Γ¥î promo_notice_btn_2p_v1 ΓÇö REJECTED
+    Γ¥î service_update_btn_2p_v1 ΓÇö REJECTED
+    Γ£à booking_confirm_btn_v1 ΓÇö APPROVED
+    Γ£à order_track_btn_v1 ΓÇö APPROVED
+    Γ£à acct_update_btn_v1 ΓÇö APPROVED
+    Γ¥î quick_notice_2p_v1 ΓÇö REJECTED
+    Γ¥î quick_update_2p_v1 ΓÇö REJECTED
+    Γ£à acct_detail_2p_v2 ΓÇö APPROVED
+    Γ¥î delivery_info_2p_v1 ΓÇö REJECTED
+    Γ¥î acct_detail_2p_v1 ΓÇö REJECTED
+    Γ¥î acct_greeting_2p_v2 ΓÇö REJECTED
+    Γ¥î acct_greeting_2p_v1 ΓÇö REJECTED
+    Γ£à order_update_2p_v1 ΓÇö APPROVED
+    Γ¥î service_notice_2p_v1 ΓÇö REJECTED
+    Γ¥î acct_update_2p_v1 ΓÇö REJECTED
+    Γ£à general_msg_v3 ΓÇö APPROVED
+    Γ¥î general_msg_v2 ΓÇö REJECTED
+    Γ£à acct_followup_v1 ΓÇö APPROVED
+    Γ£à general_notice_v1 ΓÇö APPROVED
+    Γ£à general_msg_v1 ΓÇö APPROVED
+    Γ£à acct_reminder_v1 ΓÇö APPROVED
+    Γ¥î general_alert_v2 ΓÇö REJECTED
+    Γ£à general_alert_v1 ΓÇö APPROVED
+    Γ£à support_response_v1 ΓÇö APPROVED
+    Γ£à booking_update_v1 ΓÇö APPROVED
+    Γ£à payment_notice_v1 ΓÇö APPROVED
+    Γ£à order_notification_v1 ΓÇö APPROVED
+    Γ£à acct_info_notice_v1 ΓÇö APPROVED
+    Γ£à acct_service_update_v1 ΓÇö APPROVED
+    Γ£à offer_status_update_auto_20260220070452_1 ΓÇö APPROVED
+
+  Summary: 18 APPROVED, 0 PENDING, 12 REJECTED
+
+======================================================================
+PAGE: Kanta mo, kwento mo (FB: 505302195998738)
+======================================================================
+  ΓÜá∩╕Å Cannot access templates: (#200) Requires pages_utility_messaging permission to manage the object
+
+======================================================================
+PAGE: Strix Media Agency (FB: 704576816074341)
+======================================================================
+
+  ≡ƒôï Total existing templates: 81
+    Γ¥î offer_status_update_auto_20260323040214_80 ΓÇö REJECTED (UTILITY)
+    Γ¥î offer_status_update_auto_20260323040213_79 ΓÇö REJECTED (UTILITY)
+    Γ¥î offer_status_update_auto_20260323040213_78 ΓÇö REJECTED (UTILITY)
+    Γ¥î offer_status_update_auto_20260323040212_77 ΓÇö REJECTED (UTILITY)
+    Γ¥î offer_status_update_auto_20260323040211_76 ΓÇö REJECTED (UTILITY)
+    Γ¥î offer_status_update_auto_20260323040210_75 ΓÇö REJECTED (UTILITY)
+    Γ¥î offer_status_update_auto_20260323040209_74 ΓÇö REJECTED (UTILITY)
+    Γ¥î offer_status_update_auto_20260323040208_73 ΓÇö REJECTED (UTILITY)
+    Γ¥î offer_status_update_auto_20260323040208_72 ΓÇö REJECTED (UTILITY)
+    Γ¥î offer_status_update_auto_20260323040207_71 ΓÇö REJECTED (UTILITY)
+    Γ¥î offer_status_update_auto_20260323040206_70 ΓÇö REJECTED (UTILITY)
+    Γ¥î offer_status_update_auto_20260323040205_68 ΓÇö REJECTED (UTILITY)
+    Γ¥î offer_status_update_auto_20260323040205_69 ΓÇö REJECTED (UTILITY)
+    Γ¥î offer_status_update_auto_20260323040204_67 ΓÇö REJECTED (UTILITY)
+    Γ¥î offer_status_update_auto_20260323040203_66 ΓÇö REJECTED (UTILITY)
+    Γ¥î offer_status_update_auto_20260323040202_65 ΓÇö REJECTED (UTILITY)
+    Γ¥î offer_status_update_auto_20260323040201_63 ΓÇö REJECTED (UTILITY)
+    Γ¥î offer_status_update_auto_20260323040202_64 ΓÇö REJECTED (UTILITY)
+    Γ¥î offer_status_update_auto_20260323040200_62 ΓÇö REJECTED (UTILITY)
+    Γ¥î offer_status_update_auto_20260323040200_61 ΓÇö REJECTED (UTILITY)
+    Γ¥î offer_status_update_auto_20260323040158_60 ΓÇö REJECTED (UTILITY)
+    Γ¥î offer_status_update_auto_20260323040158_59 ΓÇö REJECTED (UTILITY)
+    Γ¥î offer_status_update_auto_20260323040157_58 ΓÇö REJECTED (UTILITY)
+    Γ¥î offer_status_update_auto_20260323040156_57 ΓÇö REJECTED (UTILITY)
+    Γ¥î offer_status_update_auto_20260323040155_55 ΓÇö REJECTED (UTILITY)
+    Γ¥î offer_status_update_auto_20260323040156_56 ΓÇö REJECTED (UTILITY)
+    Γ¥î offer_status_update_auto_20260323040154_54 ΓÇö REJECTED (UTILITY)
+    Γ¥î offer_status_update_auto_20260323040153_53 ΓÇö REJECTED (UTILITY)
+    Γ¥î offer_status_update_auto_20260323040153_52 ΓÇö REJECTED (UTILITY)
+    Γ¥î offer_status_update_auto_20260323040152_51 ΓÇö REJECTED (UTILITY)
+    Γ¥î offer_status_update_auto_20260323040151_50 ΓÇö REJECTED (UTILITY)
+    Γ¥î offer_status_update_auto_20260323040150_49 ΓÇö REJECTED (UTILITY)
+    Γ¥î offer_status_update_auto_20260323040150_48 ΓÇö REJECTED (UTILITY)
+    Γ¥î offer_status_update_auto_20260323040149_47 ΓÇö REJECTED (UTILITY)
+    Γ¥î offer_status_update_auto_20260323040148_46 ΓÇö REJECTED (UTILITY)
+    Γ¥î offer_status_update_auto_20260323040147_45 ΓÇö REJECTED (UTILITY)
+    Γ¥î offer_status_update_auto_20260323040146_44 ΓÇö REJECTED (UTILITY)
+    Γ¥î offer_status_update_auto_20260323040145_43 ΓÇö REJECTED (UTILITY)
+    Γ¥î offer_status_update_auto_20260323040144_41 ΓÇö REJECTED (UTILITY)
+    Γ¥î offer_status_update_auto_20260323040145_42 ΓÇö REJECTED (UTILITY)
+    Γ¥î offer_status_update_auto_20260323040143_39 ΓÇö REJECTED (UTILITY)
+    Γ¥î offer_status_update_auto_20260323040144_40 ΓÇö REJECTED (UTILITY)
+    Γ¥î offer_status_update_auto_20260323040142_38 ΓÇö REJECTED (UTILITY)
+    Γ¥î offer_status_update_auto_20260323040142_37 ΓÇö REJECTED (UTILITY)
+    Γ¥î offer_status_update_auto_20260323040141_36 ΓÇö REJECTED (UTILITY)
+    Γ¥î offer_status_update_auto_20260323040141_35 ΓÇö REJECTED (UTILITY)
+    Γ¥î offer_status_update_auto_20260323040140_34 ΓÇö REJECTED (UTILITY)
+    Γ¥î offer_status_update_auto_20260323040139_32 ΓÇö REJECTED (UTILITY)
+    Γ¥î offer_status_update_auto_20260323040139_33 ΓÇö REJECTED (UTILITY)
+    Γ¥î offer_status_update_auto_20260323040138_31 ΓÇö REJECTED (UTILITY)
+    Γ¥î offer_status_update_auto_20260323040137_30 ΓÇö REJECTED (UTILITY)
+    Γ¥î offer_status_update_auto_20260323040136_28 ΓÇö REJECTED (UTILITY)
+    Γ¥î offer_status_update_auto_20260323040137_29 ΓÇö REJECTED (UTILITY)
+    Γ¥î offer_status_update_auto_20260323040135_27 ΓÇö REJECTED (UTILITY)
+    Γ¥î offer_status_update_auto_20260323040134_25 ΓÇö REJECTED (UTILITY)
+    Γ¥î offer_status_update_auto_20260323040134_26 ΓÇö REJECTED (UTILITY)
+    Γ¥î offer_status_update_auto_20260323040133_24 ΓÇö REJECTED (UTILITY)
+    Γ¥î offer_status_update_auto_20260323040133_23 ΓÇö REJECTED (UTILITY)
+    Γ¥î offer_status_update_auto_20260323040132_22 ΓÇö REJECTED (UTILITY)
+    Γ¥î offer_status_update_auto_20260323040131_21 ΓÇö REJECTED (UTILITY)
+    Γ¥î offer_status_update_auto_20260323040131_20 ΓÇö REJECTED (UTILITY)
+    Γ¥î offer_status_update_auto_20260323040130_19 ΓÇö REJECTED (UTILITY)
+    Γ¥î offer_status_update_auto_20260323040129_18 ΓÇö REJECTED (UTILITY)
+    Γ¥î offer_status_update_auto_20260323040128_17 ΓÇö REJECTED (UTILITY)
+    Γ¥î offer_status_update_auto_20260323040128_16 ΓÇö REJECTED (UTILITY)
+    Γ¥î offer_status_update_auto_20260323040127_15 ΓÇö REJECTED (UTILITY)
+    Γ¥î offer_status_update_auto_20260323040127_14 ΓÇö REJECTED (UTILITY)
+    Γ¥î offer_status_update_auto_20260323040126_13 ΓÇö REJECTED (UTILITY)
+    Γ¥î offer_status_update_auto_20260323040125_11 ΓÇö REJECTED (UTILITY)
+    Γ¥î offer_status_update_auto_20260323040126_12 ΓÇö REJECTED (UTILITY)
+    Γ¥î offer_status_update_auto_20260323040124_10 ΓÇö REJECTED (UTILITY)
+    Γ¥î offer_status_update_auto_20260323040124_9 ΓÇö REJECTED (UTILITY)
+    Γ¥î offer_status_update_auto_20260323040123_8 ΓÇö REJECTED (UTILITY)
+    Γ¥î offer_status_update_auto_20260323040122_6 ΓÇö REJECTED (UTILITY)
+    Γ¥î offer_status_update_auto_20260323040122_7 ΓÇö REJECTED (UTILITY)
+    Γ¥î offer_status_update_auto_20260323040121_5 ΓÇö REJECTED (UTILITY)
+    Γ¥î offer_status_update_auto_20260323040120_4 ΓÇö REJECTED (UTILITY)
+    Γ¥î offer_status_update_auto_20260323040119_3 ΓÇö REJECTED (UTILITY)
+    Γ¥î offer_status_update_auto_20260323040118_2 ΓÇö REJECTED (UTILITY)
+    Γ¥î offer_status_update_auto_20260323040118_1 ΓÇö REJECTED (UTILITY)
+    Γ£à offer_status_update_auto_20260305093336_1 ΓÇö APPROVED (UTILITY)
+
+  ≡ƒùæ∩╕Å Deleting 80 rejected templates...
+    Γ£à DELETE offer_status_update_auto_20260323040214_80: success
+    Γ£à DELETE offer_status_update_auto_20260323040213_79: success
+    Γ£à DELETE offer_status_update_auto_20260323040213_78: success
+    Γ£à DELETE offer_status_update_auto_20260323040212_77: success
+    Γ£à DELETE offer_status_update_auto_20260323040211_76: success
+    Γ£à DELETE offer_status_update_auto_20260323040210_75: success
+    Γ£à DELETE offer_status_update_auto_20260323040209_74: success
+    Γ£à DELETE offer_status_update_auto_20260323040208_73: success
+    Γ£à DELETE offer_status_update_auto_20260323040208_72: success
+    Γ£à DELETE offer_status_update_auto_20260323040207_71: success
+    Γ£à DELETE offer_status_update_auto_20260323040206_70: success
+    Γ£à DELETE offer_status_update_auto_20260323040205_68: success
+    Γ£à DELETE offer_status_update_auto_20260323040205_69: success
+    Γ£à DELETE offer_status_update_auto_20260323040204_67: success
+    Γ£à DELETE offer_status_update_auto_20260323040203_66: success
+    Γ£à DELETE offer_status_update_auto_20260323040202_65: success
+    Γ£à DELETE offer_status_update_auto_20260323040201_63: success
+    Γ£à DELETE offer_status_update_auto_20260323040202_64: success
+    Γ£à DELETE offer_status_update_auto_20260323040200_62: success
+    Γ£à DELETE offer_status_update_auto_20260323040200_61: success
+    Γ£à DELETE offer_status_update_auto_20260323040158_60: success
+    Γ£à DELETE offer_status_update_auto_20260323040158_59: success
+    Γ£à DELETE offer_status_update_auto_20260323040157_58: success
+    Γ£à DELETE offer_status_update_auto_20260323040156_57: success
+    Γ£à DELETE offer_status_update_auto_20260323040155_55: success
+    Γ£à DELETE offer_status_update_auto_20260323040156_56: success
+    Γ£à DELETE offer_status_update_auto_20260323040154_54: success
+    Γ£à DELETE offer_status_update_auto_20260323040153_53: success
+    Γ£à DELETE offer_status_update_auto_20260323040153_52: success
+    Γ£à DELETE offer_status_update_auto_20260323040152_51: success
+    Γ£à DELETE offer_status_update_auto_20260323040151_50: success
+    Γ£à DELETE offer_status_update_auto_20260323040150_49: success
+    Γ£à DELETE offer_status_update_auto_20260323040150_48: success
+    Γ£à DELETE offer_status_update_auto_20260323040149_47: success
+    Γ£à DELETE offer_status_update_auto_20260323040148_46: success
+    Γ£à DELETE offer_status_update_auto_20260323040147_45: success
+    Γ£à DELETE offer_status_update_auto_20260323040146_44: success
+    Γ£à DELETE offer_status_update_auto_20260323040145_43: success
+    Γ£à DELETE offer_status_update_auto_20260323040144_41: success
+    Γ£à DELETE offer_status_update_auto_20260323040145_42: success
+    Γ£à DELETE offer_status_update_auto_20260323040143_39: success
+    Γ£à DELETE offer_status_update_auto_20260323040144_40: success
+    Γ£à DELETE offer_status_update_auto_20260323040142_38: success
+    Γ£à DELETE offer_status_update_auto_20260323040142_37: success
+    Γ£à DELETE offer_status_update_auto_20260323040141_36: success
+    Γ£à DELETE offer_status_update_auto_20260323040141_35: success
+    Γ£à DELETE offer_status_update_auto_20260323040140_34: success
+    Γ£à DELETE offer_status_update_auto_20260323040139_32: success
+    Γ£à DELETE offer_status_update_auto_20260323040139_33: success
+    Γ£à DELETE offer_status_update_auto_20260323040138_31: success
+    Γ£à DELETE offer_status_update_auto_20260323040137_30: success
+    Γ£à DELETE offer_status_update_auto_20260323040136_28: success
+    Γ£à DELETE offer_status_update_auto_20260323040137_29: success
+    Γ£à DELETE offer_status_update_auto_20260323040135_27: success
+    Γ£à DELETE offer_status_update_auto_20260323040134_25: success
+    Γ£à DELETE offer_status_update_auto_20260323040134_26: success
+    Γ£à DELETE offer_status_update_auto_20260323040133_24: success
+    Γ£à DELETE offer_status_update_auto_20260323040133_23: success
+    Γ£à DELETE offer_status_update_auto_20260323040132_22: success
+    Γ£à DELETE offer_status_update_auto_20260323040131_21: success
+    Γ£à DELETE offer_status_update_auto_20260323040131_20: success
+    Γ£à DELETE offer_status_update_auto_20260323040130_19: success
+    Γ£à DELETE offer_status_update_auto_20260323040129_18: success
+    Γ£à DELETE offer_status_update_auto_20260323040128_17: success
+    Γ£à DELETE offer_status_update_auto_20260323040128_16: success
+    Γ£à DELETE offer_status_update_auto_20260323040127_15: success
+    Γ£à DELETE offer_status_update_auto_20260323040127_14: success
+    Γ£à DELETE offer_status_update_auto_20260323040126_13: success
+    Γ£à DELETE offer_status_update_auto_20260323040125_11: success
+    Γ£à DELETE offer_status_update_auto_20260323040126_12: success
+    Γ£à DELETE offer_status_update_auto_20260323040124_10: success
+    Γ£à DELETE offer_status_update_auto_20260323040124_9: success
+    Γ£à DELETE offer_status_update_auto_20260323040123_8: success
+    Γ£à DELETE offer_status_update_auto_20260323040122_6: success
+    Γ£à DELETE offer_status_update_auto_20260323040122_7: success
+    Γ£à DELETE offer_status_update_auto_20260323040121_5: success
+    Γ£à DELETE offer_status_update_auto_20260323040120_4: success
+    Γ£à DELETE offer_status_update_auto_20260323040119_3: success
+    Γ£à DELETE offer_status_update_auto_20260323040118_2: success
+    Γ£à DELETE offer_status_update_auto_20260323040118_1: success
+
+  ≡ƒôñ Submitting 29 templates...
+    Γ£à OK   acct_service_update_v1: id=26546101621745505, status=APPROVED
+    Γ£à OK   acct_info_notice_v1: id=26305500665758717, status=APPROVED
+    Γ£à OK   order_notification_v1: id=26034356309569385, status=APPROVED
+    Γ£à OK   payment_notice_v1: id=26559283797023178, status=APPROVED
+    Γ£à OK   booking_update_v1: id=34480273878283967, status=APPROVED
+    Γ£à OK   support_response_v1: id=34508693498777962, status=APPROVED
+    Γ£à OK   general_alert_v1: id=34500101309637076, status=APPROVED
+    Γ¥î OK   general_alert_v2: id=34761995173416009, status=REJECTED
+    Γ£à OK   acct_reminder_v1: id=24215356314828472, status=APPROVED
+    Γ£à OK   general_msg_v1: id=26241284335556400, status=APPROVED
+    Γ£à OK   general_notice_v1: id=26242259822093905, status=APPROVED
+    Γ£à OK   acct_followup_v1: id=26113519331673312, status=APPROVED
+    Γ¥î OK   general_msg_v2: id=27022487637358153, status=REJECTED
+    Γ£à OK   general_msg_v3: id=25740215812322383, status=APPROVED
+    Γ¥î OK   acct_update_2p_v1: id=35692024237063312, status=REJECTED
+    Γ¥î OK   service_notice_2p_v1: id=26396709669991456, status=REJECTED
+    Γ£à OK   order_update_2p_v1: id=25996503996715112, status=APPROVED
+    Γ¥î OK   acct_greeting_2p_v1: id=34638914072419724, status=REJECTED
+    Γ¥î OK   acct_greeting_2p_v2: id=26276577452037045, status=REJECTED
+    Γ¥î OK   acct_detail_2p_v1: id=26154386887550317, status=REJECTED
+    Γ£à OK   acct_detail_2p_v2: id=35083442747913799, status=APPROVED
+    Γ¥î OK   delivery_info_2p_v1: id=24755566797475262, status=REJECTED
+    Γ¥î OK   quick_update_2p_v1: id=34653764020904769, status=REJECTED
+    Γ¥î OK   quick_notice_2p_v1: id=26117532184598888, status=REJECTED
+    Γ£à OK   acct_update_btn_v1: id=27353875104212840, status=APPROVED
+    Γ£à OK   order_track_btn_v1: id=34844129965233225, status=APPROVED
+    Γ£à OK   booking_confirm_btn_v1: id=24281433754886966, status=APPROVED
+    Γ¥î OK   service_update_btn_2p_v1: id=26313734641587781, status=REJECTED
+    Γ¥î OK   promo_notice_btn_2p_v1: id=26750533227909957, status=REJECTED
+
+  ≡ƒôè Results: 29 submitted, 0 skipped, 0 failed
+
+  --- Final Template Status ---
+    Γ¥î promo_notice_btn_2p_v1 ΓÇö REJECTED
+    Γ¥î service_update_btn_2p_v1 ΓÇö REJECTED
+    Γ£à booking_confirm_btn_v1 ΓÇö APPROVED
+    Γ£à order_track_btn_v1 ΓÇö APPROVED
+    Γ£à acct_update_btn_v1 ΓÇö APPROVED
+    Γ¥î quick_notice_2p_v1 ΓÇö REJECTED
+    Γ¥î quick_update_2p_v1 ΓÇö REJECTED
+    Γ¥î delivery_info_2p_v1 ΓÇö REJECTED
+    Γ£à acct_detail_2p_v2 ΓÇö APPROVED
+    Γ¥î acct_detail_2p_v1 ΓÇö REJECTED
+    Γ¥î acct_greeting_2p_v2 ΓÇö REJECTED
+    Γ¥î acct_greeting_2p_v1 ΓÇö REJECTED
+    Γ£à order_update_2p_v1 ΓÇö APPROVED
+    Γ¥î service_notice_2p_v1 ΓÇö REJECTED
+    Γ¥î acct_update_2p_v1 ΓÇö REJECTED
+    Γ£à general_msg_v3 ΓÇö APPROVED
+    Γ¥î general_msg_v2 ΓÇö REJECTED
+    Γ£à acct_followup_v1 ΓÇö APPROVED
+    Γ£à general_notice_v1 ΓÇö APPROVED
+    Γ£à general_msg_v1 ΓÇö APPROVED
+    Γ£à acct_reminder_v1 ΓÇö APPROVED
+    Γ¥î general_alert_v2 ΓÇö REJECTED
+    Γ£à general_alert_v1 ΓÇö APPROVED
+    Γ£à support_response_v1 ΓÇö APPROVED
+    Γ£à booking_update_v1 ΓÇö APPROVED
+    Γ£à payment_notice_v1 ΓÇö APPROVED
+    Γ£à order_notification_v1 ΓÇö APPROVED
+    Γ£à acct_info_notice_v1 ΓÇö APPROVED
+    Γ£à acct_service_update_v1 ΓÇö APPROVED
+    Γ£à offer_status_update_auto_20260305093336_1 ΓÇö APPROVED
+
+  Summary: 18 APPROVED, 0 PENDING, 12 REJECTED
+
+======================================================================
+PAGE: Whisperwalk Interior Incorporated (FB: 754512431281378)
+======================================================================
+
+  ≡ƒôï Total existing templates: 6
+    Γ¥î account_update_notification ΓÇö REJECTED (UTILITY)
+    Γ¥î account_security_alert ΓÇö REJECTED (UTILITY)
+    Γ¥î account_general_notification ΓÇö REJECTED (UTILITY)
+    Γ£à whisperwalk_interior_incorporated_support_1771528952726 ΓÇö APPROVED (UTILITY)
+    Γ£à whisperwalk_interior_incorporated_support_1771527882235 ΓÇö APPROVED (UTILITY)
+    Γ¥î whisperwalk_interior_incorporated_msg_1771494019658 ΓÇö REJECTED (UTILITY)
+
+  ≡ƒùæ∩╕Å Deleting 4 rejected templates...
+    Γ£à DELETE account_update_notification: success
+    Γ£à DELETE account_security_alert: success
+    Γ£à DELETE account_general_notification: success
+    Γ£à DELETE whisperwalk_interior_incorporated_msg_1771494019658: success
+
+  ≡ƒôñ Submitting 29 templates...
+    Γ£à OK   acct_service_update_v1: id=26256176897378267, status=APPROVED
+    Γ£à OK   acct_info_notice_v1: id=26486417714376255, status=APPROVED
+    Γ£à OK   order_notification_v1: id=25864562929893530, status=APPROVED
+    Γ£à OK   payment_notice_v1: id=25776289978716174, status=APPROVED
+    Γ£à OK   booking_update_v1: id=26597515543247572, status=APPROVED
+    Γ£à OK   support_response_v1: id=25996263793407758, status=APPROVED
+    Γ£à OK   general_alert_v1: id=34874291268851367, status=APPROVED
+    Γ¥î OK   general_alert_v2: id=26343889935230245, status=REJECTED
+    Γ£à OK   acct_reminder_v1: id=26396254140005347, status=APPROVED
+    Γ£à OK   general_msg_v1: id=26509471725314755, status=APPROVED
+    Γ£à OK   general_notice_v1: id=26177974708534027, status=APPROVED
+    Γ£à OK   acct_followup_v1: id=25515393434801061, status=APPROVED
+    Γ¥î OK   general_msg_v2: id=26696165156681215, status=REJECTED
+    Γ£à OK   general_msg_v3: id=25947619901600981, status=APPROVED
+    Γ¥î OK   acct_update_2p_v1: id=34723126110664353, status=REJECTED
+    Γ¥î OK   service_notice_2p_v1: id=25731000399912377, status=REJECTED
+    Γ£à OK   order_update_2p_v1: id=34599317483046826, status=APPROVED
+    Γ¥î OK   acct_greeting_2p_v1: id=26489858043964628, status=REJECTED
+    Γ¥î OK   acct_greeting_2p_v2: id=35301389416126193, status=REJECTED
+    Γ¥î OK   acct_detail_2p_v1: id=34680579858252196, status=REJECTED
+    Γ£à OK   acct_detail_2p_v2: id=35023531830578423, status=APPROVED
+    Γ¥î OK   delivery_info_2p_v1: id=26671485075821516, status=REJECTED
+    Γ¥î OK   quick_update_2p_v1: id=35047315084859575, status=REJECTED
+    Γ¥î OK   quick_notice_2p_v1: id=26306793488976388, status=REJECTED
+    Γ£à OK   acct_update_btn_v1: id=34576691908645416, status=APPROVED
+    Γ£à OK   order_track_btn_v1: id=35696931576560759, status=APPROVED
+    Γ£à OK   booking_confirm_btn_v1: id=26155452320813713, status=APPROVED
+    Γ¥î OK   service_update_btn_2p_v1: id=26321752480778047, status=REJECTED
+    Γ¥î OK   promo_notice_btn_2p_v1: id=26417698114530205, status=REJECTED
+
+  ≡ƒôè Results: 29 submitted, 0 skipped, 0 failed
+
+  --- Final Template Status ---
+    Γ¥î promo_notice_btn_2p_v1 ΓÇö REJECTED
+    Γ¥î service_update_btn_2p_v1 ΓÇö REJECTED
+    Γ£à booking_confirm_btn_v1 ΓÇö APPROVED
+    Γ£à order_track_btn_v1 ΓÇö APPROVED
+    Γ£à acct_update_btn_v1 ΓÇö APPROVED
+    Γ¥î quick_notice_2p_v1 ΓÇö REJECTED
+    Γ¥î quick_update_2p_v1 ΓÇö REJECTED
+    Γ£à acct_detail_2p_v2 ΓÇö APPROVED
+    Γ¥î delivery_info_2p_v1 ΓÇö REJECTED
+    Γ¥î acct_detail_2p_v1 ΓÇö REJECTED
+    Γ¥î acct_greeting_2p_v2 ΓÇö REJECTED
+    Γ¥î acct_greeting_2p_v1 ΓÇö REJECTED
+    Γ£à order_update_2p_v1 ΓÇö APPROVED
+    Γ¥î service_notice_2p_v1 ΓÇö REJECTED
+    Γ¥î acct_update_2p_v1 ΓÇö REJECTED
+    Γ£à general_msg_v3 ΓÇö APPROVED
+    Γ¥î general_msg_v2 ΓÇö REJECTED
+    Γ£à acct_followup_v1 ΓÇö APPROVED
+    Γ£à general_notice_v1 ΓÇö APPROVED
+    Γ£à general_msg_v1 ΓÇö APPROVED
+    Γ£à acct_reminder_v1 ΓÇö APPROVED
+    Γ¥î general_alert_v2 ΓÇö REJECTED
+    Γ£à general_alert_v1 ΓÇö APPROVED
+    Γ£à support_response_v1 ΓÇö APPROVED
+    Γ£à booking_update_v1 ΓÇö APPROVED
+    Γ£à payment_notice_v1 ΓÇö APPROVED
+    Γ£à order_notification_v1 ΓÇö APPROVED
+    Γ£à acct_info_notice_v1 ΓÇö APPROVED
+    Γ£à acct_service_update_v1 ΓÇö APPROVED
+    Γ£à whisperwalk_interior_incorporated_support_1771528952726 ΓÇö APPROVED
+    Γ£à whisperwalk_interior_incorporated_support_1771527882235 ΓÇö APPROVED
+
+  Summary: 19 APPROVED, 0 PENDING, 12 REJECTED
+
+======================================================================
+PAGE: Brand Beats Studio (FB: 540901085777059)
+======================================================================
+
+  ≡ƒôï Total existing templates: 1
+    Γ£à offer_status_update_auto_20260220063531_1 ΓÇö APPROVED (UTILITY)
+
+  ≡ƒôñ Submitting 29 templates...
+    Γ£à OK   acct_service_update_v1: id=27441482895453187, status=APPROVED
+    Γ£à OK   acct_info_notice_v1: id=27028291550107087, status=APPROVED
+    Γ£à OK   order_notification_v1: id=24787629607602153, status=APPROVED
+    Γ£à OK   payment_notice_v1: id=26784931284457158, status=APPROVED
+    Γ£à OK   booking_update_v1: id=27351328504467148, status=APPROVED
+    Γ£à OK   support_response_v1: id=26734042859564550, status=APPROVED
+    Γ£à OK   general_alert_v1: id=26547306338219498, status=APPROVED
+    Γ¥î OK   general_alert_v2: id=25511395825201108, status=REJECTED
+    Γ£à OK   acct_reminder_v1: id=26205076112519286, status=APPROVED
+    Γ£à OK   general_msg_v1: id=26500650842899010, status=APPROVED
+    Γ£à OK   general_notice_v1: id=34542297418748140, status=APPROVED
+    Γ£à OK   acct_followup_v1: id=26881552598098034, status=APPROVED
+    Γ¥î OK   general_msg_v2: id=26759953363612712, status=REJECTED
+    Γ£à OK   general_msg_v3: id=34926405890306039, status=APPROVED
+    Γ¥î OK   acct_update_2p_v1: id=27079315215026016, status=REJECTED
+    Γ¥î OK   service_notice_2p_v1: id=35831392933126805, status=REJECTED
+    Γ£à OK   order_update_2p_v1: id=34971427319137300, status=APPROVED
+    Γ¥î OK   acct_greeting_2p_v1: id=26201120992915119, status=REJECTED
+    Γ¥î OK   acct_greeting_2p_v2: id=25916056681400336, status=REJECTED
+    Γ¥î OK   acct_detail_2p_v1: id=26723228693949219, status=REJECTED
+    Γ£à OK   acct_detail_2p_v2: id=25415482904795028, status=APPROVED
+    Γ¥î OK   delivery_info_2p_v1: id=26240219168920644, status=REJECTED
+    Γ¥î OK   quick_update_2p_v1: id=26166386886364343, status=REJECTED
+    Γ¥î OK   quick_notice_2p_v1: id=26871534562438048, status=REJECTED
+    Γ£à OK   acct_update_btn_v1: id=26087523350946990, status=APPROVED
+    Γ£à OK   order_track_btn_v1: id=26345555518429827, status=APPROVED
+    Γ£à OK   booking_confirm_btn_v1: id=34586458444333409, status=APPROVED
+    Γ¥î OK   service_update_btn_2p_v1: id=26352117624444943, status=REJECTED
+    Γ¥î OK   promo_notice_btn_2p_v1: id=26391999500411960, status=REJECTED
+
+  ≡ƒôè Results: 29 submitted, 0 skipped, 0 failed
+
+  --- Final Template Status ---
+    Γ¥î promo_notice_btn_2p_v1 ΓÇö REJECTED
+    Γ¥î service_update_btn_2p_v1 ΓÇö REJECTED
+    Γ£à booking_confirm_btn_v1 ΓÇö APPROVED
+    Γ£à order_track_btn_v1 ΓÇö APPROVED
+    Γ£à acct_update_btn_v1 ΓÇö APPROVED
+    Γ¥î quick_notice_2p_v1 ΓÇö REJECTED
+    Γ¥î quick_update_2p_v1 ΓÇö REJECTED
+    Γ¥î delivery_info_2p_v1 ΓÇö REJECTED
+    Γ£à acct_detail_2p_v2 ΓÇö APPROVED
+    Γ¥î acct_detail_2p_v1 ΓÇö REJECTED
+    Γ¥î acct_greeting_2p_v2 ΓÇö REJECTED
+    Γ¥î acct_greeting_2p_v1 ΓÇö REJECTED
+    Γ£à order_update_2p_v1 ΓÇö APPROVED
+    Γ¥î service_notice_2p_v1 ΓÇö REJECTED
+    Γ¥î acct_update_2p_v1 ΓÇö REJECTED
+    Γ£à general_msg_v3 ΓÇö APPROVED
+    Γ¥î general_msg_v2 ΓÇö REJECTED
+    Γ£à acct_followup_v1 ΓÇö APPROVED
+    Γ£à general_notice_v1 ΓÇö APPROVED
+    Γ£à general_msg_v1 ΓÇö APPROVED
+    Γ£à acct_reminder_v1 ΓÇö APPROVED
+    Γ¥î general_alert_v2 ΓÇö REJECTED
+    Γ£à general_alert_v1 ΓÇö APPROVED
+    Γ£à support_response_v1 ΓÇö APPROVED
+    Γ£à booking_update_v1 ΓÇö APPROVED
+    Γ£à payment_notice_v1 ΓÇö APPROVED
+    Γ£à order_notification_v1 ΓÇö APPROVED
+    Γ£à acct_info_notice_v1 ΓÇö APPROVED
+    Γ£à acct_service_update_v1 ΓÇö APPROVED
+    Γ£à offer_status_update_auto_20260220063531_1 ΓÇö APPROVED
+
+  Summary: 18 APPROVED, 0 PENDING, 12 REJECTED
+
+======================================================================
+PAGE: Habi Media Agency (FB: 763800046807356)
+======================================================================
+  ΓÜá∩╕Å Cannot access templates: Any of the pages_read_engagement, pages_manage_metadata,
+        pages_read_user_content, pages_manage_ads, pages_show_list or
+        pages_messaging permission(s) must be granted before impersonating a
+        user's page.
+
+======================================================================
+PAGE: Hiraya Studio (FB: 697291860141214)
+======================================================================
+
+  ≡ƒôï Total existing templates: 1
+    Γ£à offer_status_update_auto_20260220062538_1 ΓÇö APPROVED (UTILITY)
+
+  ≡ƒôñ Submitting 29 templates...
+    Γ£à OK   acct_service_update_v1: id=26223331820664005, status=APPROVED
+    Γ£à OK   acct_info_notice_v1: id=26387139990985937, status=APPROVED
+    Γ£à OK   order_notification_v1: id=26649259698096147, status=APPROVED
+    Γ£à OK   payment_notice_v1: id=25960134443689259, status=APPROVED
+    Γ£à OK   booking_update_v1: id=26256318207359360, status=APPROVED
+    Γ£à OK   support_response_v1: id=34487757704201221, status=APPROVED
+    Γ£à OK   general_alert_v1: id=27156941697241944, status=APPROVED
+    Γ¥î OK   general_alert_v2: id=24299368089760500, status=REJECTED
+    Γ£à OK   acct_reminder_v1: id=26171992445795076, status=APPROVED
+    Γ£à OK   general_msg_v1: id=26177391055251838, status=APPROVED
+    Γ£à OK   general_notice_v1: id=26106190085705454, status=APPROVED
+    Γ£à OK   acct_followup_v1: id=26584347697895906, status=APPROVED
+    Γ¥î OK   general_msg_v2: id=26226469296976008, status=REJECTED
+    Γ£à OK   general_msg_v3: id=26130601949958585, status=APPROVED
+    Γ¥î OK   acct_update_2p_v1: id=26529617806724779, status=REJECTED
+    Γ¥î OK   service_notice_2p_v1: id=27361523696769673, status=REJECTED
+    Γ£à OK   order_update_2p_v1: id=26871138185825423, status=APPROVED
+    Γ¥î OK   acct_greeting_2p_v1: id=26353516274298821, status=REJECTED
+    Γ¥î OK   acct_greeting_2p_v2: id=26447168004912611, status=REJECTED
+    Γ¥î OK   acct_detail_2p_v1: id=26284251311235928, status=REJECTED
+    Γ£à OK   acct_detail_2p_v2: id=26377130708572994, status=APPROVED
+    Γ¥î OK   delivery_info_2p_v1: id=26361307020203405, status=REJECTED
+    Γ¥î OK   quick_update_2p_v1: id=26512256171701392, status=REJECTED
+    Γ¥î OK   quick_notice_2p_v1: id=34920982554182370, status=REJECTED
+    Γ£à OK   acct_update_btn_v1: id=26311050248523214, status=APPROVED
+    Γ£à OK   order_track_btn_v1: id=26871142485824993, status=APPROVED
+    Γ£à OK   booking_confirm_btn_v1: id=34935634939384064, status=APPROVED
+    Γ¥î OK   service_update_btn_2p_v1: id=26289603047337170, status=REJECTED
+    Γ¥î OK   promo_notice_btn_2p_v1: id=35780488261550020, status=REJECTED
+
+  ≡ƒôè Results: 29 submitted, 0 skipped, 0 failed
+
+  --- Final Template Status ---
+    Γ¥î promo_notice_btn_2p_v1 ΓÇö REJECTED
+    Γ¥î service_update_btn_2p_v1 ΓÇö REJECTED
+    Γ£à booking_confirm_btn_v1 ΓÇö APPROVED
+    Γ£à order_track_btn_v1 ΓÇö APPROVED
+    Γ£à acct_update_btn_v1 ΓÇö APPROVED
+    Γ¥î quick_notice_2p_v1 ΓÇö REJECTED
+    Γ¥î quick_update_2p_v1 ΓÇö REJECTED
+    Γ¥î delivery_info_2p_v1 ΓÇö REJECTED
+    Γ£à acct_detail_2p_v2 ΓÇö APPROVED
+    Γ¥î acct_detail_2p_v1 ΓÇö REJECTED
+    Γ¥î acct_greeting_2p_v2 ΓÇö REJECTED
+    Γ¥î acct_greeting_2p_v1 ΓÇö REJECTED
+    Γ£à order_update_2p_v1 ΓÇö APPROVED
+    Γ¥î service_notice_2p_v1 ΓÇö REJECTED
+    Γ¥î acct_update_2p_v1 ΓÇö REJECTED
+    Γ£à general_msg_v3 ΓÇö APPROVED
+    Γ¥î general_msg_v2 ΓÇö REJECTED
+    Γ£à acct_followup_v1 ΓÇö APPROVED
+    Γ£à general_notice_v1 ΓÇö APPROVED
+    Γ£à general_msg_v1 ΓÇö APPROVED
+    Γ£à acct_reminder_v1 ΓÇö APPROVED
+    Γ¥î general_alert_v2 ΓÇö REJECTED
+    Γ£à general_alert_v1 ΓÇö APPROVED
+    Γ£à support_response_v1 ΓÇö APPROVED
+    Γ£à booking_update_v1 ΓÇö APPROVED
+    Γ£à payment_notice_v1 ΓÇö APPROVED
+    Γ£à order_notification_v1 ΓÇö APPROVED
+    Γ£à acct_info_notice_v1 ΓÇö APPROVED
+    Γ£à acct_service_update_v1 ΓÇö APPROVED
+    Γ£à offer_status_update_auto_20260220062538_1 ΓÇö APPROVED
+
+  Summary: 18 APPROVED, 0 PENDING, 12 REJECTED
+
+======================================================================
+PAGE: Salin Media Agency  (FB: 684350754769086)
+======================================================================
+  ΓÜá∩╕Å Cannot access templates: Any of the pages_read_engagement, pages_manage_metadata,
+        pages_read_user_content, pages_manage_ads, pages_show_list or
+        pages_messaging permission(s) must be granted before impersonating a
+        user's page.
+
+======================================================================
+PAGE: Onset Media Agency (FB: 699579919911250)
+======================================================================
+  ΓÜá∩╕Å Cannot access templates: Any of the pages_read_engagement, pages_manage_metadata,
+        pages_read_user_content, pages_manage_ads, pages_show_list or
+        pages_messaging permission(s) must be granted before impersonating a
+        user's page.
+
+======================================================================
+PAGE: Kundiman Studios (FB: 533584419840779)
+======================================================================
+
+  ≡ƒôï Total existing templates: 1
+    Γ£à offer_status_update_auto_20260220071256_1 ΓÇö APPROVED (UTILITY)
+
+  ≡ƒôñ Submitting 29 templates...
+    Γ£à OK   acct_service_update_v1: id=26319462380997212, status=APPROVED
+    Γ£à OK   acct_info_notice_v1: id=26233409539676435, status=APPROVED
+    Γ£à OK   order_notification_v1: id=26259165007068957, status=APPROVED
+    Γ£à OK   payment_notice_v1: id=26026984930337127, status=APPROVED
+    Γ£à OK   booking_update_v1: id=26711051021864105, status=APPROVED
+    Γ£à OK   support_response_v1: id=26521261554180353, status=APPROVED
+    Γ£à OK   general_alert_v1: id=26341431825477367, status=APPROVED
+    Γ¥î OK   general_alert_v2: id=26227336143592022, status=REJECTED
+    Γ£à OK   acct_reminder_v1: id=26527538716884447, status=APPROVED
+    Γ£à OK   general_msg_v1: id=26545654181790145, status=APPROVED
+    Γ£à OK   general_notice_v1: id=26488508597412140, status=APPROVED
+    Γ£à OK   acct_followup_v1: id=34666088166339413, status=APPROVED
+    Γ¥î OK   general_msg_v2: id=25837970772548421, status=REJECTED
+    Γ£à OK   general_msg_v3: id=34576890761955663, status=APPROVED
+    Γ¥î OK   acct_update_2p_v1: id=26248749958086798, status=REJECTED
+    Γ¥î OK   service_notice_2p_v1: id=26447336881567727, status=REJECTED
+    Γ£à OK   order_update_2p_v1: id=26094450830237691, status=APPROVED
+    Γ¥î OK   acct_greeting_2p_v1: id=26832212043043642, status=REJECTED
+    Γ¥î OK   acct_greeting_2p_v2: id=26588909097463674, status=REJECTED
+    Γ¥î OK   acct_detail_2p_v1: id=34697192583259633, status=REJECTED
+    Γ£à OK   acct_detail_2p_v2: id=26138608785821442, status=APPROVED
+    Γ¥î OK   delivery_info_2p_v1: id=25772823852396606, status=REJECTED

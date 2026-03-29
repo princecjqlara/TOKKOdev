@@ -1,0 +1,15 @@
+﻿bda30d6 fix: improve campaign send reliability and dashboard UX
+49c4156 fix: skip utility template checks for button sends
+32b1871 feat: schedule campaigns with dynamic audiences
+4ae270e fix: harden facebook message delivery fallbacks
+e120d3d fix: send welcome messages as response
+27f5f6e fix: use manual button inputs in dynamic mode
+f6ee051 fix: relax dynamic first-button validation in modal
+5aaad08 feat: add optional {{2}}-driven dynamic button mode
+c28b634 fix: validate and normalize utility button URLs
+a946695 fix: rotate support-team utility template variants
+f22fd36 fix: ignore stale contacts responses on filters
+154b5cf fix: use from wording in support-team utility template
+8268b32 fix: remove local ingest calls from bulk send UI
+f8d947d fix: scope contact tag filters by page
+4cc0c21 fix: move send route helpers to module

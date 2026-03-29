@@ -1,8 +1,9 @@
 'use client';
 
 import { useSession } from 'next-auth/react';
+
 import { useEffect, useState } from 'react';
-import { Plus, Send, Trash2, Users, Clock, CheckCircle, XCircle, MessageSquare, StopCircle } from 'lucide-react';
+import { Plus, Send, Trash2, Users, Clock, CheckCircle, XCircle, MessageSquare, StopCircle, FileText } from 'lucide-react';
 import Pagination from '@/components/Pagination';
 import Modal from '@/components/Modal';
 import { Campaign, Page, Contact, PaginatedResponse } from '@/types';
@@ -13,6 +14,14 @@ type CampaignRecipientError = {
     contactName: string | null;
     contactPsid: string | null;
     error: string;
+};
+
+type TemplateStatus = {
+    id: string | null;
+    name: string;
+    status: string;
+    category: string;
+    language: string;
 };
 
 export default function CampaignsPage() {
@@ -67,6 +76,20 @@ export default function CampaignsPage() {
     const [audienceStartDate, setAudienceStartDate] = useState('');
     const [includedAudienceTagIds, setIncludedAudienceTagIds] = useState<Set<string>>(new Set());
     const [excludedAudienceTagIds, setExcludedAudienceTagIds] = useState<Set<string>>(new Set());
+
+    // Template picker state
+    const [availableTemplates, setAvailableTemplates] = useState<TemplateStatus[]>([]);
+    const [selectedTemplateName, setSelectedTemplateName] = useState<string | null>(null);
+    const [selectedTemplateLanguage, setSelectedTemplateLanguage] = useState<string>('en_US');
+    const [templatesLoading, setTemplatesLoading] = useState(false);
+    const [messageMode, setMessageMode] = useState<'freeform' | 'template'>('freeform');
+    const [freeformWrapper, setFreeformWrapper] = useState<string>('msg');
+    const [submittingTemplates, setSubmittingTemplates] = useState(false);
+    const [templateSubmitResults, setTemplateSubmitResults] = useState<{
+        summary: { total: number; approved: number; pending: number; errors: number; alreadyExisted: number };
+        results: { name: string; status: string; action: string; error?: string; hasButtons: boolean }[];
+    } | null>(null);
+    const [showTemplateResultsModal, setShowTemplateResultsModal] = useState(false);
 
     useEffect(() => {
         fetchPages();
@@ -221,6 +244,21 @@ export default function CampaignsPage() {
         });
     };
 
+    const fetchTemplates = async () => {
+        if (!selectedPageId) return;
+        setTemplatesLoading(true);
+        try {
+            const res = await fetch(`/api/facebook/templates/status?pageId=${selectedPageId}`);
+            const data = await res.json();
+            setAvailableTemplates(data.templates || []);
+        } catch (error) {
+            console.error('Error fetching templates:', error);
+            setAvailableTemplates([]);
+        } finally {
+            setTemplatesLoading(false);
+        }
+    };
+
     const handleOpenCreateModal = async () => {
         setCampaignName('');
         setMessageText('');
@@ -237,8 +275,38 @@ export default function CampaignsPage() {
         setAudienceStartDate('');
         setIncludedAudienceTagIds(new Set());
         setExcludedAudienceTagIds(new Set());
+        setSelectedTemplateName(null);
+        setSelectedTemplateLanguage('en_US');
+        setMessageMode('freeform');
         await Promise.all([fetchContacts(), fetchTags()]);
+        fetchTemplates();
         setShowCreateModal(true);
+    };
+
+    const handleSubmitTemplates = async () => {
+        if (!selectedPageId || submittingTemplates) return;
+        setSubmittingTemplates(true);
+        setTemplateSubmitResults(null);
+        try {
+            const res = await fetch('/api/facebook/templates/submit-all', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ pageId: selectedPageId })
+            });
+            const data = await res.json();
+            if (data.success) {
+                setTemplateSubmitResults(data);
+                setShowTemplateResultsModal(true);
+                // Refresh templates list
+                fetchTemplates();
+            } else {
+                alert(`Failed to submit templates: ${data.message || 'Unknown error'}`);
+            }
+        } catch (error) {
+            alert(`Error submitting templates: ${(error as Error).message}`);
+        } finally {
+            setSubmittingTemplates(false);
+        }
     };
 
     const handleCreate = async () => {
@@ -253,6 +321,7 @@ export default function CampaignsPage() {
         // For regular campaigns without AI: need messageText
         if (isLoop && !aiPrompt.trim()) return;
         if (!isLoop && useAiMessage && !aiPrompt.trim()) return;
+        if (!isLoop && !useAiMessage && messageMode === 'template' && !selectedTemplateName) return;
         if (!isLoop && !useAiMessage && !messageText.trim()) return;
 
         const resolvedScheduledAt =
@@ -281,6 +350,45 @@ export default function CampaignsPage() {
                 contactIds = data.items.map(c => c.id);
             }
 
+            const useTemplateInPayload = !isLoop && !useAiMessage && messageMode === 'template' && selectedTemplateName;
+
+            let payloadTemplateName: string | undefined = undefined;
+            let payloadTemplateLanguage: string | undefined = undefined;
+
+            if (!isLoop && !useAiMessage) {
+                if (useTemplateInPayload && selectedTemplateName) {
+                    payloadTemplateName = selectedTemplateName;
+                    payloadTemplateLanguage = selectedTemplateLanguage;
+                } else if (messageMode === 'freeform') {
+                    if (freeformWrapper !== 'none') {
+                        // Map the wrapper choice to the exact template name
+                        let targetTemplate = 'general_msg_v1';
+                        
+                        switch(freeformWrapper) {
+                            case 'notice': targetTemplate = 'general_notice_v1'; break;
+                            case 'alert': targetTemplate = 'general_alert_v1'; break;
+                            case 'btn_join': targetTemplate = 'instant_meeting_btn_v1'; break;
+                            case 'btn_details': targetTemplate = 'instant_meeting_btn_v2'; break;
+                            case 'btn_book': targetTemplate = 'instant_meeting_btn_v3'; break;
+                            case 'msg': targetTemplate = 'general_msg_v1'; break;
+                        }
+
+                        const fallbackTemplate = availableTemplates.find(
+                            t => (t.status === 'APPROVED' || t.status === 'ACTIVE') &&
+                                 t.name === targetTemplate
+                        ) || availableTemplates.find(
+                            t => (t.status === 'APPROVED' || t.status === 'ACTIVE') &&
+                                 t.category === 'UTILITY'
+                        );
+
+                        if (fallbackTemplate) {
+                            payloadTemplateName = fallbackTemplate.name;
+                            payloadTemplateLanguage = typeof fallbackTemplate.language === 'string' ? fallbackTemplate.language : 'en_US';
+                        }
+                    }
+                }
+            }
+
             const response = await fetch('/api/campaigns', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
@@ -297,8 +405,10 @@ export default function CampaignsPage() {
                         excludeTagIds: [...excludedAudienceTagIds]
                     } : undefined,
                     isLoop,
-                    useAiMessage, // New field for AI personalized regular campaigns
-                    aiPrompt: (isLoop || useAiMessage) ? aiPrompt.trim() : null
+                    useAiMessage,
+                    aiPrompt: (isLoop || useAiMessage) ? aiPrompt.trim() : null,
+                    templateName: payloadTemplateName,
+                    templateLanguage: payloadTemplateLanguage
                 })
             });
 
@@ -501,6 +611,25 @@ export default function CampaignsPage() {
                         <Plus className="w-4 h-4 mr-2" />
                         Create
                     </button>
+
+                    <button
+                        onClick={handleSubmitTemplates}
+                        disabled={submittingTemplates || !selectedPageId}
+                        className="btn-wireframe bg-gray-100 text-xs"
+                        title="Submit all predefined templates to Facebook for approval"
+                    >
+                        {submittingTemplates ? (
+                            <>
+                                <div className="animate-spin w-3 h-3 border-2 border-black border-t-transparent rounded-full mr-1" />
+                                Submitting...
+                            </>
+                        ) : (
+                            <>
+                                <FileText className="w-3 h-3 mr-1" />
+                                Submit Templates
+                            </>
+                        )}
+                    </button>
                 </div>
             </div>
 
@@ -536,7 +665,7 @@ export default function CampaignsPage() {
                                         {getLoopBadge(campaign)}
                                     </div>
                                     <p className="text-sm font-mono text-gray-600 line-clamp-2 border-l-2 border-gray-200 pl-3">
-                                        {campaign.is_loop ? `🤖 AI Prompt: "${campaign.ai_prompt}"` : `"${campaign.message_text}"`}
+                                        {campaign.is_loop ? `🤖 AI Prompt: "${campaign.ai_prompt}"` : campaign.template_name ? `📋 Template: ${campaign.template_name.replace(/_/g, ' ')} — "${campaign.message_text}"` : `"${campaign.message_text}"`}
                                     </p>
                                     <div className="flex flex-wrap items-center gap-6 text-sm font-bold uppercase tracking-wider text-gray-500">
                                         <span className="flex items-center gap-1">
@@ -783,15 +912,154 @@ export default function CampaignsPage() {
                                     </p>
                                 </div>
                             ) : (
-                                <div>
-                                    <label className="label-wireframe">Message Content</label>
-                                    <textarea
-                                        value={messageText}
-                                        onChange={(e) => setMessageText(e.target.value)}
-                                        placeholder="TYPE YOUR MESSAGE HERE..."
-                                        rows={4}
-                                        className="input-wireframe resize-none h-auto p-3"
-                                    />
+                                <div className="space-y-4">
+                                    {/* Message Mode Toggle */}
+                                    <div>
+                                        <label className="label-wireframe mb-2">Message Mode</label>
+                                        <div className="grid grid-cols-2 gap-2">
+                                            <button
+                                                type="button"
+                                                onClick={() => {
+                                                    setMessageMode('freeform');
+                                                    setSelectedTemplateName(null);
+                                                }}
+                                                className={`border px-3 py-3 text-left transition-colors ${
+                                                    messageMode === 'freeform'
+                                                        ? 'border-black bg-white'
+                                                        : 'border-gray-300 bg-transparent'
+                                                }`}
+                                            >
+                                                <p className="font-bold uppercase text-sm">Freeform (All Contacts)</p>
+                                                <p className="text-xs text-gray-500 font-mono mt-1">
+                                                    Wrapped in an approved system format to deliver anytime.
+                                                </p>
+                                            </button>
+                                            <button
+                                                type="button"
+                                                onClick={() => setMessageMode('template')}
+                                                className={`border px-3 py-3 text-left transition-colors ${
+                                                    messageMode === 'template'
+                                                        ? 'border-black bg-white'
+                                                        : 'border-gray-300 bg-transparent'
+                                                }`}
+                                            >
+                                                <p className="font-bold uppercase text-sm flex items-center gap-1.5">
+                                                    <FileText className="w-3.5 h-3.5" />
+                                                    Template
+                                                </p>
+                                                <p className="text-xs text-gray-500 font-mono mt-1">
+                                                    Pick an approved Facebook template
+                                                </p>
+                                            </button>
+                                        </div>
+                                    </div>
+
+                                    {messageMode === 'freeform' && (
+                                        <div className="p-4 border border-gray-200 bg-gray-50 rounded-md">
+                                            <label className="text-xs font-bold uppercase mb-2 block text-gray-700">Message Style (Envelope)</label>
+                                            <select 
+                                                className="input-wireframe mb-2"
+                                                value={freeformWrapper}
+                                                onChange={(e) => setFreeformWrapper(e.target.value)}
+                                            >
+                                                <option value="msg">Standard Message (&quot;Message from our team: [Your Text]&quot;)</option>
+                                                <option value="notice">System Notice (&quot;Important notice: [Your Text]&quot;)</option>
+                                                <option value="alert">System Alert (&quot;[Your Text]. This is an automated notification.&quot;)</option>
+                                                <option disabled>────── With Action Buttons ──────</option>
+                                                <option value="btn_join">Join Meeting + [Join Meeting Button]</option>
+                                                <option value="btn_details">Update Request + [View Details Button]</option>
+                                                <option value="btn_book">New Notification + [Book Now Button]</option>
+                                                <option disabled>─────────────────────────────────</option>
+                                                <option value="none">No Wrapper (Strict 24h limit applies!)</option>
+                                            </select>
+                                            <p className="text-xs text-gray-500 font-mono">
+                                                {freeformWrapper === 'none' 
+                                                    ? 'Warning: Unwrapped messages will ONLY reach contacts who interacted with you in the last 24 hours.' 
+                                                    : 'This wrapper bypasses the 24-hour limit, allowing you to blast all contacts anytime.'}
+                                            </p>
+                                        </div>
+                                    )}
+
+                                    {/* Template Picker (shown when template mode) */}
+                                    {messageMode === 'template' && (
+                                        <div className="border border-dashed border-black bg-white p-4 space-y-3">
+                                            <label className="label-wireframe mb-0">Select Template</label>
+                                            {templatesLoading ? (
+                                                <div className="flex items-center gap-2 text-xs font-mono text-gray-500">
+                                                    <div className="animate-spin w-4 h-4 border-2 border-black border-t-transparent rounded-full" />
+                                                    Loading templates...
+                                                </div>
+                                            ) : availableTemplates.filter(t => t.status === 'APPROVED' || t.status === 'ACTIVE').length === 0 ? (
+                                                <div className="text-xs font-mono text-red-600 bg-red-50 border border-red-200 p-3">
+                                                    No approved templates found for this page. Create and get templates approved on Facebook first.
+                                                </div>
+                                            ) : (
+                                                <>
+                                                    <select
+                                                        value={selectedTemplateName || ''}
+                                                        onChange={(e) => {
+                                                            const name = e.target.value || null;
+                                                            setSelectedTemplateName(name);
+                                                            if (name) {
+                                                                const tmpl = availableTemplates.find(t => t.name === name);
+                                                                if (tmpl) {
+                                                                    setSelectedTemplateLanguage(typeof tmpl.language === 'string' ? tmpl.language : 'en_US');
+                                                                }
+                                                            }
+                                                        }}
+                                                        className="input-wireframe"
+                                                    >
+                                                        <option value="">-- Pick a template --</option>
+                                                        {availableTemplates
+                                                            .filter(t => t.status === 'APPROVED' || t.status === 'ACTIVE')
+                                                            .map((tmpl) => (
+                                                                <option key={`${tmpl.name}-${tmpl.language}`} value={tmpl.name}>
+                                                                    {tmpl.name.replace(/_/g, ' ')} ({tmpl.language}) — {tmpl.category}
+                                                                </option>
+                                                            ))}
+                                                    </select>
+
+                                                    {selectedTemplateName && (
+                                                        <div className="flex items-center gap-2 text-xs font-mono">
+                                                            <span className="bg-green-100 text-green-800 border border-green-400 px-2 py-0.5 font-bold uppercase">
+                                                                APPROVED
+                                                            </span>
+                                                            <span className="text-gray-600">
+                                                                {selectedTemplateName.replace(/_/g, ' ')}
+                                                            </span>
+                                                            <span className="text-gray-400">|</span>
+                                                            <span className="text-gray-500">
+                                                                Lang: {selectedTemplateLanguage}
+                                                            </span>
+                                                        </div>
+                                                    )}
+                                                </>
+                                            )}
+                                        </div>
+                                    )}
+
+                                    {/* Message Text Input */}
+                                    <div>
+                                        <label className="label-wireframe">
+                                            {messageMode === 'template'
+                                                ? 'Template Body Text (replaces {{1}})'
+                                                : 'Message Content'}
+                                        </label>
+                                        <textarea
+                                            value={messageText}
+                                            onChange={(e) => setMessageText(e.target.value)}
+                                            placeholder={messageMode === 'template'
+                                                ? 'Enter the text that will replace {{1}} in the template body...'
+                                                : 'TYPE YOUR MESSAGE HERE...'}
+                                            rows={4}
+                                            className="input-wireframe resize-none h-auto p-3"
+                                        />
+                                        {messageMode === 'template' && (
+                                            <p className="text-xs text-gray-400 font-mono mt-2">
+                                                This text fills the {'{{1}}'} placeholder in the selected template body. Buttons defined in the template will be shown automatically.
+                                            </p>
+                                        )}
+                                    </div>
                                 </div>
                             )}
                         </div>
@@ -1009,6 +1277,7 @@ export default function CampaignsPage() {
                             actionLoading ||
                             (isLoop && !aiPrompt.trim()) ||
                             (!isLoop && useAiMessage && !aiPrompt.trim()) ||
+                            (!isLoop && !useAiMessage && messageMode === 'template' && !selectedTemplateName) ||
                             (!isLoop && !useAiMessage && !messageText.trim()) ||
                             ((isLoop || audienceMode === 'specific') &&
                                 ((!isSelectAllMode && selectedContactIds.size === 0) ||
@@ -1025,7 +1294,9 @@ export default function CampaignsPage() {
                                     ? 'Create Scheduled Campaign'
                                     : useAiMessage
                                         ? 'Create AI Campaign'
-                                        : 'Create Campaign'}
+                                        : messageMode === 'template'
+                                            ? 'Create Template Campaign'
+                                            : 'Create Campaign'}
                     </button>
                 </div>
             </Modal>
@@ -1125,6 +1396,87 @@ export default function CampaignsPage() {
                         </div>
                     )}
                 </div>
+            </Modal>
+
+            {/* Template Submit Results Modal */}
+            <Modal
+                isOpen={showTemplateResultsModal}
+                onClose={() => setShowTemplateResultsModal(false)}
+                title="Template Submission Results"
+            >
+                {templateSubmitResults && (
+                    <div className="space-y-4">
+                        {/* Summary */}
+                        <div className="grid grid-cols-4 gap-2 text-center">
+                            <div className="border border-green-400 bg-green-50 p-3">
+                                <p className="text-2xl font-black text-green-800">{templateSubmitResults.summary.approved}</p>
+                                <p className="text-xs font-mono text-green-600 uppercase">Approved</p>
+                            </div>
+                            <div className="border border-yellow-400 bg-yellow-50 p-3">
+                                <p className="text-2xl font-black text-yellow-800">{templateSubmitResults.summary.pending}</p>
+                                <p className="text-xs font-mono text-yellow-600 uppercase">Pending</p>
+                            </div>
+                            <div className="border border-gray-400 bg-gray-50 p-3">
+                                <p className="text-2xl font-black text-gray-800">{templateSubmitResults.summary.alreadyExisted}</p>
+                                <p className="text-xs font-mono text-gray-600 uppercase">Existed</p>
+                            </div>
+                            <div className="border border-red-400 bg-red-50 p-3">
+                                <p className="text-2xl font-black text-red-800">{templateSubmitResults.summary.errors}</p>
+                                <p className="text-xs font-mono text-red-600 uppercase">Errors</p>
+                            </div>
+                        </div>
+
+                        {/* Template List */}
+                        <div className="space-y-2 max-h-[400px] overflow-y-auto">
+                            {templateSubmitResults.results.map((result, idx) => (
+                                <div
+                                    key={idx}
+                                    className={`border p-3 flex items-center justify-between ${
+                                        result.status === 'APPROVED' || result.status === 'ACTIVE'
+                                            ? 'border-green-400 bg-green-50'
+                                            : result.status === 'ERROR'
+                                                ? 'border-red-300 bg-red-50'
+                                                : 'border-gray-300 bg-gray-50'
+                                    }`}
+                                >
+                                    <div className="flex-1 min-w-0">
+                                        <p className="font-bold text-sm truncate">
+                                            {result.name.replace(/_/g, ' ')}
+                                        </p>
+                                        <div className="flex items-center gap-2 mt-1">
+                                            {result.hasButtons && (
+                                                <span className="text-xs font-mono bg-blue-100 text-blue-700 border border-blue-300 px-1.5 py-0.5">
+                                                    HAS BUTTONS
+                                                </span>
+                                            )}
+                                            <span className="text-xs font-mono text-gray-500">
+                                                {result.action === 'already_exists' ? 'Already on page' : 'Newly submitted'}
+                                            </span>
+                                        </div>
+                                        {result.error && (
+                                            <p className="text-xs text-red-600 mt-1 truncate">{result.error}</p>
+                                        )}
+                                    </div>
+                                    <span className={`badge-wireframe text-xs ml-3 whitespace-nowrap ${
+                                        result.status === 'APPROVED' || result.status === 'ACTIVE'
+                                            ? 'bg-green-100 text-green-800 border-green-400'
+                                            : result.status === 'PENDING'
+                                                ? 'bg-yellow-100 text-yellow-800 border-yellow-400'
+                                                : result.status === 'ERROR'
+                                                    ? 'bg-red-100 text-red-800 border-red-400'
+                                                    : 'bg-gray-200 text-gray-700 border-gray-400'
+                                    }`}>
+                                        {result.status}
+                                    </span>
+                                </div>
+                            ))}
+                        </div>
+
+                        <p className="text-xs font-mono text-gray-500 text-center">
+                            Only APPROVED templates can be used for campaigns. Pending templates need Facebook review.
+                        </p>
+                    </div>
+                )}
             </Modal>
         </div>
     );

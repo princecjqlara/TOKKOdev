@@ -314,7 +314,8 @@ export async function POST(request: NextRequest) {
             messagePart2: rawMessagePart2,
             buttons: rawButtons,
             buttonMode: rawButtonMode,
-            buttonPlaceholderMode: rawButtonPlaceholderMode
+            buttonPlaceholderMode: rawButtonPlaceholderMode,
+            envelopeWrapper: rawEnvelopeWrapper
         } = body as {
             pageId?: string;
             contactIds?: string[];
@@ -324,6 +325,7 @@ export async function POST(request: NextRequest) {
             buttons?: RequestedMessageButton[];
             buttonMode?: string;
             buttonPlaceholderMode?: boolean;
+            envelopeWrapper?: string;
         };
 
         const resolvedMessage = resolveMessageParts(rawMessageText, rawMessagePart1, rawMessagePart2);
@@ -357,13 +359,29 @@ export async function POST(request: NextRequest) {
             buttonMode === 'RESPONSE_DYNAMIC' &&
             rawButtonPlaceholderMode === true &&
             requestedButtons.length > 0;
-        const messagingType = getMessagingType(buttonMode, requestedButtons.length);
+            
+        // Map envelopeWrapper to target template name
+        let targetEnvelopeTemplateName: string | undefined = undefined;
+        if (rawEnvelopeWrapper && rawEnvelopeWrapper !== 'none') {
+            switch(rawEnvelopeWrapper) {
+                case 'notice': targetEnvelopeTemplateName = 'general_notice_v1'; break;
+                case 'alert': targetEnvelopeTemplateName = 'general_alert_v1'; break;
+                case 'btn_join': targetEnvelopeTemplateName = 'instant_meeting_btn_v1'; break;
+                case 'btn_details': targetEnvelopeTemplateName = 'instant_meeting_btn_v2'; break;
+                case 'btn_book': targetEnvelopeTemplateName = 'instant_meeting_btn_v3'; break;
+                case 'msg': targetEnvelopeTemplateName = 'general_msg_v1'; break;
+                default: targetEnvelopeTemplateName = 'general_msg_v1'; break;
+            }
+        }
+
+        const messagingType = targetEnvelopeTemplateName ? 'UTILITY' : getMessagingType(buttonMode, requestedButtons.length);
         const allowDualTemplateBodyModes =
             messagingType === 'UTILITY' &&
             resolvedMessage.isTwoPart &&
-            requestedButtons.length > 0;
+            requestedButtons.length > 0 &&
+            !targetEnvelopeTemplateName;
         const requiresSupportTeamTemplate =
-            resolvedMessage.isTwoPart && !allowDualTemplateBodyModes;
+            resolvedMessage.isTwoPart && !allowDualTemplateBodyModes && !targetEnvelopeTemplateName;
 
         // Log total contacts to send
         console.log(`📤 ========== API: MESSAGE SEND REQUEST ==========`);
@@ -810,9 +828,13 @@ export async function POST(request: NextRequest) {
                             return countPlaceholders(template) === 1 && matchesRequestedButtons(template);
                         });
 
-                        const selectedTemplate = requiresSupportTeamTemplate
+                        const exactEnvelopeTemplate = targetEnvelopeTemplateName
+                            ? sendableTemplates.find(t => typeof (t as any).name === 'string' && (t as any).name === targetEnvelopeTemplateName)
+                            : undefined;
+
+                        const selectedTemplate = exactEnvelopeTemplate || (requiresSupportTeamTemplate
                             ? supportTeamTemplate || twoPlaceholderTemplate || anyApprovedWithPlaceholder
-                            : onePlaceholderTemplate || anyApprovedWithPlaceholder || twoPlaceholderTemplate;
+                            : onePlaceholderTemplate || anyApprovedWithPlaceholder || twoPlaceholderTemplate);
 
                         if (!selectedTemplate) {
                             if (utilityTemplates.length > 0) {

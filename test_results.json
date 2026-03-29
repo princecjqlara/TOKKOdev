@@ -1,0 +1,1421 @@
+﻿{
+    "numTotalTestSuites":  53,
+    "numPassedTestSuites":  53,
+    "numFailedTestSuites":  0,
+    "numPendingTestSuites":  0,
+    "numTotalTests":  94,
+    "numPassedTests":  93,
+    "numFailedTests":  1,
+    "numPendingTests":  0,
+    "numTodoTests":  0,
+    "startTime":  1774703733358,
+    "success":  false,
+    "testResults":  [
+                        {
+                            "assertionResults":  [
+                                                     {
+                                                         "ancestorTitles":  [
+                                                                                "",
+                                                                                "resolveCampaignAudienceContactIds"
+                                                                            ],
+                                                         "fullName":  " resolveCampaignAudienceContactIds applies start-date and sendable filters when resolving a dynamic audience",
+                                                         "status":  "passed",
+                                                         "title":  "applies start-date and sendable filters when resolving a dynamic audience",
+                                                         "duration":  6,
+                                                         "failureMessages":  [
+
+                                                                             ]
+                                                     },
+                                                     {
+                                                         "ancestorTitles":  [
+                                                                                "",
+                                                                                "resolveCampaignAudienceContactIds"
+                                                                            ],
+                                                         "fullName":  " resolveCampaignAudienceContactIds applies include and exclude tag filters before returning contact ids",
+                                                         "status":  "passed",
+                                                         "title":  "applies include and exclude tag filters before returning contact ids",
+                                                         "duration":  4,
+                                                         "failureMessages":  [
+
+                                                                             ]
+                                                     }
+                                                 ],
+                            "startTime":  1774703734323,
+                            "endTime":  1774703734333,
+                            "status":  "passed",
+                            "message":  "",
+                            "name":  "C:/Users/bigcl/Downloads/tokkodev/tokkodev/src/lib/__tests__/campaign-audience.test.ts"
+                        },
+                        {
+                            "assertionResults":  [
+                                                     {
+                                                         "ancestorTitles":  [
+                                                                                "",
+                                                                                "normalizeCampaignRecipientErrors"
+                                                                            ],
+                                                         "fullName":  " normalizeCampaignRecipientErrors handles contact objects and arrays with fallback error",
+                                                         "status":  "passed",
+                                                         "title":  "handles contact objects and arrays with fallback error",
+                                                         "duration":  2,
+                                                         "failureMessages":  [
+
+                                                                             ]
+                                                     }
+                                                 ],
+                            "startTime":  1774703734695,
+                            "endTime":  1774703734697,
+                            "status":  "passed",
+                            "message":  "",
+                            "name":  "C:/Users/bigcl/Downloads/tokkodev/tokkodev/src/lib/__tests__/campaign-errors.test.ts"
+                        },
+                        {
+                            "assertionResults":  [
+                                                     {
+                                                         "ancestorTitles":  [
+                                                                                "",
+                                                                                "sendCampaignById"
+                                                                            ],
+                                                         "fullName":  " sendCampaignById blocks scheduled campaigns from the manual send path",
+                                                         "status":  "failed",
+                                                         "title":  "blocks scheduled campaigns from the manual send path",
+                                                         "duration":  14,
+                                                         "failureMessages":  [
+                                                                                 "expected \u0027Campaign has already been completed oΓÇª\u0027 to be \u0027Campaign has already been sent or is ΓÇª\u0027 // Object.is equality"
+                                                                             ],
+                                                         "location":  {
+                                                                          "line":  101,
+                                                                          "column":  37
+                                                                      }
+                                                     },
+                                                     {
+                                                         "ancestorTitles":  [
+                                                                                "",
+                                                                                "sendCampaignById"
+                                                                            ],
+                                                         "fullName":  " sendCampaignById allows scheduled campaigns from cron and completes cleanly when no recipients are pending",
+                                                         "status":  "passed",
+                                                         "title":  "allows scheduled campaigns from cron and completes cleanly when no recipients are pending",
+                                                         "duration":  2,
+                                                         "failureMessages":  [
+
+                                                                             ]
+                                                     }
+                                                 ],
+                            "startTime":  1774703734419,
+                            "endTime":  1774703734436,
+                            "status":  "failed",
+                            "message":  "",
+                            "name":  "C:/Users/bigcl/Downloads/tokkodev/tokkodev/src/lib/__tests__/campaign-send.test.ts"
+                        },
+                        {
+                            "assertionResults":  [
+                                                     {
+                                                         "ancestorTitles":  [
+                                                                                "",
+                                                                                "chunkArray"
+                                                                            ],
+                                                         "fullName":  " chunkArray splits arrays into fixed-size chunks",
+                                                         "status":  "passed",
+                                                         "title":  "splits arrays into fixed-size chunks",
+                                                         "duration":  1,
+                                                         "failureMessages":  [
+
+                                                                             ]
+                                                     },
+                                                     {
+                                                         "ancestorTitles":  [
+                                                                                "",
+                                                                                "chunkArray"
+                                                                            ],
+                                                         "fullName":  " chunkArray returns empty array for empty input",
+                                                         "status":  "passed",
+                                                         "title":  "returns empty array for empty input",
+                                                         "duration":  1,
+                                                         "failureMessages":  [
+
+                                                                             ]
+                                                     }
+                                                 ],
+                            "startTime":  1774703734715,
+                            "endTime":  1774703734717,
+                            "status":  "passed",
+                            "message":  "",
+                            "name":  "C:/Users/bigcl/Downloads/tokkodev/tokkodev/src/lib/__tests__/chunking.test.ts"
+                        },
+                        {
+                            "assertionResults":  [
+                                                     {
+                                                         "ancestorTitles":  [
+                                                                                "",
+                                                                                "normalizeContactName"
+                                                                            ],
+                                                         "fullName":  " normalizeContactName returns null for placeholder and empty values",
+                                                         "status":  "passed",
+                                                         "title":  "returns null for placeholder and empty values",
+                                                         "duration":  1,
+                                                         "failureMessages":  [
+
+                                                                             ]
+                                                     },
+                                                     {
+                                                         "ancestorTitles":  [
+                                                                                "",
+                                                                                "normalizeContactName"
+                                                                            ],
+                                                         "fullName":  " normalizeContactName returns trimmed names for valid values",
+                                                         "status":  "passed",
+                                                         "title":  "returns trimmed names for valid values",
+                                                         "duration":  0,
+                                                         "failureMessages":  [
+
+                                                                             ]
+                                                     },
+                                                     {
+                                                         "ancestorTitles":  [
+                                                                                "",
+                                                                                "hasUsableContactName"
+                                                                            ],
+                                                         "fullName":  " hasUsableContactName identifies whether a name can be used",
+                                                         "status":  "passed",
+                                                         "title":  "identifies whether a name can be used",
+                                                         "duration":  0,
+                                                         "failureMessages":  [
+
+                                                                             ]
+                                                     },
+                                                     {
+                                                         "ancestorTitles":  [
+                                                                                "",
+                                                                                "pickPreferredContactName"
+                                                                            ],
+                                                         "fullName":  " pickPreferredContactName chooses the first usable candidate",
+                                                         "status":  "passed",
+                                                         "title":  "chooses the first usable candidate",
+                                                         "duration":  0,
+                                                         "failureMessages":  [
+
+                                                                             ]
+                                                     },
+                                                     {
+                                                         "ancestorTitles":  [
+                                                                                "",
+                                                                                "pickPreferredContactName"
+                                                                            ],
+                                                         "fullName":  " pickPreferredContactName returns null when all candidates are unusable",
+                                                         "status":  "passed",
+                                                         "title":  "returns null when all candidates are unusable",
+                                                         "duration":  0,
+                                                         "failureMessages":  [
+
+                                                                             ]
+                                                     }
+                                                 ],
+                            "startTime":  1774703734687,
+                            "endTime":  1774703734689,
+                            "status":  "passed",
+                            "message":  "",
+                            "name":  "C:/Users/bigcl/Downloads/tokkodev/tokkodev/src/lib/__tests__/contact-names.test.ts"
+                        },
+                        {
+                            "assertionResults":  [
+                                                     {
+                                                         "ancestorTitles":  [
+                                                                                "",
+                                                                                "sendMessage"
+                                                                            ],
+                                                         "fullName":  " sendMessage uses default utility template with en_US language",
+                                                         "status":  "passed",
+                                                         "title":  "uses default utility template with en_US language",
+                                                         "duration":  4,
+                                                         "failureMessages":  [
+
+                                                                             ]
+                                                     },
+                                                     {
+                                                         "ancestorTitles":  [
+                                                                                "",
+                                                                                "sendMessage"
+                                                                            ],
+                                                         "fullName":  " sendMessage supports custom template and language for utility sends",
+                                                         "status":  "passed",
+                                                         "title":  "supports custom template and language for utility sends",
+                                                         "duration":  0,
+                                                         "failureMessages":  [
+
+                                                                             ]
+                                                     },
+                                                     {
+                                                         "ancestorTitles":  [
+                                                                                "",
+                                                                                "sendMessage"
+                                                                            ],
+                                                         "fullName":  " sendMessage supports utility templates without body parameters",
+                                                         "status":  "passed",
+                                                         "title":  "supports utility templates without body parameters",
+                                                         "duration":  1,
+                                                         "failureMessages":  [
+
+                                                                             ]
+                                                     },
+                                                     {
+                                                         "ancestorTitles":  [
+                                                                                "",
+                                                                                "sendMessage"
+                                                                            ],
+                                                         "fullName":  " sendMessage throws facebook api error message when send fails",
+                                                         "status":  "passed",
+                                                         "title":  "throws facebook api error message when send fails",
+                                                         "duration":  1,
+                                                         "failureMessages":  [
+
+                                                                             ]
+                                                     },
+                                                     {
+                                                         "ancestorTitles":  [
+                                                                                "",
+                                                                                "sendMessage"
+                                                                            ],
+                                                         "fullName":  " sendMessage sends HUMAN_AGENT messages as MESSAGE_TAG payloads",
+                                                         "status":  "passed",
+                                                         "title":  "sends HUMAN_AGENT messages as MESSAGE_TAG payloads",
+                                                         "duration":  1,
+                                                         "failureMessages":  [
+
+                                                                             ]
+                                                     },
+                                                     {
+                                                         "ancestorTitles":  [
+                                                                                "",
+                                                                                "sendMessage"
+                                                                            ],
+                                                         "fullName":  " sendMessage sends RESPONSE button template payload when buttons are provided",
+                                                         "status":  "passed",
+                                                         "title":  "sends RESPONSE button template payload when buttons are provided",
+                                                         "duration":  1,
+                                                         "failureMessages":  [
+
+                                                                             ]
+                                                     },
+                                                     {
+                                                         "ancestorTitles":  [
+                                                                                "",
+                                                                                "sendMessage"
+                                                                            ],
+                                                         "fullName":  " sendMessage sends UTILITY message with buttons (buttons are in template, not payload)",
+                                                         "status":  "passed",
+                                                         "title":  "sends UTILITY message with buttons (buttons are in template, not payload)",
+                                                         "duration":  2,
+                                                         "failureMessages":  [
+
+                                                                             ]
+                                                     },
+                                                     {
+                                                         "ancestorTitles":  [
+                                                                                "",
+                                                                                "sendMessage"
+                                                                            ],
+                                                         "fullName":  " sendMessage does not include buttons for HUMAN_AGENT messages",
+                                                         "status":  "passed",
+                                                         "title":  "does not include buttons for HUMAN_AGENT messages",
+                                                         "duration":  1,
+                                                         "failureMessages":  [
+
+                                                                             ]
+                                                     }
+                                                 ],
+                            "startTime":  1774703734311,
+                            "endTime":  1774703734322,
+                            "status":  "passed",
+                            "message":  "",
+                            "name":  "C:/Users/bigcl/Downloads/tokkodev/tokkodev/src/lib/__tests__/facebook-send.test.ts"
+                        },
+                        {
+                            "assertionResults":  [
+                                                     {
+                                                         "ancestorTitles":  [
+                                                                                "",
+                                                                                "replaceTemplateVariables"
+                                                                            ],
+                                                         "fullName":  " replaceTemplateVariables should replace {name} with full name",
+                                                         "status":  "passed",
+                                                         "title":  "should replace {name} with full name",
+                                                         "duration":  2,
+                                                         "failureMessages":  [
+
+                                                                             ]
+                                                     },
+                                                     {
+                                                         "ancestorTitles":  [
+                                                                                "",
+                                                                                "replaceTemplateVariables"
+                                                                            ],
+                                                         "fullName":  " replaceTemplateVariables should replace {{name}} with full name",
+                                                         "status":  "passed",
+                                                         "title":  "should replace {{name}} with full name",
+                                                         "duration":  0,
+                                                         "failureMessages":  [
+
+                                                                             ]
+                                                     },
+                                                     {
+                                                         "ancestorTitles":  [
+                                                                                "",
+                                                                                "replaceTemplateVariables"
+                                                                            ],
+                                                         "fullName":  " replaceTemplateVariables should replace {first_name} with first name",
+                                                         "status":  "passed",
+                                                         "title":  "should replace {first_name} with first name",
+                                                         "duration":  0,
+                                                         "failureMessages":  [
+
+                                                                             ]
+                                                     },
+                                                     {
+                                                         "ancestorTitles":  [
+                                                                                "",
+                                                                                "replaceTemplateVariables"
+                                                                            ],
+                                                         "fullName":  " replaceTemplateVariables should replace {{first_name}} with first name",
+                                                         "status":  "passed",
+                                                         "title":  "should replace {{first_name}} with first name",
+                                                         "duration":  0,
+                                                         "failureMessages":  [
+
+                                                                             ]
+                                                     },
+                                                     {
+                                                         "ancestorTitles":  [
+                                                                                "",
+                                                                                "replaceTemplateVariables"
+                                                                            ],
+                                                         "fullName":  " replaceTemplateVariables should be case-insensitive for placeholders",
+                                                         "status":  "passed",
+                                                         "title":  "should be case-insensitive for placeholders",
+                                                         "duration":  0,
+                                                         "failureMessages":  [
+
+                                                                             ]
+                                                     },
+                                                     {
+                                                         "ancestorTitles":  [
+                                                                                "",
+                                                                                "replaceTemplateVariables"
+                                                                            ],
+                                                         "fullName":  " replaceTemplateVariables should replace {last_name} with last name",
+                                                         "status":  "passed",
+                                                         "title":  "should replace {last_name} with last name",
+                                                         "duration":  0,
+                                                         "failureMessages":  [
+
+                                                                             ]
+                                                     },
+                                                     {
+                                                         "ancestorTitles":  [
+                                                                                "",
+                                                                                "replaceTemplateVariables"
+                                                                            ],
+                                                         "fullName":  " replaceTemplateVariables should replace {firstname} as a variant of first_name",
+                                                         "status":  "passed",
+                                                         "title":  "should replace {firstname} as a variant of first_name",
+                                                         "duration":  0,
+                                                         "failureMessages":  [
+
+                                                                             ]
+                                                     },
+                                                     {
+                                                         "ancestorTitles":  [
+                                                                                "",
+                                                                                "replaceTemplateVariables"
+                                                                            ],
+                                                         "fullName":  " replaceTemplateVariables should replace multiple placeholders in one string",
+                                                         "status":  "passed",
+                                                         "title":  "should replace multiple placeholders in one string",
+                                                         "duration":  1,
+                                                         "failureMessages":  [
+
+                                                                             ]
+                                                     },
+                                                     {
+                                                         "ancestorTitles":  [
+                                                                                "",
+                                                                                "replaceTemplateVariables"
+                                                                            ],
+                                                         "fullName":  " replaceTemplateVariables should replace placeholder variants with spaces and dashes",
+                                                         "status":  "passed",
+                                                         "title":  "should replace placeholder variants with spaces and dashes",
+                                                         "duration":  0,
+                                                         "failureMessages":  [
+
+                                                                             ]
+                                                     },
+                                                     {
+                                                         "ancestorTitles":  [
+                                                                                "",
+                                                                                "replaceTemplateVariables"
+                                                                            ],
+                                                         "fullName":  " replaceTemplateVariables should use \"there\" as fallback for name if contact name is missing",
+                                                         "status":  "passed",
+                                                         "title":  "should use \"there\" as fallback for name if contact name is missing",
+                                                         "duration":  0,
+                                                         "failureMessages":  [
+
+                                                                             ]
+                                                     }
+                                                 ],
+                            "startTime":  1774703734303,
+                            "endTime":  1774703734306,
+                            "status":  "passed",
+                            "message":  "",
+                            "name":  "C:/Users/bigcl/Downloads/tokkodev/tokkodev/src/lib/__tests__/placeholders.test.ts"
+                        },
+                        {
+                            "assertionResults":  [
+                                                     {
+                                                         "ancestorTitles":  [
+                                                                                "",
+                                                                                "createRequestGate"
+                                                                            ],
+                                                         "fullName":  " createRequestGate marks only the newest token as latest",
+                                                         "status":  "passed",
+                                                         "title":  "marks only the newest token as latest",
+                                                         "duration":  1,
+                                                         "failureMessages":  [
+
+                                                                             ]
+                                                     },
+                                                     {
+                                                         "ancestorTitles":  [
+                                                                                "",
+                                                                                "createRequestGate"
+                                                                            ],
+                                                         "fullName":  " createRequestGate does not share state across gate instances",
+                                                         "status":  "passed",
+                                                         "title":  "does not share state across gate instances",
+                                                         "duration":  0,
+                                                         "failureMessages":  [
+
+                                                                             ]
+                                                     }
+                                                 ],
+                            "startTime":  1774703734710,
+                            "endTime":  1774703734711,
+                            "status":  "passed",
+                            "message":  "",
+                            "name":  "C:/Users/bigcl/Downloads/tokkodev/tokkodev/src/lib/__tests__/request-gate.test.ts"
+                        },
+                        {
+                            "assertionResults":  [
+                                                     {
+                                                         "ancestorTitles":  [
+                                                                                "",
+                                                                                "mergeSendErrors"
+                                                                            ],
+                                                         "fullName":  " mergeSendErrors dedupes by contactId and keeps last error",
+                                                         "status":  "passed",
+                                                         "title":  "dedupes by contactId and keeps last error",
+                                                         "duration":  2,
+                                                         "failureMessages":  [
+
+                                                                             ]
+                                                     },
+                                                     {
+                                                         "ancestorTitles":  [
+                                                                                "",
+                                                                                "mergeSendErrors"
+                                                                            ],
+                                                         "fullName":  " mergeSendErrors skips missing ids and defaults empty errors",
+                                                         "status":  "passed",
+                                                         "title":  "skips missing ids and defaults empty errors",
+                                                         "duration":  0,
+                                                         "failureMessages":  [
+
+                                                                             ]
+                                                     },
+                                                     {
+                                                         "ancestorTitles":  [
+                                                                                "",
+                                                                                "mergeSendErrors"
+                                                                            ],
+                                                         "fullName":  " mergeSendErrors categorizes known facebook send errors",
+                                                         "status":  "passed",
+                                                         "title":  "categorizes known facebook send errors",
+                                                         "duration":  1,
+                                                         "failureMessages":  [
+
+                                                                             ]
+                                                     },
+                                                     {
+                                                         "ancestorTitles":  [
+                                                                                "",
+                                                                                "mergeSendErrors"
+                                                                            ],
+                                                         "fullName":  " mergeSendErrors marks only unknown category as retryable",
+                                                         "status":  "passed",
+                                                         "title":  "marks only unknown category as retryable",
+                                                         "duration":  0,
+                                                         "failureMessages":  [
+
+                                                                             ]
+                                                     },
+                                                     {
+                                                         "ancestorTitles":  [
+                                                                                "",
+                                                                                "mergeSendErrors"
+                                                                            ],
+                                                         "fullName":  " mergeSendErrors summarizes send error categories",
+                                                         "status":  "passed",
+                                                         "title":  "summarizes send error categories",
+                                                         "duration":  1,
+                                                         "failureMessages":  [
+
+                                                                             ]
+                                                     }
+                                                 ],
+                            "startTime":  1774703734311,
+                            "endTime":  1774703734315,
+                            "status":  "passed",
+                            "message":  "",
+                            "name":  "C:/Users/bigcl/Downloads/tokkodev/tokkodev/src/lib/__tests__/send-errors.test.ts"
+                        },
+                        {
+                            "assertionResults":  [
+                                                     {
+                                                         "ancestorTitles":  [
+                                                                                "",
+                                                                                "buildNotInFilter"
+                                                                            ],
+                                                         "fullName":  " buildNotInFilter returns null for empty input",
+                                                         "status":  "passed",
+                                                         "title":  "returns null for empty input",
+                                                         "duration":  1,
+                                                         "failureMessages":  [
+
+                                                                             ]
+                                                     },
+                                                     {
+                                                         "ancestorTitles":  [
+                                                                                "",
+                                                                                "buildNotInFilter"
+                                                                            ],
+                                                         "fullName":  " buildNotInFilter quotes values for PostgREST in filter syntax",
+                                                         "status":  "passed",
+                                                         "title":  "quotes values for PostgREST in filter syntax",
+                                                         "duration":  1,
+                                                         "failureMessages":  [
+
+                                                                             ]
+                                                     },
+                                                     {
+                                                         "ancestorTitles":  [
+                                                                                "",
+                                                                                "buildNotInFilter"
+                                                                            ],
+                                                         "fullName":  " buildNotInFilter escapes embedded double quotes",
+                                                         "status":  "passed",
+                                                         "title":  "escapes embedded double quotes",
+                                                         "duration":  0,
+                                                         "failureMessages":  [
+
+                                                                             ]
+                                                     }
+                                                 ],
+                            "startTime":  1774703734694,
+                            "endTime":  1774703734696,
+                            "status":  "passed",
+                            "message":  "",
+                            "name":  "C:/Users/bigcl/Downloads/tokkodev/tokkodev/src/lib/__tests__/tag-filters.test.ts"
+                        },
+                        {
+                            "assertionResults":  [
+                                                     {
+                                                         "ancestorTitles":  [
+                                                                                "",
+                                                                                "POST /api/campaigns"
+                                                                            ],
+                                                         "fullName":  " POST /api/campaigns stores scheduled dynamic audience rules without creating recipients yet",
+                                                         "status":  "passed",
+                                                         "title":  "stores scheduled dynamic audience rules without creating recipients yet",
+                                                         "duration":  14,
+                                                         "failureMessages":  [
+
+                                                                             ]
+                                                     }
+                                                 ],
+                            "startTime":  1774703734365,
+                            "endTime":  1774703734379,
+                            "status":  "passed",
+                            "message":  "",
+                            "name":  "C:/Users/bigcl/Downloads/tokkodev/tokkodev/src/app/api/campaigns/route.test.ts"
+                        },
+                        {
+                            "assertionResults":  [
+                                                     {
+                                                         "ancestorTitles":  [
+                                                                                "",
+                                                                                "GET /api/tags"
+                                                                            ],
+                                                         "fullName":  " GET /api/tags includes shared personal tags from teammates on the same page",
+                                                         "status":  "passed",
+                                                         "title":  "includes shared personal tags from teammates on the same page",
+                                                         "duration":  22,
+                                                         "failureMessages":  [
+
+                                                                             ]
+                                                     },
+                                                     {
+                                                         "ancestorTitles":  [
+                                                                                "",
+                                                                                "GET /api/tags"
+                                                                            ],
+                                                         "fullName":  " GET /api/tags only includes teammate shared tags targeted to the current user",
+                                                         "status":  "passed",
+                                                         "title":  "only includes teammate shared tags targeted to the current user",
+                                                         "duration":  2,
+                                                         "failureMessages":  [
+
+                                                                             ]
+                                                     },
+                                                     {
+                                                         "ancestorTitles":  [
+                                                                                "",
+                                                                                "POST /api/tags"
+                                                                            ],
+                                                         "fullName":  " POST /api/tags stores is_shared when creating a personal tag shared with page teammates",
+                                                         "status":  "passed",
+                                                         "title":  "stores is_shared when creating a personal tag shared with page teammates",
+                                                         "duration":  4,
+                                                         "failureMessages":  [
+
+                                                                             ]
+                                                     },
+                                                     {
+                                                         "ancestorTitles":  [
+                                                                                "",
+                                                                                "POST /api/tags"
+                                                                            ],
+                                                         "fullName":  " POST /api/tags stores selected share recipients when creating a shared personal tag",
+                                                         "status":  "passed",
+                                                         "title":  "stores selected share recipients when creating a shared personal tag",
+                                                         "duration":  4,
+                                                         "failureMessages":  [
+
+                                                                             ]
+                                                     }
+                                                 ],
+                            "startTime":  1774703734365,
+                            "endTime":  1774703734397,
+                            "status":  "passed",
+                            "message":  "",
+                            "name":  "C:/Users/bigcl/Downloads/tokkodev/tokkodev/src/app/api/tags/route.test.ts"
+                        },
+                        {
+                            "assertionResults":  [
+                                                     {
+                                                         "ancestorTitles":  [
+                                                                                "",
+                                                                                "POST /api/facebook/connect"
+                                                                            ],
+                                                         "fullName":  " POST /api/facebook/connect subscribes the page to webhook events before saving connection",
+                                                         "status":  "passed",
+                                                         "title":  "subscribes the page to webhook events before saving connection",
+                                                         "duration":  14,
+                                                         "failureMessages":  [
+
+                                                                             ]
+                                                     },
+                                                     {
+                                                         "ancestorTitles":  [
+                                                                                "",
+                                                                                "POST /api/facebook/connect"
+                                                                            ],
+                                                         "fullName":  " POST /api/facebook/connect returns 502 and skips database writes when webhook subscription fails",
+                                                         "status":  "passed",
+                                                         "title":  "returns 502 and skips database writes when webhook subscription fails",
+                                                         "duration":  6,
+                                                         "failureMessages":  [
+
+                                                                             ]
+                                                     }
+                                                 ],
+                            "startTime":  1774703734365,
+                            "endTime":  1774703734385,
+                            "status":  "passed",
+                            "message":  "",
+                            "name":  "C:/Users/bigcl/Downloads/tokkodev/tokkodev/src/app/api/facebook/connect/route.test.ts"
+                        },
+                        {
+                            "assertionResults":  [
+                                                     {
+                                                         "ancestorTitles":  [
+                                                                                "",
+                                                                                "POST /api/facebook/webhook"
+                                                                            ],
+                                                         "fullName":  " POST /api/facebook/webhook creates new contacts and enriches profile from Facebook on first inbound message",
+                                                         "status":  "passed",
+                                                         "title":  "creates new contacts and enriches profile from Facebook on first inbound message",
+                                                         "duration":  19,
+                                                         "failureMessages":  [
+
+                                                                             ]
+                                                     },
+                                                     {
+                                                         "ancestorTitles":  [
+                                                                                "",
+                                                                                "POST /api/facebook/webhook"
+                                                                            ],
+                                                         "fullName":  " POST /api/facebook/webhook refreshes existing contacts that are missing names",
+                                                         "status":  "passed",
+                                                         "title":  "refreshes existing contacts that are missing names",
+                                                         "duration":  3,
+                                                         "failureMessages":  [
+
+                                                                             ]
+                                                     },
+                                                     {
+                                                         "ancestorTitles":  [
+                                                                                "",
+                                                                                "POST /api/facebook/webhook"
+                                                                            ],
+                                                         "fullName":  " POST /api/facebook/webhook does not persist placeholder UNKNOWN name values from profile fetch",
+                                                         "status":  "passed",
+                                                         "title":  "does not persist placeholder UNKNOWN name values from profile fetch",
+                                                         "duration":  3,
+                                                         "failureMessages":  [
+
+                                                                             ]
+                                                     },
+                                                     {
+                                                         "ancestorTitles":  [
+                                                                                "",
+                                                                                "POST /api/facebook/webhook"
+                                                                            ],
+                                                         "fullName":  " POST /api/facebook/webhook constructs contact name from first_name and last_name when combined name is missing",
+                                                         "status":  "passed",
+                                                         "title":  "constructs contact name from first_name and last_name when combined name is missing",
+                                                         "duration":  3,
+                                                         "failureMessages":  [
+
+                                                                             ]
+                                                     },
+                                                     {
+                                                         "ancestorTitles":  [
+                                                                                "",
+                                                                                "POST /api/facebook/webhook"
+                                                                            ],
+                                                         "fullName":  " POST /api/facebook/webhook retries contact upsert without first_interaction_at when schema is older",
+                                                         "status":  "passed",
+                                                         "title":  "retries contact upsert without first_interaction_at when schema is older",
+                                                         "duration":  5,
+                                                         "failureMessages":  [
+
+                                                                             ]
+                                                     },
+                                                     {
+                                                         "ancestorTitles":  [
+                                                                                "",
+                                                                                "POST /api/facebook/webhook"
+                                                                            ],
+                                                         "fullName":  " POST /api/facebook/webhook falls back to insert for new contact when upsert fails unexpectedly",
+                                                         "status":  "passed",
+                                                         "title":  "falls back to insert for new contact when upsert fails unexpectedly",
+                                                         "duration":  4,
+                                                         "failureMessages":  [
+
+                                                                             ]
+                                                     },
+                                                     {
+                                                         "ancestorTitles":  [
+                                                                                "",
+                                                                                "POST /api/facebook/webhook"
+                                                                            ],
+                                                         "fullName":  " POST /api/facebook/webhook ingests inbound standby events so contacts appear without manual sync",
+                                                         "status":  "passed",
+                                                         "title":  "ingests inbound standby events so contacts appear without manual sync",
+                                                         "duration":  2,
+                                                         "failureMessages":  [
+
+                                                                             ]
+                                                     },
+                                                     {
+                                                         "ancestorTitles":  [
+                                                                                "",
+                                                                                "POST /api/facebook/webhook"
+                                                                            ],
+                                                         "fullName":  " POST /api/facebook/webhook sends welcome as RESPONSE with mapped buttons when welcome config has buttons",
+                                                         "status":  "passed",
+                                                         "title":  "sends welcome as RESPONSE with mapped buttons when welcome config has buttons",
+                                                         "duration":  12,
+                                                         "failureMessages":  [
+
+                                                                             ]
+                                                     },
+                                                     {
+                                                         "ancestorTitles":  [
+                                                                                "",
+                                                                                "POST /api/facebook/webhook"
+                                                                            ],
+                                                         "fullName":  " POST /api/facebook/webhook sends text-only welcome as RESPONSE for a new contact",
+                                                         "status":  "passed",
+                                                         "title":  "sends text-only welcome as RESPONSE for a new contact",
+                                                         "duration":  2,
+                                                         "failureMessages":  [
+
+                                                                             ]
+                                                     }
+                                                 ],
+                            "startTime":  1774703734379,
+                            "endTime":  1774703734433,
+                            "status":  "passed",
+                            "message":  "",
+                            "name":  "C:/Users/bigcl/Downloads/tokkodev/tokkodev/src/app/api/facebook/webhook/route.test.ts"
+                        },
+                        {
+                            "assertionResults":  [
+                                                     {
+                                                         "ancestorTitles":  [
+                                                                                "",
+                                                                                "GET /api/cron/campaign-scheduled"
+                                                                            ],
+                                                         "fullName":  " GET /api/cron/campaign-scheduled allows public requests without a cron secret",
+                                                         "status":  "passed",
+                                                         "title":  "allows public requests without a cron secret",
+                                                         "duration":  11,
+                                                         "failureMessages":  [
+
+                                                                             ]
+                                                     },
+                                                     {
+                                                         "ancestorTitles":  [
+                                                                                "",
+                                                                                "GET /api/cron/campaign-scheduled"
+                                                                            ],
+                                                         "fullName":  " GET /api/cron/campaign-scheduled materializes dynamic recipients and dispatches due campaigns",
+                                                         "status":  "passed",
+                                                         "title":  "materializes dynamic recipients and dispatches due campaigns",
+                                                         "duration":  5,
+                                                         "failureMessages":  [
+
+                                                                             ]
+                                                     }
+                                                 ],
+                            "startTime":  1774703734365,
+                            "endTime":  1774703734381,
+                            "status":  "passed",
+                            "message":  "",
+                            "name":  "C:/Users/bigcl/Downloads/tokkodev/tokkodev/src/app/api/cron/campaign-scheduled/route.test.ts"
+                        },
+                        {
+                            "assertionResults":  [
+                                                     {
+                                                         "ancestorTitles":  [
+                                                                                "",
+                                                                                "buildSupportTeamTemplateBody"
+                                                                            ],
+                                                         "fullName":  " buildSupportTeamTemplateBody builds the support-team template in the required page-name format",
+                                                         "status":  "passed",
+                                                         "title":  "builds the support-team template in the required page-name format",
+                                                         "duration":  1,
+                                                         "failureMessages":  [
+
+                                                                             ]
+                                                     },
+                                                     {
+                                                         "ancestorTitles":  [
+                                                                                "",
+                                                                                "buildSupportTeamTemplateBodyCandidates"
+                                                                            ],
+                                                         "fullName":  " buildSupportTeamTemplateBodyCandidates returns unique support-team variants with placeholders for auto-template retries",
+                                                         "status":  "passed",
+                                                         "title":  "returns unique support-team variants with placeholders for auto-template retries",
+                                                         "duration":  1,
+                                                         "failureMessages":  [
+
+                                                                             ]
+                                                     },
+                                                     {
+                                                         "ancestorTitles":  [
+                                                                                "",
+                                                                                "buildUtilityTemplateBodyCandidates"
+                                                                            ],
+                                                         "fullName":  " buildUtilityTemplateBodyCandidates uses single placeholder body for one-part utility sends",
+                                                         "status":  "passed",
+                                                         "title":  "uses single placeholder body for one-part utility sends",
+                                                         "duration":  1,
+                                                         "failureMessages":  [
+
+                                                                             ]
+                                                     },
+                                                     {
+                                                         "ancestorTitles":  [
+                                                                                "",
+                                                                                "buildUtilityTemplateBodyCandidates"
+                                                                            ],
+                                                         "fullName":  " buildUtilityTemplateBodyCandidates uses support-team variants for two-part utility sends",
+                                                         "status":  "passed",
+                                                         "title":  "uses support-team variants for two-part utility sends",
+                                                         "duration":  0,
+                                                         "failureMessages":  [
+
+                                                                             ]
+                                                     },
+                                                     {
+                                                         "ancestorTitles":  [
+                                                                                "",
+                                                                                "buildUtilityTemplateBodyCandidates"
+                                                                            ],
+                                                         "fullName":  " buildUtilityTemplateBodyCandidates allows single and support-team options when dual mode is enabled",
+                                                         "status":  "passed",
+                                                         "title":  "allows single and support-team options when dual mode is enabled",
+                                                         "duration":  0,
+                                                         "failureMessages":  [
+
+                                                                             ]
+                                                     },
+                                                     {
+                                                         "ancestorTitles":  [
+                                                                                "",
+                                                                                "buildUtilityTemplateBodyExample"
+                                                                            ],
+                                                         "fullName":  " buildUtilityTemplateBodyExample returns one example value for a single-placeholder body",
+                                                         "status":  "passed",
+                                                         "title":  "returns one example value for a single-placeholder body",
+                                                         "duration":  0,
+                                                         "failureMessages":  [
+
+                                                                             ]
+                                                     },
+                                                     {
+                                                         "ancestorTitles":  [
+                                                                                "",
+                                                                                "buildUtilityTemplateBodyExample"
+                                                                            ],
+                                                         "fullName":  " buildUtilityTemplateBodyExample returns matching example values for a two-placeholder body",
+                                                         "status":  "passed",
+                                                         "title":  "returns matching example values for a two-placeholder body",
+                                                         "duration":  0,
+                                                         "failureMessages":  [
+
+                                                                             ]
+                                                     },
+                                                     {
+                                                         "ancestorTitles":  [
+                                                                                "",
+                                                                                "buildUtilityTemplateBodyExample"
+                                                                            ],
+                                                         "fullName":  " buildUtilityTemplateBodyExample returns undefined when body has no placeholders",
+                                                         "status":  "passed",
+                                                         "title":  "returns undefined when body has no placeholders",
+                                                         "duration":  0,
+                                                         "failureMessages":  [
+
+                                                                             ]
+                                                     },
+                                                     {
+                                                         "ancestorTitles":  [
+                                                                                "",
+                                                                                "buildUtilityBodyParameters"
+                                                                            ],
+                                                         "fullName":  " buildUtilityBodyParameters keeps support-team separator between message parts",
+                                                         "status":  "passed",
+                                                         "title":  "keeps support-team separator between message parts",
+                                                         "duration":  0,
+                                                         "failureMessages":  [
+
+                                                                             ]
+                                                     },
+                                                     {
+                                                         "ancestorTitles":  [
+                                                                                "",
+                                                                                "buildUtilityBodyParameters"
+                                                                            ],
+                                                         "fullName":  " buildUtilityBodyParameters keeps first-name substitution for one-part non support-team templates",
+                                                         "status":  "passed",
+                                                         "title":  "keeps first-name substitution for one-part non support-team templates",
+                                                         "duration":  0,
+                                                         "failureMessages":  [
+
+                                                                             ]
+                                                     },
+                                                     {
+                                                         "ancestorTitles":  [
+                                                                                "",
+                                                                                "buildUtilityBodyParameters"
+                                                                            ],
+                                                         "fullName":  " buildUtilityBodyParameters keeps part1 and part2 order for two-part messages even on generic two-slot templates",
+                                                         "status":  "passed",
+                                                         "title":  "keeps part1 and part2 order for two-part messages even on generic two-slot templates",
+                                                         "duration":  1,
+                                                         "failureMessages":  [
+
+                                                                             ]
+                                                     },
+                                                     {
+                                                         "ancestorTitles":  [
+                                                                                "",
+                                                                                "buildUtilityBodyParameters"
+                                                                            ],
+                                                         "fullName":  " buildUtilityBodyParameters can collapse two-part text into one placeholder when separator is provided",
+                                                         "status":  "passed",
+                                                         "title":  "can collapse two-part text into one placeholder when separator is provided",
+                                                         "duration":  0,
+                                                         "failureMessages":  [
+
+                                                                             ]
+                                                     },
+                                                     {
+                                                         "ancestorTitles":  [
+                                                                                "",
+                                                                                "templateMatchesRequestedButtons"
+                                                                            ],
+                                                         "fullName":  " templateMatchesRequestedButtons matches URL buttons when requested URL omits protocol",
+                                                         "status":  "passed",
+                                                         "title":  "matches URL buttons when requested URL omits protocol",
+                                                         "duration":  0,
+                                                         "failureMessages":  [
+
+                                                                             ]
+                                                     },
+                                                     {
+                                                         "ancestorTitles":  [
+                                                                                "",
+                                                                                "templateMatchesRequestedButtons"
+                                                                            ],
+                                                         "fullName":  " templateMatchesRequestedButtons rejects a template with stale URL button values",
+                                                         "status":  "passed",
+                                                         "title":  "rejects a template with stale URL button values",
+                                                         "duration":  0,
+                                                         "failureMessages":  [
+
+                                                                             ]
+                                                     },
+                                                     {
+                                                         "ancestorTitles":  [
+                                                                                "",
+                                                                                "templateMatchesRequestedButtons"
+                                                                            ],
+                                                         "fullName":  " templateMatchesRequestedButtons rejects templates with buttons when none are requested",
+                                                         "status":  "passed",
+                                                         "title":  "rejects templates with buttons when none are requested",
+                                                         "duration":  0,
+                                                         "failureMessages":  [
+
+                                                                             ]
+                                                     },
+                                                     {
+                                                         "ancestorTitles":  [
+                                                                                "",
+                                                                                "templateMatchesRequestedButtons"
+                                                                            ],
+                                                         "fullName":  " templateMatchesRequestedButtons matches equivalent quick reply and postback button payloads",
+                                                         "status":  "passed",
+                                                         "title":  "matches equivalent quick reply and postback button payloads",
+                                                         "duration":  1,
+                                                         "failureMessages":  [
+
+                                                                             ]
+                                                     },
+                                                     {
+                                                         "ancestorTitles":  [
+                                                                                "",
+                                                                                "templateMatchesRequestedButtons"
+                                                                            ],
+                                                         "fullName":  " templateMatchesRequestedButtons rejects template buttons when button metadata is incomplete",
+                                                         "status":  "passed",
+                                                         "title":  "rejects template buttons when button metadata is incomplete",
+                                                         "duration":  0,
+                                                         "failureMessages":  [
+
+                                                                             ]
+                                                     },
+                                                     {
+                                                         "ancestorTitles":  [
+                                                                                "",
+                                                                                "normalizeRequestedButtons"
+                                                                            ],
+                                                         "fullName":  " normalizeRequestedButtons normalizes URL buttons to valid https links",
+                                                         "status":  "passed",
+                                                         "title":  "normalizes URL buttons to valid https links",
+                                                         "duration":  0,
+                                                         "failureMessages":  [
+
+                                                                             ]
+                                                     },
+                                                     {
+                                                         "ancestorTitles":  [
+                                                                                "",
+                                                                                "normalizeRequestedButtons"
+                                                                            ],
+                                                         "fullName":  " normalizeRequestedButtons drops URL buttons that cannot be parsed as valid URIs",
+                                                         "status":  "passed",
+                                                         "title":  "drops URL buttons that cannot be parsed as valid URIs",
+                                                         "duration":  0,
+                                                         "failureMessages":  [
+
+                                                                             ]
+                                                     },
+                                                     {
+                                                         "ancestorTitles":  [
+                                                                                "",
+                                                                                "resolveButtonMode"
+                                                                            ],
+                                                         "fullName":  " resolveButtonMode defaults to TEMPLATE_STATIC for unknown values",
+                                                         "status":  "passed",
+                                                         "title":  "defaults to TEMPLATE_STATIC for unknown values",
+                                                         "duration":  1,
+                                                         "failureMessages":  [
+
+                                                                             ]
+                                                     },
+                                                     {
+                                                         "ancestorTitles":  [
+                                                                                "",
+                                                                                "resolveButtonMode"
+                                                                            ],
+                                                         "fullName":  " resolveButtonMode accepts RESPONSE_DYNAMIC when explicitly requested",
+                                                         "status":  "passed",
+                                                         "title":  "accepts RESPONSE_DYNAMIC when explicitly requested",
+                                                         "duration":  0,
+                                                         "failureMessages":  [
+
+                                                                             ]
+                                                     },
+                                                     {
+                                                         "ancestorTitles":  [
+                                                                                "",
+                                                                                "getMessagingType"
+                                                                            ],
+                                                         "fullName":  " getMessagingType uses RESPONSE whenever buttons are present so sending does not depend on utility templates",
+                                                         "status":  "passed",
+                                                         "title":  "uses RESPONSE whenever buttons are present so sending does not depend on utility templates",
+                                                         "duration":  0,
+                                                         "failureMessages":  [
+
+                                                                             ]
+                                                     },
+                                                     {
+                                                         "ancestorTitles":  [
+                                                                                "",
+                                                                                "getMessagingType"
+                                                                            ],
+                                                         "fullName":  " getMessagingType keeps UTILITY for buttonless sends",
+                                                         "status":  "passed",
+                                                         "title":  "keeps UTILITY for buttonless sends",
+                                                         "duration":  0,
+                                                         "failureMessages":  [
+
+                                                                             ]
+                                                     },
+                                                     {
+                                                         "ancestorTitles":  [
+                                                                                "",
+                                                                                "applyDynamicButtonValue"
+                                                                            ],
+                                                         "fullName":  " applyDynamicButtonValue replaces first URL button link when part2 is a valid URL",
+                                                         "status":  "passed",
+                                                         "title":  "replaces first URL button link when part2 is a valid URL",
+                                                         "duration":  0,
+                                                         "failureMessages":  [
+
+                                                                             ]
+                                                     },
+                                                     {
+                                                         "ancestorTitles":  [
+                                                                                "",
+                                                                                "applyDynamicButtonValue"
+                                                                            ],
+                                                         "fullName":  " applyDynamicButtonValue replaces first button text when part2 is not a URL",
+                                                         "status":  "passed",
+                                                         "title":  "replaces first button text when part2 is not a URL",
+                                                         "duration":  0,
+                                                         "failureMessages":  [
+
+                                                                             ]
+                                                     },
+                                                     {
+                                                         "ancestorTitles":  [
+                                                                                "",
+                                                                                "applyDynamicButtonValue"
+                                                                            ],
+                                                         "fullName":  " applyDynamicButtonValue maps part2 to quick-reply text and payload",
+                                                         "status":  "passed",
+                                                         "title":  "maps part2 to quick-reply text and payload",
+                                                         "duration":  1,
+                                                         "failureMessages":  [
+
+                                                                             ]
+                                                     },
+                                                     {
+                                                         "ancestorTitles":  [
+                                                                                "",
+                                                                                "resolveMessageParts"
+                                                                            ],
+                                                         "fullName":  " resolveMessageParts prefers explicit message parts when provided",
+                                                         "status":  "passed",
+                                                         "title":  "prefers explicit message parts when provided",
+                                                         "duration":  0,
+                                                         "failureMessages":  [
+
+                                                                             ]
+                                                     },
+                                                     {
+                                                         "ancestorTitles":  [
+                                                                                "",
+                                                                                "resolveMessageParts"
+                                                                            ],
+                                                         "fullName":  " resolveMessageParts parses separator-based message text when explicit parts are missing",
+                                                         "status":  "passed",
+                                                         "title":  "parses separator-based message text when explicit parts are missing",
+                                                         "duration":  0,
+                                                         "failureMessages":  [
+
+                                                                             ]
+                                                     },
+                                                     {
+                                                         "ancestorTitles":  [
+                                                                                "",
+                                                                                "resolveMessageParts"
+                                                                            ],
+                                                         "fullName":  " resolveMessageParts treats empty second part as single-part message",
+                                                         "status":  "passed",
+                                                         "title":  "treats empty second part as single-part message",
+                                                         "duration":  0,
+                                                         "failureMessages":  [
+
+                                                                             ]
+                                                     }
+                                                 ],
+                            "startTime":  1774703734311,
+                            "endTime":  1774703734320,
+                            "status":  "passed",
+                            "message":  "",
+                            "name":  "C:/Users/bigcl/Downloads/tokkodev/tokkodev/src/app/api/facebook/messages/send/route.test.ts"
+                        },
+                        {
+                            "assertionResults":  [
+                                                     {
+                                                         "ancestorTitles":  [
+                                                                                "",
+                                                                                "GET /api/pages/[pageId]/contacts"
+                                                                            ],
+                                                         "fullName":  " GET /api/pages/[pageId]/contacts includes who added each tag in contact results",
+                                                         "status":  "passed",
+                                                         "title":  "includes who added each tag in contact results",
+                                                         "duration":  12,
+                                                         "failureMessages":  [
+
+                                                                             ]
+                                                     },
+                                                     {
+                                                         "ancestorTitles":  [
+                                                                                "",
+                                                                                "GET /api/pages/[pageId]/contacts"
+                                                                            ],
+                                                         "fullName":  " GET /api/pages/[pageId]/contacts applies include and exclude tag filters together",
+                                                         "status":  "passed",
+                                                         "title":  "applies include and exclude tag filters together",
+                                                         "duration":  4,
+                                                         "failureMessages":  [
+
+                                                                             ]
+                                                     }
+                                                 ],
+                            "startTime":  1774703734368,
+                            "endTime":  1774703734384,
+                            "status":  "passed",
+                            "message":  "",
+                            "name":  "C:/Users/bigcl/Downloads/tokkodev/tokkodev/src/app/api/pages/[pageId]/contacts/route.test.ts"
+                        },
+                        {
+                            "assertionResults":  [
+                                                     {
+                                                         "ancestorTitles":  [
+                                                                                "",
+                                                                                "POST /api/pages/[pageId]/webhook"
+                                                                            ],
+                                                         "fullName":  " POST /api/pages/[pageId]/webhook subscribes an authorized page using stored page token",
+                                                         "status":  "passed",
+                                                         "title":  "subscribes an authorized page using stored page token",
+                                                         "duration":  12,
+                                                         "failureMessages":  [
+
+                                                                             ]
+                                                     },
+                                                     {
+                                                         "ancestorTitles":  [
+                                                                                "",
+                                                                                "POST /api/pages/[pageId]/webhook"
+                                                                            ],
+                                                         "fullName":  " POST /api/pages/[pageId]/webhook returns 403 when user does not have page access",
+                                                         "status":  "passed",
+                                                         "title":  "returns 403 when user does not have page access",
+                                                         "duration":  2,
+                                                         "failureMessages":  [
+
+                                                                             ]
+                                                     },
+                                                     {
+                                                         "ancestorTitles":  [
+                                                                                "",
+                                                                                "POST /api/pages/[pageId]/webhook"
+                                                                            ],
+                                                         "fullName":  " POST /api/pages/[pageId]/webhook returns 502 when facebook subscription fails",
+                                                         "status":  "passed",
+                                                         "title":  "returns 502 when facebook subscription fails",
+                                                         "duration":  2,
+                                                         "failureMessages":  [
+
+                                                                             ]
+                                                     }
+                                                 ],
+                            "startTime":  1774703734364,
+                            "endTime":  1774703734380,
+                            "status":  "passed",
+                            "message":  "",
+                            "name":  "C:/Users/bigcl/Downloads/tokkodev/tokkodev/src/app/api/pages/[pageId]/webhook/route.test.ts"
+                        },
+                        {
+                            "assertionResults":  [
+                                                     {
+                                                         "ancestorTitles":  [
+                                                                                "",
+                                                                                "GET /api/pages/[pageId]/team"
+                                                                            ],
+                                                         "fullName":  " GET /api/pages/[pageId]/team returns page team members and total count",
+                                                         "status":  "passed",
+                                                         "title":  "returns page team members and total count",
+                                                         "duration":  9,
+                                                         "failureMessages":  [
+
+                                                                             ]
+                                                     }
+                                                 ],
+                            "startTime":  1774703734364,
+                            "endTime":  1774703734373,
+                            "status":  "passed",
+                            "message":  "",
+                            "name":  "C:/Users/bigcl/Downloads/tokkodev/tokkodev/src/app/api/pages/[pageId]/team/route.test.ts"
+                        },
+                        {
+                            "assertionResults":  [
+                                                     {
+                                                         "ancestorTitles":  [
+                                                                                "",
+                                                                                "POST /api/pages/[pageId]/contacts/bulk-add-tags"
+                                                                            ],
+                                                         "fullName":  " POST /api/pages/[pageId]/contacts/bulk-add-tags records which user added each contact tag",
+                                                         "status":  "passed",
+                                                         "title":  "records which user added each contact tag",
+                                                         "duration":  10,
+                                                         "failureMessages":  [
+
+                                                                             ]
+                                                     }
+                                                 ],
+                            "startTime":  1774703734365,
+                            "endTime":  1774703734375,
+                            "status":  "passed",
+                            "message":  "",
+                            "name":  "C:/Users/bigcl/Downloads/tokkodev/tokkodev/src/app/api/pages/[pageId]/contacts/bulk-add-tags/route.test.ts"
+                        }
+                    ]
+}

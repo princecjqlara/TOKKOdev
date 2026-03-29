@@ -1,0 +1,502 @@
+node.exe : [33mThe CJS 
+build of Vite's Node 
+API is deprecated. See h
+ttps://vite.dev/guide/tr
+oubleshooting.html#vite-
+cjs-node-api-deprecated 
+for more details.[39m
+At line:1 char:1
++ & "C:\Program 
+Files\nodejs/node.exe" 
+"C:\Program 
+Files\nodejs/node_mo ...
++ ~~~~~~~~~~~~~~~~~~~~~~
+~~~~~~~~~~~~~~~~~~~~~~~~
+~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo      
+        : NotSpecified: 
+(    [33mThe CJS 
+bu...e de    
+tails.[39m:String) [   
+ ], RemoteException
+    + 
+FullyQualifiedError    
+Id : NativeCommandErr   
+ or
+ 
+
+[7m[1m[36m RUN [39m[22m[27m [36mv1.6.1[39m [90mC:/Users/bigcl/Downloads/tokkodev/tokkodev[39m
+
+ [32m???[39m src/lib/__tests__/placeholders.test.ts [2m ([22m[2m10 tests[22m[2m)[22m[90m 4[2mms[22m[39m
+ [32m???[39m src/lib/__tests__/send-errors.test.ts [2m ([22m[2m5 tests[22m[2m)[22m[90m 5[2mms[22m[39m
+ [32m???[39m src/app/api/facebook/messages/send/route.test.ts [2m ([22m[2m29 tests[22m[2m)[22m[90m 12[2mms[22m[39m
+ [32m???[39m src/lib/__tests__/campaign-audience.test.ts [2m ([22m[2m2 tests[22m[2m)[22m[90m 8[2mms[22m[39m
+ [32m???[39m src/lib/__tests__/facebook-send.test.ts [2m ([22m[2m8 tests[22m[2m)[22m[90m 19[2mms[22m[39m
+[90mstdout[2m | src/lib/__tests__/facebook-send.test.ts[2m > [22m[2msendMessage[2m > [22m[2muses default utility template with en_US language[22m[39m
+??? Message sent successfully: { pageId: [32m'page_1'[39m, recipientPsid: [32m'psid_1'[39m, messageId: [32m'mid.1'[39m }
+
+[90mstdout[2m | src/lib/__tests__/facebook-send.test.ts[2m > [22m[2msendMessage[2m > [22m[2msupports custom template and language for utility sends[22m[39m
+??? Message sent successfully: { pageId: [32m'page_1'[39m, recipientPsid: [32m'psid_1'[39m, messageId: [32m'mid.2'[39m }
+
+[90mstdout[2m | src/lib/__tests__/facebook-send.test.ts[2m > [22m[2msendMessage[2m > [22m[2msupports utility templates without body parameters[22m[39m
+??? Message sent successfully: {
+  pageId: [32m'page_1'[39m,
+  recipientPsid: [32m'psid_1'[39m,
+  messageId: [32m'mid.no-params'[39m
+}
+
+[90mstderr[2m | src/li
+b/__tests__/facebook-sen
+d.test.ts[2m > [22m[2
+msendMessage[2m > 
+[22m[2mthrows 
+facebook api error 
+message when send 
+fails[22m[39m
+???? Facebook send 
+message error: {
+  pageId: 
+[32m'page_1'[39m,
+  recipientPsid: 
+[32m'psid_1'[39m,
+  status: [33m400[39m,
+  error: [32m'(#100) 
+Template cannot be 
+found.'[39m,
+  fullError: { error: { 
+message: [32m'(#100) 
+Template cannot be 
+found.'[39m } }
+}
+
+[90mstdout[2m | src/lib/__tests__/facebook-send.test.ts[2m > [22m[2msendMessage[2m > [22m[2msends HUMAN_AGENT messages as MESSAGE_TAG payloads[22m[39m
+??? Message sent successfully: { pageId: [32m'page_1'[39m, recipientPsid: [32m'psid_1'[39m, messageId: [32m'mid.3'[39m }
+
+[90mstdout[2m | src/lib/__tests__/facebook-send.test.ts[2m > [22m[2msendMessage[2m > [22m[2msends RESPONSE button template payload when buttons are provided[22m[39m
+??? Message sent successfully: {
+  pageId: [32m'page_1'[39m,
+  recipientPsid: [32m'psid_1'[39m,
+  messageId: [32m'mid.response.buttons'[39m
+}
+
+[90mstdout[2m | src/lib/__tests__/facebook-send.test.ts[2m > [22m[2msendMessage[2m > [22m[2msends UTILITY message with buttons (buttons are in template, not payload)[22m[39m
+??? Message sent successfully: { pageId: [32m'page_1'[39m, recipientPsid: [32m'psid_1'[39m, messageId: [32m'mid.btn'[39m }
+
+[90mstdout[2m | src/lib/__tests__/facebook-send.test.ts[2m > [22m[2msendMessage[2m > [22m[2mdoes not include buttons for HUMAN_AGENT messages[22m[39m
+??? Message sent successfully: { pageId: [32m'page_1'[39m, recipientPsid: [32m'psid_1'[39m, messageId: [32m'mid.no-btn'[39m }
+
+ [32m???[39m src/app/api/campaigns/route.test.ts [2m ([22m[2m1 test[22m[2m)[22m[90m 19[2mms[22m[39m
+ [32m???[39m src/app/api/cron/campaign-scheduled/route.test.ts [2m ([22m[2m2 tests[22m[2m)[22m[90m 15[2mms[22m[39m
+ [32m???[39m src/app/api/pages/[pageId]/team/route.test.ts [2m ([22m[2m1 test[22m[2m)[22m[90m 15[2mms[22m[39m
+ [32m???[39m src/app/api/pages/[pageId]/contacts/bulk-add-tags/route.test.ts [2m ([22m[2m1 test[22m[2m)[22m[90m 15[2mms[22m[39m
+ [32m???[39m src/app/api/pages/[pageId]/webhook/route.test.ts [2m ([22m[2m3 tests[22m[2m)[22m[90m 24[2mms[22m[39m
+[90mstdout[2m | src/app/api/pages/[pageId]/webhook/route.test.ts[2m > [22m[2mPOST /api/pages/[pageId]/webhook[2m > [22m[2msubscribes an authorized page using stored page token[22m[39m
+[PAGE_WEBHOOK_REFRESH][0613fd15-c17b-4be0-ba7f-f4a096a5d06b] Successfully refreshed page webhook subscription { userId: [32m'user_1'[39m, pageId: [32m'page_row_1'[39m, fbPageId: [32m'fb_page_1'[39m }
+
+[90mstderr[2m | src/ap
+p/api/pages/[pageId]/web
+hook/route.test.ts[2m 
+> [22m[2mPOST /api/pag
+es/[pageId]/webhook[2m 
+> [22m[2mreturns 403 
+when user does not have 
+page access[22m[39m
+[PAGE_WEBHOOK_REFRESH][9
+dd0f51d-ebd2-4612-b7ed-5
+8a2b7ff85d4] Webhook 
+refresh forbidden for 
+user/page pair { 
+userId: 
+[32m'user_1'[39m, 
+pageId: 
+[32m'page_row_1'[39m }
+
+[90mstderr[2m | src/ap
+p/api/pages/[pageId]/web
+hook/route.test.ts[2m 
+> [22m[2mPOST /api/pag
+es/[pageId]/webhook[2m 
+> [22m[2mreturns 502 
+when facebook 
+subscription 
+fails[22m[39m
+[PAGE_WEBHOOK_REFRESH][d
+d2799b9-1fb4-4bdc-a343-f
+5e092db98f4] Failed to 
+re-subscribe page 
+webhook {
+  userId: 
+[32m'user_1'[39m,
+  pageId: 
+[32m'page_row_1'[39m,
+  fbPageId: 
+[32m'fb_page_1'[39m,
+  error: [32m'Requires 
+pages_manage_metadata 
+permission'[39m
+}
+
+ [32m???[39m src/app/api/facebook/connect/route.test.ts [2m ([22m[2m2 tests[22m[2m)[22m[90m 26[2mms[22m[39m
+[90mstdout[2m | src/app/api/facebook/connect/route.test.ts[2m > [22m[2mPOST /api/facebook/connect[2m > [22m[2msubscribes the page to webhook events before saving connection[22m[39m
+???? Session found: { email: [32m'user@example.com'[39m, userId: [32m'user_1'[39m }
+
+[90mstdout[2m | src/app/api/facebook/connect/route.test.ts[2m > [22m[2mPOST /api/facebook/connect[2m > [22m[2mreturns 502 and skips database writes when webhook subscription fails[22m[39m
+???? Session found: { email: [32m'user@example.com'[39m, userId: [32m'user_1'[39m }
+
+[90mstderr[2m | src/ap
+p/api/facebook/connect/r
+oute.test.ts[2m > 
+[22m[2mPOST /api/faceb
+ook/connect[2m > 
+[22m[2mreturns 502 
+and skips database 
+writes when webhook 
+subscription 
+fails[22m[39m
+???? Failed to 
+subscribe page to 
+webhook events: Error: 
+Requires 
+pages_manage_metadata 
+permission
+    at [90mC:\Users\big
+cl\Downloads\tokkodev\to
+kkodev\[39msrc\app\api\
+facebook\connect\route.t
+est.ts:109:13
+    at [90mfile:///C:/U
+sers/bigcl/Downloads/tok
+kodev/tokkodev/[39mnode
+_modules/[4m@vitest/run
+ner[24m/dist/index.js:1
+35:14
+    at [90mfile:///C:/U
+sers/bigcl/Downloads/tok
+kodev/tokkodev/[39mnode
+_modules/[4m@vitest/run
+ner[24m/dist/index.js:6
+0:26
+    at runTest [90m(fil
+e:///C:/Users/bigcl/Down
+loads/tokkodev/tokkodev/
+[39mnode_modules/[4m@v
+itest/runner[24m/dist/i
+ndex.js:781:17[90m)[39
+m
+    at runSuite [90m(fi
+le:///C:/Users/bigcl/Dow
+nloads/tokkodev/tokkodev
+/[39mnode_modules/[4m@
+vitest/runner[24m/dist/
+index.js:909:15[90m)[3
+9m
+    at runSuite [90m(fi
+le:///C:/Users/bigcl/Dow
+nloads/tokkodev/tokkodev
+/[39mnode_modules/[4m@
+vitest/runner[24m/dist/
+index.js:909:15[90m)[3
+9m
+    at runFiles [90m(fi
+le:///C:/Users/bigcl/Dow
+nloads/tokkodev/tokkodev
+/[39mnode_modules/[4m@
+vitest/runner[24m/dist/
+index.js:958:5[90m)[39
+m
+    at startTests [90m(
+file:///C:/Users/bigcl/D
+ownloads/tokkodev/tokkod
+ev/[39mnode_modules/[4
+m@vitest/runner[24m/dis
+t/index.js:967:3[90m)[
+39m
+    at [90mfile:///C:/U
+sers/bigcl/Downloads/tok
+kodev/tokkodev/[39mnode
+_modules/[4mvitest[24m
+/dist/chunks/runtime-run
+BaseTests.oAvMKtQC.js:11
+6:7
+    at withEnv [90m(fil
+e:///C:/Users/bigcl/Down
+loads/tokkodev/tokkodev/
+[39mnode_modules/[4mvi
+test[24m/dist/chunks/ru
+ntime-runBaseTests.oAvMK
+tQC.js:83:5[90m)[39m
+
+[90mstdout[2m | src/app/api/pages/[pageId]/contacts/route.test.ts[2m > [22m[2mGET /api/pages/[pageId]/contacts[2m > [22m[2mincludes who added each tag in contact results[22m[39m
+[CONTACTS_GET][73a4cf23-8980-424c-99dd-37e7f0aa0f5b] Contacts request received {
+  userId: [32m'user_1'[39m,
+  pageId: [32m'page_1'[39m,
+  page: [33m1[39m,
+  pageSize: [33m25[39m,
+  hasSearch: [33mfalse[39m,
+  searchLength: [33m0[39m,
+  includeTagCount: [33m0[39m,
+  excludeTagCount: [33m0[39m,
+  sendableOnly: [33mfalse[39m,
+  dateFrom: [1mnull[22m,
+  dateTo: [1mnull[22m
+}
+[CONTACTS_GET][73a4cf23-8980-424c-99dd-37e7f0aa0f5b] Returning contacts response {
+  returnedItems: [33m1[39m,
+  totalMatched: [33m1[39m,
+  page: [33m1[39m,
+  pageSize: [33m25[39m,
+  firstReturnedContactId: [32m'contact_1'[39m,
+  firstReturnedPsid: [32m'psid_1'[39m
+}
+
+[90mstdout[2m | src/app/api/pages/[pageId]/contacts/route.test.ts[2m > [22m[2mGET /api/pages/[pageId]/contacts[2m > [22m[2mapplies include and exclude tag filters together[22m[39m
+[CONTACTS_GET][913f7672-fedb-4e66-b9fd-b577673ba905] Contacts request received {
+  userId: [32m'user_1'[39m,
+  pageId: [32m'page_1'[39m,
+  page: [33m1[39m,
+  pageSize: [33m25[39m,
+  hasSearch: [33mfalse[39m,
+  searchLength: [33m0[39m,
+  includeTagCount: [33m2[39m,
+  excludeTagCount: [33m1[39m,
+  sendableOnly: [33mfalse[39m,
+  dateFrom: [1mnull[22m,
+  dateTo: [1mnull[22m
+}
+[CONTACTS_GET][913f7672-fedb-4e66-b9fd-b577673ba905] Applied include-tag filter { includeTagCount: [33m2[39m, matchingContactCount: [33m2[39m }
+[CONTACTS_GET][913f7672-fedb-4e66-b9fd-b577673ba905] Applied exclude-tag filter { excludeTagCount: [33m1[39m, excludedContactCount: [33m1[39m }
+[CONTACTS_GET][913f7672-fedb-4e66-b9fd-b577673ba905] Returning contacts response {
+  returnedItems: [33m1[39m,
+  totalMatched: [33m1[39m,
+  page: [33m1[39m,
+  pageSize: [33m25[39m,
+  firstReturnedContactId: [32m'contact_1'[39m,
+  firstReturnedPsid: [32m'psid_1'[39m
+}
+
+ [32m???[39m src/app/api/pages/[pageId]/contacts/route.test.ts [2m ([22m[2m2 tests[22m[2m)[22m[90m 22[2mms[22m[39m
+ [32m???[39m src/app/api/tags/route.test.ts [2m ([22m[2m4 tests[22m[2m)[22m[90m 60[2mms[22m[39m
+[90mstderr[2m | src/ap
+p/api/facebook/webhook/r
+oute.test.ts[2m > 
+[22m[2mPOST /api/faceb
+ook/webhook[2m > 
+[22m[2mretries 
+contact upsert without 
+first_interaction_at 
+when schema is 
+older[22m[39m
+[FB_WEBHOOK][49fa43ab-02
+df-439b-aeec-48f51f6b51f
+3] Retrying contact 
+upsert without 
+first_interaction_at 
+due to schema mismatch {
+  pageId: 
+[32m'fb_page_1'[39m,
+  senderId: [32m'contac
+t_psid_1'[39m,
+  error: [32m"Could 
+not find the 
+'first_interaction_at' 
+column of 'contacts' in 
+the schema cache"[39m
+}
+
+[90mstdout[2m | src/app/api/facebook/webhook/route.test.ts[2m > [22m[2mPOST /api/facebook/webhook[2m > [22m[2mcreates new contacts and enriches profile from Facebook on first inbound message[22m[39m
+[FB_WEBHOOK][358c5906-92b7-4df7-806e-4cc3bc65f89b] Webhook signature verification skipped (development mode)
+[FB_WEBHOOK][358c5906-92b7-4df7-806e-4cc3bc65f89b] Webhook payload parsed {
+  object: [32m'page'[39m,
+  entryCount: [33m1[39m,
+  bodyLength: [33m199[39m,
+  signatureProvided: [33mfalse[39m
+}
+[FB_WEBHOOK][358c5906-92b7-4df7-806e-4cc3bc65f89b] Webhook processing summary {
+  processedEntries: [33m1[39m,
+  processedEvents: [33m1[39m,
+  processedContacts: [33m1[39m,
+  skippedEvents: [33m0[39m,
+  hadCriticalFailure: [33mfalse[39m
+}
+
+[90mstderr[2m | src/ap
+p/api/facebook/webhook/r
+oute.test.ts[2m > 
+[22m[2mPOST /api/faceb
+ook/webhook[2m > 
+[22m[2mfalls back to 
+insert for new contact 
+when upsert fails 
+unexpectedly[22m[39m
+[FB_WEBHOOK][6078e30b-2d
+06-4241-b23c-6af89c6bb9c
+2] Upsert failed for 
+new contact, retrying 
+with direct insert {
+  pageId: 
+[32m'fb_page_1'[39m,
+  senderId: [32m'contac
+t_psid_1'[39m,
+  error: 
+[32m'insert/update 
+failed due to transient 
+database issue'[39m
+}
+
+[90mstdout[2m | src/app/api/facebook/webhook/route.test.ts[2m > [22m[2mPOST /api/facebook/webhook[2m > [22m[2mrefreshes existing contacts that are missing names[22m[39m
+[FB_WEBHOOK][2687f3e2-26d6-47c6-bc45-608e86c3aa50] Webhook signature verification skipped (development mode)
+[FB_WEBHOOK][2687f3e2-26d6-47c6-bc45-608e86c3aa50] Webhook payload parsed {
+  object: [32m'page'[39m,
+  entryCount: [33m1[39m,
+  bodyLength: [33m199[39m,
+  signatureProvided: [33mfalse[39m
+}
+[FB_WEBHOOK][2687f3e2-26d6-47c6-bc45-608e86c3aa50] Webhook processing summary {
+  processedEntries: [33m1[39m,
+  processedEvents: [33m1[39m,
+  processedContacts: [33m1[39m,
+  skippedEvents: [33m0[39m,
+  hadCriticalFailure: [33mfalse[39m
+}
+
+[90mstdout[2m | src/app/api/facebook/webhook/route.test.ts[2m > [22m[2mPOST /api/facebook/webhook[2m > [22m[2mdoes not persist placeholder UNKNOWN name values from profile fetch[22m[39m
+[FB_WEBHOOK][ad5a14f8-932d-4a18-a885-7c35f6c31464] Webhook signature verification skipped (development mode)
+[FB_WEBHOOK][ad5a14f8-932d-4a18-a885-7c35f6c31464] Webhook payload parsed {
+  object: [32m'page'[39m,
+  entryCount: [33m1[39m,
+  bodyLength: [33m199[39m,
+  signatureProvided: [33mfalse[39m
+}
+[FB_WEBHOOK][ad5a14f8-932d-4a18-a885-7c35f6c31464] Webhook processing summary {
+  processedEntries: [33m1[39m,
+  processedEvents: [33m1[39m,
+  processedContacts: [33m1[39m,
+  skippedEvents: [33m0[39m,
+  hadCriticalFailure: [33mfalse[39m
+}
+
+[90mstdout[2m | src/app/api/facebook/webhook/route.test.ts[2m > [22m[2mPOST /api/facebook/webhook[2m > [22m[2mconstructs contact name from first_name and last_name when combined name is missing[22m[39m
+[FB_WEBHOOK][9650093a-f124-403c-8218-51ca2b18c348] Webhook signature verification skipped (development mode)
+[FB_WEBHOOK][9650093a-f124-403c-8218-51ca2b18c348] Webhook payload parsed {
+  object: [32m'page'[39m,
+  entryCount: [33m1[39m,
+  bodyLength: [33m199[39m,
+  signatureProvided: [33mfalse[39m
+}
+[FB_WEBHOOK][9650093a-f124-403c-8218-51ca2b18c348] Webhook processing summary {
+  processedEntries: [33m1[39m,
+  processedEvents: [33m1[39m,
+  processedContacts: [33m1[39m,
+  skippedEvents: [33m0[39m,
+  hadCriticalFailure: [33mfalse[39m
+}
+
+[90mstdout[2m | src/app/api/facebook/webhook/route.test.ts[2m > [22m[2mPOST /api/facebook/webhook[2m > [22m[2mretries contact upsert without first_interaction_at when schema is older[22m[39m
+[FB_WEBHOOK][49fa43ab-02df-439b-aeec-48f51f6b51f3] Webhook signature verification skipped (development mode)
+[FB_WEBHOOK][49fa43ab-02df-439b-aeec-48f51f6b51f3] Webhook payload parsed {
+  object: [32m'page'[39m,
+  entryCount: [33m1[39m,
+  bodyLength: [33m199[39m,
+  signatureProvided: [33mfalse[39m
+}
+[FB_WEBHOOK][49fa43ab-02df-439b-aeec-48f51f6b51f3] Webhook processing summary {
+  processedEntries: [33m1[39m,
+  processedEvents: [33m1[39m,
+  processedContacts: [33m1[39m,
+  skippedEvents: [33m0[39m,
+  hadCriticalFailure: [33mfalse[39m
+}
+
+[90mstdout[2m | src/app/api/facebook/webhook/route.test.ts[2m > [22m[2mPOST /api/facebook/webhook[2m > [22m[2mfalls back to insert for new contact when upsert fails unexpectedly[22m[39m
+[FB_WEBHOOK][6078e30b-2d06-4241-b23c-6af89c6bb9c2] Webhook signature verification skipped (development mode)
+[FB_WEBHOOK][6078e30b-2d06-4241-b23c-6af89c6bb9c2] Webhook payload parsed {
+  object: [32m'page'[39m,
+  entryCount: [33m1[39m,
+  bodyLength: [33m199[39m,
+  signatureProvided: [33mfalse[39m
+}
+[FB_WEBHOOK][6078e30b-2d06-4241-b23c-6af89c6bb9c2] Webhook processing summary {
+  processedEntries: [33m1[39m,
+  processedEvents: [33m1[39m,
+  processedContacts: [33m1[39m,
+  skippedEvents: [33m0[39m,
+  hadCriticalFailure: [33mfalse[39m
+}
+
+[90mstdout[2m | src/app/api/facebook/webhook/route.test.ts[2m > [22m[2mPOST /api/facebook/webhook[2m > [22m[2mingests inbound standby events so contacts appear without manual sync[22m[39m
+[FB_WEBHOOK][629882a8-69f7-4f9d-bb6b-ee6969884a73] Webhook signature verification skipped (development mode)
+[FB_WEBHOOK][629882a8-69f7-4f9d-bb6b-ee6969884a73] Webhook payload parsed {
+  object: [32m'page'[39m,
+  entryCount: [33m1[39m,
+  bodyLength: [33m201[39m,
+  signatureProvided: [33mfalse[39m
+}
+[FB_WEBHOOK][629882a8-69f7-4f9d-bb6b-ee6969884a73] Received standby events for contact ingestion { pageId: [32m'fb_page_1'[39m, standbyCount: [33m1[39m }
+[FB_WEBHOOK][629882a8-69f7-4f9d-bb6b-ee6969884a73] Webhook processing summary {
+  processedEntries: [33m1[39m,
+  processedEvents: [33m1[39m,
+  processedContacts: [33m1[39m,
+  skippedEvents: [33m0[39m,
+  hadCriticalFailure: [33mfalse[39m
+}
+
+[90mstdout[2m | src/app/api/facebook/webhook/route.test.ts[2m > [22m[2mPOST /api/facebook/webhook[2m > [22m[2msends welcome as RESPONSE with mapped buttons when welcome config has buttons[22m[39m
+[FB_WEBHOOK][0285f5b1-5a20-4df2-93df-f4849af94dbc] Webhook signature verification skipped (development mode)
+[FB_WEBHOOK][0285f5b1-5a20-4df2-93df-f4849af94dbc] Webhook payload parsed {
+  object: [32m'page'[39m,
+  entryCount: [33m1[39m,
+  bodyLength: [33m199[39m,
+  signatureProvided: [33mfalse[39m
+}
+[FB_WEBHOOK][0285f5b1-5a20-4df2-93df-f4849af94dbc] Welcome message sent to new contact {
+  pageId: [32m'fb_page_1'[39m,
+  senderId: [32m'contact_psid_1'[39m,
+  messagingType: [32m'RESPONSE'[39m,
+  buttonCount: [33m2[39m
+}
+[FB_WEBHOOK][0285f5b1-5a20-4df2-93df-f4849af94dbc] Webhook processing summary {
+  processedEntries: [33m1[39m,
+  processedEvents: [33m1[39m,
+  processedContacts: [33m1[39m,
+  skippedEvents: [33m0[39m,
+  hadCriticalFailure: [33mfalse[39m
+}
+
+[90mstdout[2m | src/app/api/facebook/webhook/route.test.ts[2m > [22m[2mPOST /api/facebook/webhook[2m > [22m[2msends text-only welcome as RESPONSE for a new contact[22m[39m
+[FB_WEBHOOK][e2b54660-738e-48aa-9a08-a651d2eb9a0f] Webhook signature verification skipped (development mode)
+[FB_WEBHOOK][e2b54660-738e-48aa-9a08-a651d2eb9a0f] Webhook payload parsed {
+  object: [32m'page'[39m,
+  entryCount: [33m1[39m,
+  bodyLength: [33m199[39m,
+  signatureProvided: [33mfalse[39m
+}
+[FB_WEBHOOK][e2b54660-738e-48aa-9a08-a651d2eb9a0f] Welcome message sent to new contact {
+  pageId: [32m'fb_page_1'[39m,
+  senderId: [32m'contact_psid_1'[39m,
+  messagingType: [32m'RESPONSE'[39m,
+  buttonCount: [33m0[39m
+}
+[FB_WEBHOOK][e2b54660-738e-48aa-9a08-a651d2eb9a0f] Webhook processing summary {
+  processedEntries: [33m1[39m,
+  processedEvents: [33m1[39m,
+  processedContacts: [33m1[39m,
+  skippedEvents: [33m0[39m,
+  hadCriticalFailure: [33mfalse[39m
+}
+
+ [32m???[39m src/app/api/facebook/webhook/route.test.ts [2m ([22m[2m9 tests[22m[2m)[22m[90m 68[2mms[22m[39m
+[90mstdout[2m | src/lib/__tests__/campaign-send.test.ts[2m > [22m[2msendCampaignById[2m > [22m[2mallows scheduled campaigns from cron and completes cleanly when no recipients are pending[22m[39m
+???? Fetching all recipients for campaign campaign_1...
+
+ [32m???[39m src/lib/__tests__/campaign-send.test.ts [2m ([22m[2m2 tests[22m[2m)[22m[90m 12[2mms[22m[39m
+ [32m???[39m src/lib/__tests__/contact-names.test.ts [2m ([22m[2m5 tests[22m[2m)[22m[90m 6[2mms[22m[39m
+ [32m???[39m src/lib/__tests__/campaign-errors.test.ts [2m ([22m[2m1 test[22m[2m)[22m[90m 4[2mms[22m[39m
+ [32m???[39m src/lib/__tests__/request-gate.test.ts [2m ([22m[2m2 tests[22m[2m)[22m[90m 3[2mms[22m[39m
+ [32m???[39m src/lib/__tests__/tag-filters.test.ts [2m ([22m[2m3 tests[22m[2m)[22m[90m 3[2mms[22m[39m
+ [32m???[39m src/lib/__tests__/chunking.test.ts [2m ([22m[2m2 tests[22m[2m)[22m[90m 3[2mms[22m[39m
+
+[2m Test Files [22m [1m[32m20 passed[39m[22m[90m (20)[39m
+[2m      Tests [22m [1m[32m94 passed[39m[22m[90m (94)[39m
+[2m   Start at [22m 07:53:49
+[2m   Duration [22m 2.79s[2m (transform 2.78s, setup 2ms, collect 5.25s, tests 343ms, environment 17ms, prepare 6.32s)[22m
+

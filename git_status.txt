@@ -1,0 +1,23 @@
+﻿ M src/app/api/campaigns/route.ts
+ M src/app/dashboard/campaigns/page.tsx
+ M src/lib/__tests__/campaign-send.test.ts
+ M src/lib/campaign-send.ts
+ M src/lib/facebook.ts
+ M src/types/index.ts
+?? debug-templates.mjs
+?? fix-templates.mjs
+?? git_log_output.txt
+?? src/app/api/facebook/templates/status/
+?? src/app/api/facebook/templates/submit-all/
+?? src/lib/facebook-templates.ts
+?? status_output.txt
+?? submit-new-templates.mjs
+?? submit-templates.mjs
+?? submit_new_results.txt
+?? submit_results.txt
+?? template_check.txt
+?? template_status_check.log
+?? test_out.log
+?? test_out2.log
+?? test_output.txt
+?? test_results.json

@@ -1,5 +1,6 @@
 import { generatePersonalizedMessage } from './ai';
-import { getConversationIdForPsid, getConversationMessages, sendMessage } from './facebook';
+import { getConversationIdForPsid, getConversationMessages, sendMessage, getPageTemplates, createUtilityTemplate, UTILITY_TEMPLATES } from './facebook';
+import { UTILITY_TEMPLATES as TEMPLATE_DEFS } from './facebook-templates';
 import { replaceTemplateVariables } from './placeholders';
 import { getSupabaseAdmin } from './supabase';
 
@@ -258,12 +259,31 @@ export async function sendCampaignById({
                         throw new Error('No message content available');
                     }
 
+                    const useTemplate = !!(campaign.template_name);
+                    const messagingType = useTemplate ? 'UTILITY' : 'HUMAN_AGENT';
+
+                    // Build body parameters for UTILITY template messages
+                    // Look up paramCount from template definitions to send correct number of params
+                    let bodyParameters: string[] | undefined;
+                    if (useTemplate) {
+                        const templateDef = TEMPLATE_DEFS.find(t => t.name === campaign.template_name);
+                        const paramCount = templateDef?.paramCount ?? 1;
+                        if (paramCount === 2) {
+                            bodyParameters = [messageToSend, 'Thank you for your attention.'];
+                        } else {
+                            bodyParameters = [messageToSend];
+                        }
+                    }
+
                     await sendMessage(
                         page.fb_page_id,
                         page.access_token,
                         contact.psid,
                         messageToSend,
-                        'HUMAN_AGENT'
+                        messagingType,
+                        useTemplate ? campaign.template_name : undefined,
+                        useTemplate ? (campaign.template_language || 'en_US') : undefined,
+                        bodyParameters
                     );
 
                     await supabase

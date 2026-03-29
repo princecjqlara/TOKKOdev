@@ -1,0 +1,18 @@
+
+Using page: Whisperwalk Interior Incorporated (FB ID: 754512431281378)
+
+Existing templates on page: 3
+---
+SUBMITTING: account_general_notification...
+  SUCCESS: id=26060416916941944, status=REJECTED
+SUBMITTING: account_security_alert...
+  SUCCESS: id=26185272967789838, status=REJECTED
+SUBMITTING: account_update_notification...
+  SUCCESS: id=26166117066394110, status=REJECTED
+
+--- Final Status Check ---
+??? account_update_notification ??? REJECTED
+??? account_security_alert ??? REJECTED
+??? account_general_notification ??? REJECTED
+
+Done.

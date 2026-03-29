@@ -1,0 +1,694 @@
+﻿
+==================================================
+Name: promo_notice_btn_2p_v1
+Status: REJECTED
+Category: UTILITY
+Language: "en_US"
+Rejected Reason: INVALID_FORMAT
+Components: [
+  {
+    "type": "BODY",
+    "text": "Notification for you: {{1}}. Details: {{2}}.",
+    "example": {
+      "body_text": [
+        [
+          "A special offer is now available on your account",
+          "Valid until April 30 2026 for all Premium members"
+        ]
+      ]
+    }
+  },
+  {
+    "type": "BUTTONS",
+    "buttons": [
+      {
+        "type": "URL",
+        "text": "Learn More",
+        "url": "https://example.com/offers"
+      }
+    ]
+  }
+]
+
+==================================================
+Name: service_update_btn_2p_v1
+Status: REJECTED
+Category: UTILITY
+Language: "en_US"
+Rejected Reason: INVALID_FORMAT
+Components: [
+  {
+    "type": "BODY",
+    "text": "Service update: {{1}}. Reference: {{2}}.",
+    "example": {
+      "body_text": [
+        [
+          "Your support ticket has been updated with a new response",
+          "Ticket number SUP-20260328-001"
+        ]
+      ]
+    }
+  },
+  {
+    "type": "BUTTONS",
+    "buttons": [
+      {
+        "type": "URL",
+        "text": "View Ticket",
+        "url": "https://example.com/support"
+      },
+      {
+        "type": "POSTBACK",
+        "text": "Mark Resolved",
+        "payload": "TICKET_RESOLVED"
+      }
+    ]
+  }
+]
+
+==================================================
+Name: booking_confirm_btn_v1
+Status: APPROVED
+Category: UTILITY
+Language: "en_US"
+Rejected Reason: NONE
+Components: [
+  {
+    "type": "BODY",
+    "text": "Booking confirmation: {{1}}. Use the buttons below to manage your booking.",
+    "example": {
+      "body_text": [
+        [
+          "Your design consultation has been scheduled for next Monday at 3 PM"
+        ]
+      ]
+    }
+  },
+  {
+    "type": "BUTTONS",
+    "buttons": [
+      {
+        "type": "POSTBACK",
+        "text": "Confirm",
+        "payload": "CONFIRM_BOOKING"
+      },
+      {
+        "type": "POSTBACK",
+        "text": "Reschedule",
+        "payload": "RESCHEDULE_BOOKING"
+      }
+    ]
+  }
+]
+
+==================================================
+Name: order_track_btn_v1
+Status: APPROVED
+Category: UTILITY
+Language: "en_US"
+Rejected Reason: NONE
+Components: [
+  {
+    "type": "BODY",
+    "text": "Your order has been updated. {{1}}. Track your order below.",
+    "example": {
+      "body_text": [
+        [
+          "Your package is currently in transit and will arrive within 2 business days"
+        ]
+      ]
+    }
+  },
+  {
+    "type": "BUTTONS",
+    "buttons": [
+      {
+        "type": "URL",
+        "text": "Track Order",
+        "url": "https://example.com/track"
+      }
+    ]
+  }
+]
+
+==================================================
+Name: acct_update_btn_v1
+Status: APPROVED
+Category: UTILITY
+Language: "en_US"
+Rejected Reason: NONE
+Components: [
+  {
+    "type": "BODY",
+    "text": "Account update: {{1}}. Tap below for more details.",
+    "example": {
+      "body_text": [
+        [
+          "Your membership renewal options are now available for the upcoming period"
+        ]
+      ]
+    }
+  },
+  {
+    "type": "BUTTONS",
+    "buttons": [
+      {
+        "type": "URL",
+        "text": "View Details",
+        "url": "https://example.com/account"
+      }
+    ]
+  }
+]
+
+==================================================
+Name: quick_notice_2p_v1
+Status: REJECTED
+Category: UTILITY
+Language: "en_US"
+Rejected Reason: INVALID_FORMAT
+Components: [
+  {
+    "type": "BODY",
+    "text": "{{1}}. {{2}}.",
+    "example": {
+      "body_text": [
+        [
+          "Your recent transaction has been processed successfully",
+          "A confirmation email has been sent to your registered address"
+        ]
+      ]
+    }
+  }
+]
+
+==================================================
+Name: quick_update_2p_v1
+Status: REJECTED
+Category: UTILITY
+Language: "en_US"
+Rejected Reason: INVALID_FORMAT
+Components: [
+  {
+    "type": "BODY",
+    "text": "{{1}} - {{2}}",
+    "example": {
+      "body_text": [
+        [
+          "Your appointment has been confirmed for April 3 at 2 PM",
+          "Please arrive 10 minutes early and bring your ID"
+        ]
+      ]
+    }
+  }
+]
+
+==================================================
+Name: acct_detail_2p_v2
+Status: APPROVED
+Category: UTILITY
+Language: "en_US"
+Rejected Reason: NONE
+Components: [
+  {
+    "type": "BODY",
+    "text": "Notification: {{1}}. Note: {{2}}. Reply for assistance.",
+    "example": {
+      "body_text": [
+        [
+          "Your subscription plan will change on your next billing date",
+          "You can cancel anytime before the renewal date"
+        ]
+      ]
+    }
+  }
+]
+
+==================================================
+Name: delivery_info_2p_v1
+Status: REJECTED
+Category: UTILITY
+Language: "en_US"
+Rejected Reason: INVALID_FORMAT
+Components: [
+  {
+    "type": "BODY",
+    "text": "Delivery update: {{1}}. Tracking info: {{2}}.",
+    "example": {
+      "body_text": [
+        [
+          "Your package has been dispatched from our warehouse",
+          "Tracking number PH9876543210 via LBC Express"
+        ]
+      ]
+    }
+  }
+]
+
+==================================================
+Name: acct_detail_2p_v1
+Status: REJECTED
+Category: UTILITY
+Language: "en_US"
+Rejected Reason: INVALID_FORMAT
+Components: [
+  {
+    "type": "BODY",
+    "text": "Important: {{1}}. Additional information: {{2}}.",
+    "example": {
+      "body_text": [
+        [
+          "Your account security settings have been updated",
+          "Two-factor authentication is now enabled"
+        ]
+      ]
+    }
+  }
+]
+
+==================================================
+Name: acct_greeting_2p_v2
+Status: REJECTED
+Category: UTILITY
+Language: "en_US"
+Rejected Reason: INCORRECT_CATEGORY
+Components: [
+  {
+    "type": "BODY",
+    "text": "Hi there! {{1}} - {{2}}. Thank you for your attention.",
+    "example": {
+      "body_text": [
+        [
+          "Your billing cycle has been updated",
+          "Next payment is due on April 15"
+        ]
+      ]
+    }
+  }
+]
+
+==================================================
+Name: acct_greeting_2p_v1
+Status: REJECTED
+Category: UTILITY
+Language: "en_US"
+Rejected Reason: INCORRECT_CATEGORY
+Components: [
+  {
+    "type": "BODY",
+    "text": "Hello! {{1}}. {{2}}. If you have questions, please reply to this message.",
+    "example": {
+      "body_text": [
+        [
+          "We wanted to let you know about an important change to your account settings",
+          "Your preferences have been saved successfully"
+        ]
+      ]
+    }
+  }
+]
+
+==================================================
+Name: order_update_2p_v1
+Status: APPROVED
+Category: UTILITY
+Language: "en_US"
+Rejected Reason: NONE
+Components: [
+  {
+    "type": "BODY",
+    "text": "Order update: {{1}}. Details: {{2}}. Contact us if you need help.",
+    "example": {
+      "body_text": [
+        [
+          "Your order is on its way",
+          "Estimated delivery is March 25 between 9 AM and 5 PM"
+        ]
+      ]
+    }
+  }
+]
+
+==================================================
+Name: service_notice_2p_v1
+Status: REJECTED
+Category: UTILITY
+Language: "en_US"
+Rejected Reason: INVALID_FORMAT
+Components: [
+  {
+    "type": "BODY",
+    "text": "Service notice: {{1}}. For reference: {{2}}.",
+    "example": {
+      "body_text": [
+        [
+          "Your service appointment has been rescheduled",
+          "New date is April 5 at 10 AM"
+        ]
+      ]
+    }
+  }
+]
+
+==================================================
+Name: acct_update_2p_v1
+Status: REJECTED
+Category: UTILITY
+Language: "en_US"
+Rejected Reason: INVALID_FORMAT
+Components: [
+  {
+    "type": "BODY",
+    "text": "Account update: {{1}}. {{2}}.",
+    "example": {
+      "body_text": [
+        [
+          "Your membership has been renewed for another year",
+          "Thank you for your continued support"
+        ]
+      ]
+    }
+  }
+]
+
+==================================================
+Name: general_msg_v3
+Status: APPROVED
+Category: UTILITY
+Language: "en_US"
+Rejected Reason: NONE
+Components: [
+  {
+    "type": "BODY",
+    "text": "Good day! Here is an update for you: {{1}}. Thank you for choosing our services.",
+    "example": {
+      "body_text": [
+        [
+          "New service packages are now available and you can view them in your account dashboard"
+        ]
+      ]
+    }
+  }
+]
+
+==================================================
+Name: general_msg_v2
+Status: REJECTED
+Category: UTILITY
+Language: "en_US"
+Rejected Reason: INCORRECT_CATEGORY
+Components: [
+  {
+    "type": "BODY",
+    "text": "Hi! {{1}}. If you have questions, feel free to reach out to us anytime.",
+    "example": {
+      "body_text": [
+        [
+          "We have updated our store hours and we are now open until 9 PM on weekdays"
+        ]
+      ]
+    }
+  }
+]
+
+==================================================
+Name: acct_followup_v1
+Status: APPROVED
+Category: UTILITY
+Language: "en_US"
+Rejected Reason: NONE
+Components: [
+  {
+    "type": "BODY",
+    "text": "Hello! We have an update for you. {{1}}. Thank you for being a valued customer.",
+    "example": {
+      "body_text": [
+        [
+          "Your request has been processed and the changes are now active on your account"
+        ]
+      ]
+    }
+  }
+]
+
+==================================================
+Name: general_notice_v1
+Status: APPROVED
+Category: UTILITY
+Language: "en_US"
+Rejected Reason: NONE
+Components: [
+  {
+    "type": "BODY",
+    "text": "Important notice: {{1}}. Please review this information at your earliest convenience.",
+    "example": {
+      "body_text": [
+        [
+          "Our terms of service have been updated effective April 1st 2026"
+        ]
+      ]
+    }
+  }
+]
+
+==================================================
+Name: general_msg_v1
+Status: APPROVED
+Category: UTILITY
+Language: "en_US"
+Rejected Reason: NONE
+Components: [
+  {
+    "type": "BODY",
+    "text": "Message from our team: {{1}}.",
+    "example": {
+      "body_text": [
+        [
+          "Your recent inquiry has been forwarded to the appropriate department for review"
+        ]
+      ]
+    }
+  }
+]
+
+==================================================
+Name: acct_reminder_v1
+Status: APPROVED
+Category: UTILITY
+Language: "en_US"
+Rejected Reason: NONE
+Components: [
+  {
+    "type": "BODY",
+    "text": "Friendly reminder from our team: {{1}}.",
+    "example": {
+      "body_text": [
+        [
+          "Your scheduled appointment is tomorrow at 2 PM and our team is ready to assist you"
+        ]
+      ]
+    }
+  }
+]
+
+==================================================
+Name: general_alert_v2
+Status: REJECTED
+Category: UTILITY
+Language: "en_US"
+Rejected Reason: INCORRECT_CATEGORY
+Components: [
+  {
+    "type": "BODY",
+    "text": "{{1}}. Thank you for being a valued customer. For assistance, reply to this message.",
+    "example": {
+      "body_text": [
+        [
+          "Your account preferences have been updated based on your recent request"
+        ]
+      ]
+    }
+  }
+]
+
+==================================================
+Name: general_alert_v1
+Status: APPROVED
+Category: UTILITY
+Language: "en_US"
+Rejected Reason: NONE
+Components: [
+  {
+    "type": "BODY",
+    "text": "{{1}}. This is an automated notification from our system. Reply STOP to opt out.",
+    "example": {
+      "body_text": [
+        [
+          "Your weekly account summary is ready and shows 3 new transactions this week"
+        ]
+      ]
+    }
+  }
+]
+
+==================================================
+Name: support_response_v1
+Status: APPROVED
+Category: UTILITY
+Language: "en_US"
+Rejected Reason: NONE
+Components: [
+  {
+    "type": "BODY",
+    "text": "Update on your support request: {{1}}. Reply to this message if you need further assistance.",
+    "example": {
+      "body_text": [
+        [
+          "Our technical team has resolved the issue you reported and your account should now be working normally"
+        ]
+      ]
+    }
+  }
+]
+
+==================================================
+Name: booking_update_v1
+Status: APPROVED
+Category: UTILITY
+Language: "en_US"
+Rejected Reason: NONE
+Components: [
+  {
+    "type": "BODY",
+    "text": "Booking update: {{1}}. If you need to make changes, please reply to this message or contact us.",
+    "example": {
+      "body_text": [
+        [
+          "Your consultation scheduled for March 20 has been confirmed with our design specialist"
+        ]
+      ]
+    }
+  }
+]
+
+==================================================
+Name: payment_notice_v1
+Status: APPROVED
+Category: UTILITY
+Language: "en_US"
+Rejected Reason: NONE
+Components: [
+  {
+    "type": "BODY",
+    "text": "Payment notification: {{1}}. View your complete billing history in your account.",
+    "example": {
+      "body_text": [
+        [
+          "Your payment of PHP 5000 has been received and a receipt has been sent to your email"
+        ]
+      ]
+    }
+  }
+]
+
+==================================================
+Name: order_notification_v1
+Status: APPROVED
+Category: UTILITY
+Language: "en_US"
+Rejected Reason: NONE
+Components: [
+  {
+    "type": "BODY",
+    "text": "Order notification: {{1}}. Track your order status in your account at any time.",
+    "example": {
+      "body_text": [
+        [
+          "Your package has been shipped via express delivery and the tracking number is PH1234567890"
+        ]
+      ]
+    }
+  }
+]
+
+==================================================
+Name: acct_info_notice_v1
+Status: APPROVED
+Category: UTILITY
+Language: "en_US"
+Rejected Reason: NONE
+Components: [
+  {
+    "type": "BODY",
+    "text": "Notice: {{1}}. This message was sent to keep you informed about your account activity.",
+    "example": {
+      "body_text": [
+        [
+          "A new device was used to access your account on March 15 2026"
+        ]
+      ]
+    }
+  }
+]
+
+==================================================
+Name: acct_service_update_v1
+Status: APPROVED
+Category: UTILITY
+Language: "en_US"
+Rejected Reason: NONE
+Components: [
+  {
+    "type": "BODY",
+    "text": "Important update regarding your account: {{1}}. If you have any questions, please reply to this message.",
+    "example": {
+      "body_text": [
+        [
+          "Your service plan has been upgraded to Premium effective immediately"
+        ]
+      ]
+    }
+  }
+]
+
+==================================================
+Name: whisperwalk_interior_incorporated_support_1771528952726
+Status: APPROVED
+Category: UTILITY
+Language: "en_US"
+Rejected Reason: NONE
+Components: [
+  {
+    "type": "BODY",
+    "text": "{{1}} ΓÇö Message from Whisperwalk Interior Incorporated support team. {{2}}",
+    "example": {
+      "body_text": [
+        [
+          "Your order has shipped",
+          "Thank you for your purchase"
+        ]
+      ]
+    }
+  }
+]
+
+==================================================
+Name: whisperwalk_interior_incorporated_support_1771527882235
+Status: APPROVED
+Category: UTILITY
+Language: "en_US"
+Rejected Reason: NONE
+Components: [
+  {
+    "type": "BODY",
+    "text": "{{1}} ΓÇö Message from Whisperwalk Interior Incorporated support team. {{2}}",
+    "example": {
+      "body_text": [
+        [
+          "Your order has shipped",
+          "Thank you for your purchase"
+        ]
+      ]
+    }
+  }
+]

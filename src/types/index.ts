@@ -100,6 +100,8 @@ export interface Campaign {
   ai_prompt?: string | null;
   loop_status?: 'active' | 'paused' | 'stopped';
   use_ai_message?: boolean;
+  template_name?: string | null;
+  template_language?: string | null;
 }
 
 export interface CampaignRecipient {

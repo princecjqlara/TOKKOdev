@@ -98,7 +98,7 @@ describe('sendCampaignById', () => {
         });
 
         expect(result.status).toBe(400);
-        expect(result.body.message).toBe('Campaign has already been sent or is in progress');
+        expect(result.body.message).toBe('Campaign has already been completed or cancelled');
     });
 
     it('allows scheduled campaigns from cron and completes cleanly when no recipients are pending', async () => {

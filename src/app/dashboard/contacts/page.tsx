@@ -173,6 +173,7 @@ export default function ContactsPage() {
     const [messagePart2, setMessagePart2] = useState('');
     const [messageButtons, setMessageButtons] = useState<MessageButton[]>([]);
     const [usePart2AsButtonValue, setUsePart2AsButtonValue] = useState(false);
+    const [envelopeWrapper, setEnvelopeWrapper] = useState<string>('msg');
     const [actionLoading, setActionLoading] = useState(false);
 
     const messageText = `${messagePart1}|||${messagePart2}`;
@@ -739,9 +740,10 @@ export default function ContactsPage() {
                             messageText: messageText.trim(),
                             messagePart1,
                             messagePart2,
-                            buttons: normalizedMessageButtons,
+                            buttons: envelopeWrapper.startsWith('btn_') ? [] : normalizedMessageButtons,
                             buttonMode: usePart2AsButtonValue ? 'RESPONSE_DYNAMIC' : 'TEMPLATE_STATIC',
-                            buttonPlaceholderMode: false
+                            buttonPlaceholderMode: false,
+                            envelopeWrapper
                         })
                     });
 
@@ -1848,6 +1850,30 @@ export default function ContactsPage() {
                             Sending to <span className="font-bold text-black">{getSelectionCount()}</span> recipients.
                         </p>
                     )}
+
+                    <div className="p-4 border border-gray-200 bg-gray-50 rounded-md">
+                        <label className="text-xs font-bold uppercase mb-2 block text-gray-700">Message Style (Envelope)</label>
+                        <select 
+                            className="input-wireframe mb-2"
+                            value={envelopeWrapper}
+                            onChange={(e) => setEnvelopeWrapper(e.target.value)}
+                        >
+                            <option value="msg">Standard Message (&quot;Message from our team: [Your Text]&quot;)</option>
+                            <option value="notice">System Notice (&quot;Important notice: [Your Text]&quot;)</option>
+                            <option value="alert">System Alert (&quot;[Your Text]. This is an automated notification.&quot;)</option>
+                            <option disabled>────── With Action Buttons ──────</option>
+                            <option value="btn_join">Join Meeting + [Join Meeting Button]</option>
+                            <option value="btn_details">Update Request + [View Details Button]</option>
+                            <option value="btn_book">New Notification + [Book Now Button]</option>
+                            <option disabled>─────────────────────────────────</option>
+                            <option value="none">No Wrapper (Strict 24h limit applies!)</option>
+                        </select>
+                        <p className="text-xs text-gray-500 font-mono">
+                            {envelopeWrapper === 'none' 
+                                ? 'Warning: Unwrapped messages will ONLY reach contacts who interacted with you in the last 24 hours.' 
+                                : 'This wrapper bypasses the 24-hour limit, allowing you to blast all contacts anytime.'}
+                        </p>
+                    </div>
                     {failedContactErrors.length > 0 && (
                         <div className="bg-red-50 border-2 border-red-300 p-3 rounded">
                             <p className="font-mono text-xs text-red-800 mb-2">
@@ -1914,8 +1940,16 @@ export default function ContactsPage() {
                     </div>
                     {/* Button Card Section */}
                     <div className="border border-gray-300 p-3 rounded">
-                        <div className="flex items-center justify-between">
-                            <label className="font-mono text-xs font-bold uppercase text-gray-500 flex items-center gap-1.5">
+                        {envelopeWrapper.startsWith('btn_') ? (
+                            <div className="bg-blue-50 text-blue-800 p-3 border border-blue-200">
+                                <p className="text-xs font-mono">
+                                    <b>Note:</b> You selected a pre-approved Button Wrapper. Custom inline link buttons are disabled because Facebook requires hardcoded action buttons outside the 24-hour messaging window.
+                                </p>
+                            </div>
+                        ) : (
+                            <>
+                                <div className="flex items-center justify-between">
+                                    <label className="font-mono text-xs font-bold uppercase text-gray-500 flex items-center gap-1.5">
                                 <Link2 className="w-3.5 h-3.5" />
                                 Buttons
                             </label>
@@ -2073,6 +2107,8 @@ export default function ContactsPage() {
                         </div>
                         {firstMessageButtonError && (
                             <p className="mt-2 text-xs font-mono text-red-700">Fix button errors before sending.</p>
+                        )}
+                            </>
                         )}
                     </div>
                     <div className="bg-gray-50 border border-gray-200 p-3 rounded text-xs">

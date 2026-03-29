@@ -1,5 +1,8 @@
 import { FacebookPage, FacebookConversation } from '@/types';
 
+// Re-export templates from dedicated file
+export { UTILITY_TEMPLATES } from './facebook-templates';
+
 const FACEBOOK_GRAPH_URL = 'https://graph.facebook.com/v21.0';
 
 // Get user's Facebook pages (including business pages)
@@ -245,25 +248,20 @@ export async function sendMessage(
             language: { code: templateLanguage }
         };
 
-        if (Array.isArray(templateBodyParameters)) {
-            if (templateBodyParameters.length > 0) {
-                const components: Record<string, unknown>[] = [
-                    {
-                        type: 'body',
-                        parameters: templateBodyParameters.map((text) => ({
-                            type: 'text',
-                            text
-                        }))
-                    }
-                ];
-
-                // Note: buttons with static URLs are defined in the template itself
-                // and don't need runtime parameters in the send call.
-
-                templatePayload.components = components;
-            }
-        } else {
-            const components: Record<string, unknown>[] = [
+        if (Array.isArray(templateBodyParameters) && templateBodyParameters.length > 0) {
+            // Use explicitly provided body parameters (string array)
+            templatePayload.components = [
+                {
+                    type: 'body',
+                    parameters: templateBodyParameters.map((text) => ({
+                        type: 'text',
+                        text
+                    }))
+                }
+            ];
+        } else if (!Array.isArray(templateBodyParameters)) {
+            // Fallback: use messageText as single parameter (only when no explicit params provided)
+            templatePayload.components = [
                 {
                     type: 'body',
                     parameters: [
@@ -271,10 +269,9 @@ export async function sendMessage(
                     ]
                 }
             ];
-
-
-            templatePayload.components = components;
         }
+        // When templateBodyParameters is an empty array, omit components entirely
+        // (template has no variable parameters)
 
         bodyPayload = {
             recipient: { id: recipientPsid },
@@ -574,149 +571,18 @@ export async function getPageTemplates(
     return allTemplates;
 }
 
-// Pre-defined utility templates for account notifications
-export const UTILITY_TEMPLATES: Omit<UtilityTemplate, 'language'>[] = [
-    {
-        name: 'account_security_alert',
-        category: 'UTILITY',
-        components: [
-            {
-                type: 'BODY',
-                text: '{{1}}',
-                example: {
-                    body_text: [['We detected a new login to your account. If this was not you, please secure your account immediately.']]
-                }
-            }
-        ]
-    },
-    {
-        name: 'account_update_notification',
-        category: 'UTILITY',
-        components: [
-            {
-                type: 'BODY',
-                text: '{{1}}',
-                example: {
-                    body_text: [['Your account settings have been changed successfully.']]
-                }
-            }
-        ]
-    },
-    {
-        name: 'account_general_notification',
-        category: 'UTILITY',
-        components: [
-            {
-                type: 'BODY',
-                text: '{{1}}',
-                example: {
-                    body_text: [['Your account information has been updated.']]
-                }
-            }
-        ]
-    },
-    {
-        name: 'account_verification_alert',
-        category: 'UTILITY',
-        components: [
-            {
-                type: 'BODY',
-                text: '{{1}}',
-                example: {
-                    body_text: [['Please verify your email address to complete your account setup.']]
-                }
-            }
-        ]
-    },
-    {
-        name: 'account_billing_notice',
-        category: 'UTILITY',
-        components: [
-            {
-                type: 'BODY',
-                text: '{{1}}',
-                example: {
-                    body_text: [['Your billing statement is ready. Please review the details in your account.']]
-                }
-            }
-        ]
-    },
-    {
-        name: 'account_payment_confirmation',
-        category: 'UTILITY',
-        components: [
-            {
-                type: 'BODY',
-                text: '{{1}}',
-                example: {
-                    body_text: [['Your payment was received successfully. Thank you.']]
-                }
-            }
-        ]
-    },
-    {
-        name: 'account_subscription_reminder',
-        category: 'UTILITY',
-        components: [
-            {
-                type: 'BODY',
-                text: '{{1}}',
-                example: {
-                    body_text: [['Your subscription renews soon. Please verify your payment method.']]
-                }
-            }
-        ]
-    },
-    {
-        name: 'account_service_announcement',
-        category: 'UTILITY',
-        components: [
-            {
-                type: 'BODY',
-                text: '{{1}}',
-                example: {
-                    body_text: [['We have an important service update related to your account.']]
-                }
-            }
-        ]
-    },
-    {
-        name: 'account_action_required_notice',
-        category: 'UTILITY',
-        components: [
-            {
-                type: 'BODY',
-                text: '{{1}}',
-                example: {
-                    body_text: [['Action is required to keep your account settings up to date.']]
-                }
-            }
-        ]
-    },
-    {
-        name: 'account_policy_update_notice',
-        category: 'UTILITY',
-        components: [
-            {
-                type: 'BODY',
-                text: '{{1}}',
-                example: {
-                    body_text: [['We updated account terms and policies. Please review the latest information.']]
-                }
-            }
-        ]
-    }
-];
-
-// Send utility message using template
+// Send utility message using template (supports multiple body parameters for {{1}}/{{2}} format)
 export async function sendUtilityMessage(
     pageId: string,
     pageAccessToken: string,
     recipientPsid: string,
     templateName: string,
     languageCode: string,
-    bodyText: string
+    bodyTexts: string | string[]
 ): Promise<{ message_id: string; recipient_id: string }> {
+    const textsArray = Array.isArray(bodyTexts) ? bodyTexts : [bodyTexts];
+    const parameters = textsArray.map((text) => ({ type: 'text' as const, text }));
+
     const response = await fetch(
         `${FACEBOOK_GRAPH_URL}/${pageId}/messages?access_token=${pageAccessToken}`,
         {
@@ -734,12 +600,7 @@ export async function sendUtilityMessage(
                         components: [
                             {
                                 type: 'body',
-                                parameters: [
-                                    {
-                                        type: 'text',
-                                        text: bodyText
-                                    }
-                                ]
+                                parameters
                             }
                         ]
                     }

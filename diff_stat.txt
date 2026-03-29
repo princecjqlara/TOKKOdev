@@ -1,0 +1,7 @@
+﻿ src/app/api/campaigns/route.ts          |  10 +-
+ src/app/dashboard/campaigns/page.tsx    | 316 ++++++++++++++++++++++++++++++--
+ src/lib/__tests__/campaign-send.test.ts |   2 +-
+ src/lib/campaign-send.ts                |  24 ++-
+ src/lib/facebook.ts                     | 189 +++----------------
+ src/types/index.ts                      |   2 +
+ 6 files changed, 360 insertions(+), 183 deletions(-)
