@@ -189,10 +189,15 @@ export default function ConnectPage() {
                                         <td className="text-right">
                                             {isConnected ? (
                                                 <button
-                                                    disabled
-                                                    className="btn-ghost-wireframe text-xs opacity-50 cursor-not-allowed font-bold"
+                                                    onClick={() => handleConnect(page)}
+                                                    disabled={isConnecting}
+                                                    className="btn-wireframe text-xs py-1.5 h-8 bg-white text-black hover:bg-gray-100"
                                                 >
-                                                    Installed
+                                                    {isConnecting ? (
+                                                        <span className="animate-pulse">Reconnecting...</span>
+                                                    ) : (
+                                                        'Reconnect'
+                                                    )}
                                                 </button>
                                             ) : (
                                                 <button
