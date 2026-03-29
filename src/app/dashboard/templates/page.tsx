@@ -90,8 +90,17 @@ export default function TemplatesPage() {
             });
             const data = await res.json();
             if (data.success) {
-                alert(`Templates submitted!\n\n✅ Approved: ${data.summary.approved}\n⏳ Pending: ${data.summary.pending}\n❌ Errors: ${data.summary.errors}\n📋 Already existed: ${data.summary.alreadyExisted}`);
-                // Refresh
+                let msg = `Templates submitted!\n\n✅ Approved: ${data.summary.approved}\n⏳ Pending: ${data.summary.pending}\n❌ Errors: ${data.summary.errors}\n📋 Already existed: ${data.summary.alreadyExisted}`;
+
+                // Show first error reason if there are errors
+                if (data.summary.errors > 0 && Array.isArray(data.results)) {
+                    const firstError = data.results.find((r: any) => r.action === 'error');
+                    if (firstError?.error) {
+                        msg += `\n\n⚠️ Error reason: ${firstError.error}`;
+                    }
+                }
+
+                alert(msg);
                 await fetchTemplates();
             } else {
                 alert(`Failed: ${data.message || 'Unknown error'}`);
