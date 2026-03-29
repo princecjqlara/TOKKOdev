@@ -162,8 +162,13 @@ async function autoSubmitTemplates(fbPageId: string, accessToken: string, pageNa
             await createUtilityTemplate(fbPageId, accessToken, fullTemplate);
             submitted++;
         } catch (err) {
-            failed++;
-            console.warn(`[AUTO_SUBMIT] Template "${template.name}" failed for "${pageName}":`, (err as Error).message);
+            const msg = (err as Error).message || '';
+            if (msg.includes('2018423') || msg.includes('already exists')) {
+                skipped++;
+            } else {
+                failed++;
+                console.warn(`[AUTO_SUBMIT] Template "${template.name}" failed for "${pageName}":`, msg);
+            }
         }
     }
 

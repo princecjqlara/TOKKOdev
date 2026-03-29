@@ -139,18 +139,29 @@ export async function POST(request: NextRequest) {
                 );
             } catch (err) {
                 const errorMessage = (err as Error).message || 'Unknown error';
-                results.push({
-                    name: template.name,
-                    status: 'ERROR',
-                    action: 'error',
-                    error: errorMessage,
-                    hasButtons
-                });
 
-                console.error(
-                    `[SUBMIT_ALL] Failed to submit template '${template.name}':`,
-                    errorMessage
-                );
+                // Treat "already exists" as a skip, not an error (race condition safe)
+                if (errorMessage.includes('2018423') || errorMessage.includes('already exists')) {
+                    results.push({
+                        name: template.name,
+                        status: 'ALREADY_EXISTS',
+                        action: 'already_exists',
+                        hasButtons
+                    });
+                } else {
+                    results.push({
+                        name: template.name,
+                        status: 'ERROR',
+                        action: 'error',
+                        error: errorMessage,
+                        hasButtons
+                    });
+
+                    console.error(
+                        `[SUBMIT_ALL] Failed to submit template '${template.name}':`,
+                        errorMessage
+                    );
+                }
             }
         }
 
