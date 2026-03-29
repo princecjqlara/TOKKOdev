@@ -270,7 +270,8 @@ async function main() {
     // Get all pages
     const { data: pages } = await supabase
         .from('pages')
-        .select('id, name, fb_page_id, access_token');
+        .select('id, name, fb_page_id, access_token')
+        .ilike('name', '%JP Luxe Estate%');
 
     if (!pages?.length) {
         console.log('No pages found');

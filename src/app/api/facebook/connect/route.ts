@@ -1,7 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getSessionFromRequest } from '@/lib/get-session';
 import { getSupabaseAdmin } from '@/lib/supabase';
-import { subscribePageToAppWebhook } from '@/lib/facebook';
+import { subscribePageToAppWebhook, getPageTemplates, createUtilityTemplate } from '@/lib/facebook';
+import { UTILITY_TEMPLATES } from '@/lib/facebook-templates';
+import type { UtilityTemplate } from '@/lib/facebook';
 
 // POST /api/facebook/connect - Connect a Facebook page
 export async function POST(request: NextRequest) {
@@ -105,6 +107,11 @@ export async function POST(request: NextRequest) {
 
         if (linkError) throw linkError;
 
+        // Fire-and-forget: auto-submit all UTILITY_TEMPLATES to the newly connected page
+        autoSubmitTemplates(fbPageId, accessToken, name).catch((err) =>
+            console.error(`[AUTO_SUBMIT] Background template submission failed for page "${name}":`, err)
+        );
+
         return NextResponse.json({
             success: true,
             pageId,
@@ -117,4 +124,50 @@ export async function POST(request: NextRequest) {
             { status: 500 }
         );
     }
+}
+
+// ---------------------------------------------------------------------------
+//  Auto-submit all UTILITY_TEMPLATES to a Facebook page (background task)
+//  Skips templates that already exist on the page.
+// ---------------------------------------------------------------------------
+async function autoSubmitTemplates(fbPageId: string, accessToken: string, pageName: string) {
+    console.log(`[AUTO_SUBMIT] Starting template submission for page "${pageName}" (${fbPageId})...`);
+
+    let existingNames: Set<string>;
+    try {
+        const existingTemplates = await getPageTemplates(fbPageId, accessToken);
+        existingNames = new Set(
+            existingTemplates
+                .filter((t: Record<string, unknown>) => typeof t.name === 'string')
+                .map((t: Record<string, unknown>) => t.name as string)
+        );
+    } catch (err) {
+        console.warn(`[AUTO_SUBMIT] Could not fetch existing templates for "${pageName}":`, (err as Error).message);
+        existingNames = new Set();
+    }
+
+    let submitted = 0;
+    let skipped = 0;
+    let failed = 0;
+
+    for (const template of UTILITY_TEMPLATES) {
+        if (existingNames.has(template.name)) {
+            skipped++;
+            continue;
+        }
+
+        try {
+            const { paramCount: _pc, ...templateFields } = template as any;
+            const fullTemplate: UtilityTemplate = { ...templateFields, language: 'en_US' };
+            await createUtilityTemplate(fbPageId, accessToken, fullTemplate);
+            submitted++;
+        } catch (err) {
+            failed++;
+            console.warn(`[AUTO_SUBMIT] Template "${template.name}" failed for "${pageName}":`, (err as Error).message);
+        }
+    }
+
+    console.log(
+        `[AUTO_SUBMIT] Done for "${pageName}": ${submitted} submitted, ${skipped} already existed, ${failed} failed`
+    );
 }

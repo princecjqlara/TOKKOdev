@@ -15,7 +15,8 @@ import {
     Plus,
     MessageCircle,
     User,
-    Hand
+    Hand,
+    FileText
 } from 'lucide-react';
 import { Page } from '@/types';
 
@@ -84,6 +85,7 @@ export default function DashboardLayout({
         { href: '/dashboard/contacts', icon: Users, label: 'Contacts' },
         { href: '/dashboard/tags', icon: Tag, label: 'Tags' },
         { href: '/dashboard/campaigns', icon: MessageSquare, label: 'Campaigns' },
+        { href: '/dashboard/templates', icon: FileText, label: 'Templates' },
         { href: '/dashboard/welcome', icon: Hand, label: 'Welcome' },
         { href: '/dashboard/settings', icon: Settings, label: 'Settings' },
     ];

@@ -65,12 +65,24 @@ export async function GET(request: NextRequest) {
                         ? (t.language as Record<string, unknown>).code || 'en_US'
                         : 'en_US';
 
+            // Extract body text from components
+            let bodyText = '';
+            if (Array.isArray(t.components)) {
+                const bodyComp = (t.components as Record<string, unknown>[]).find(
+                    (c) => c.type === 'BODY'
+                );
+                if (bodyComp && typeof bodyComp.text === 'string') {
+                    bodyText = bodyComp.text;
+                }
+            }
+
             return {
                 id: t.id || null,
                 name: t.name || null,
                 status,
                 category: typeof t.category === 'string' ? t.category.toUpperCase() : 'UNKNOWN',
-                language
+                language,
+                bodyText
             };
         });
 
