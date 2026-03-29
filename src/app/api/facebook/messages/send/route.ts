@@ -362,17 +362,29 @@ export async function POST(request: NextRequest) {
             
         // Map envelopeWrapper to target template name
         let targetEnvelopeTemplateName: string | undefined = undefined;
-        if (rawEnvelopeWrapper && rawEnvelopeWrapper !== 'none') {
+        if (rawEnvelopeWrapper && rawEnvelopeWrapper !== 'none' && rawEnvelopeWrapper !== 'template') {
             switch(rawEnvelopeWrapper) {
                 case 'notice': targetEnvelopeTemplateName = 'general_notice_v1'; break;
                 case 'alert': targetEnvelopeTemplateName = 'general_alert_v1'; break;
                 case 'btn_join': targetEnvelopeTemplateName = 'instant_meeting_btn_v1'; break;
                 case 'btn_details': targetEnvelopeTemplateName = 'instant_meeting_btn_v2'; break;
                 case 'btn_book': targetEnvelopeTemplateName = 'instant_meeting_btn_v3'; break;
+                case 'friendly_1': targetEnvelopeTemplateName = 'friendly_msg_v1'; break;
+                case 'friendly_2': targetEnvelopeTemplateName = 'friendly_msg_v2'; break;
+                case 'friendly_3': targetEnvelopeTemplateName = 'friendly_msg_v3'; break;
+                case 'friendly_4': targetEnvelopeTemplateName = 'friendly_msg_v4'; break;
+                case 'friendly_5': targetEnvelopeTemplateName = 'friendly_msg_v5'; break;
+                case 'friendly_6': targetEnvelopeTemplateName = 'friendly_msg_v6'; break;
+                case 'casual_1': targetEnvelopeTemplateName = 'casual_update_v1'; break;
+                case 'casual_2': targetEnvelopeTemplateName = 'casual_update_v3'; break;
+                case 'casual_3': targetEnvelopeTemplateName = 'casual_update_v4'; break;
+                case 'simple_1': targetEnvelopeTemplateName = 'simple_msg_v4'; break;
                 case 'msg': targetEnvelopeTemplateName = 'general_msg_v1'; break;
                 default: targetEnvelopeTemplateName = 'general_msg_v1'; break;
             }
         }
+        // When envelopeWrapper is 'template', force UTILITY messaging type to use auto-selected template
+        const forceUtilityMode = rawEnvelopeWrapper === 'template';
 
         const messagingType = targetEnvelopeTemplateName ? 'UTILITY' : getMessagingType(buttonMode, requestedButtons.length);
         const allowDualTemplateBodyModes =

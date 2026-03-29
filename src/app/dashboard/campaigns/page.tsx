@@ -7,6 +7,45 @@ import { Plus, Send, Trash2, Users, Clock, CheckCircle, XCircle, MessageSquare, 
 import Pagination from '@/components/Pagination';
 import Modal from '@/components/Modal';
 import { Campaign, Page, Contact, PaginatedResponse } from '@/types';
+import { UTILITY_TEMPLATES } from '@/lib/facebook-templates';
+
+// Map freeform wrapper values to template names
+const CAMPAIGN_ENVELOPE_MAP: Record<string, string> = {
+    // Legacy Templates
+    msg: 'general_msg_v1',
+    notice: 'general_notice_v1',
+    alert: 'general_alert_v1',
+    btn_join: 'instant_meeting_btn_v1',
+    btn_details: 'instant_meeting_btn_v2',
+    btn_book: 'instant_meeting_btn_v3',
+    // New Natural Templates
+    friendly_1: 'friendly_msg_v1',
+    friendly_2: 'friendly_msg_v2',
+    friendly_3: 'friendly_msg_v3',
+    friendly_4: 'friendly_msg_v4',
+    friendly_5: 'friendly_msg_v5',
+    friendly_6: 'friendly_msg_v6',
+    casual_1: 'casual_update_v1',
+    casual_2: 'casual_update_v3',
+    casual_3: 'casual_update_v4',
+    simple_1: 'simple_msg_v4',
+};
+
+function getCampaignTemplateBodyText(key: string): string | null {
+    const templateName = CAMPAIGN_ENVELOPE_MAP[key];
+    if (!templateName) return null;
+    const tmpl = UTILITY_TEMPLATES.find(t => t.name === templateName);
+    if (!tmpl) return null;
+    const bodyComponent = tmpl.components.find(c => c.type === 'BODY');
+    return bodyComponent && 'text' in bodyComponent ? (bodyComponent.text ?? null) : null;
+}
+
+function getTemplateBodyByName(name: string): string | null {
+    const tmpl = UTILITY_TEMPLATES.find(t => t.name === name);
+    if (!tmpl) return null;
+    const bodyComponent = tmpl.components.find(c => c.type === 'BODY');
+    return bodyComponent && 'text' in bodyComponent ? (bodyComponent.text ?? null) : null;
+}
 
 type CampaignRecipientError = {
     id: string;
@@ -362,16 +401,7 @@ export default function CampaignsPage() {
                 } else if (messageMode === 'freeform') {
                     if (freeformWrapper !== 'none') {
                         // Map the wrapper choice to the exact template name
-                        let targetTemplate = 'general_msg_v1';
-                        
-                        switch(freeformWrapper) {
-                            case 'notice': targetTemplate = 'general_notice_v1'; break;
-                            case 'alert': targetTemplate = 'general_alert_v1'; break;
-                            case 'btn_join': targetTemplate = 'instant_meeting_btn_v1'; break;
-                            case 'btn_details': targetTemplate = 'instant_meeting_btn_v2'; break;
-                            case 'btn_book': targetTemplate = 'instant_meeting_btn_v3'; break;
-                            case 'msg': targetTemplate = 'general_msg_v1'; break;
-                        }
+                        let targetTemplate = CAMPAIGN_ENVELOPE_MAP[freeformWrapper] || 'general_msg_v1';
 
                         const fallbackTemplate = availableTemplates.find(
                             t => (t.status === 'APPROVED' || t.status === 'ACTIVE') &&
@@ -962,6 +992,18 @@ export default function CampaignsPage() {
                                                 value={freeformWrapper}
                                                 onChange={(e) => setFreeformWrapper(e.target.value)}
                                             >
+                                                <option disabled>────── Natural Conversations ──────</option>
+                                                <option value="friendly_1">Friendly (Just wanted to let you know)</option>
+                                                <option value="friendly_2">Friendly (Hi there)</option>
+                                                <option value="friendly_3">Friendly (Quick heads up)</option>
+                                                <option value="friendly_4">Friendly (Quick update)</option>
+                                                <option value="friendly_5">Friendly (Keeping you in the loop)</option>
+                                                <option value="friendly_6">Friendly (Thought you should know)</option>
+                                                <option value="casual_1">Casual (Good news)</option>
+                                                <option value="casual_2">Casual (Just checking in)</option>
+                                                <option value="casual_3">Casual (Quick reminder)</option>
+                                                <option value="simple_1">Simple (Just a note)</option>
+                                                <option disabled>────── Legacy Wrappers ──────</option>
                                                 <option value="msg">Standard Message (&quot;Message from our team: [Your Text]&quot;)</option>
                                                 <option value="notice">System Notice (&quot;Important notice: [Your Text]&quot;)</option>
                                                 <option value="alert">System Alert (&quot;[Your Text]. This is an automated notification.&quot;)</option>
@@ -977,6 +1019,23 @@ export default function CampaignsPage() {
                                                     ? 'Warning: Unwrapped messages will ONLY reach contacts who interacted with you in the last 24 hours.' 
                                                     : 'This wrapper bypasses the 24-hour limit, allowing you to blast all contacts anytime.'}
                                             </p>
+                                            {/* Show original template body when a wrapper is selected */}
+                                            {freeformWrapper !== 'none' && getCampaignTemplateBodyText(freeformWrapper) && (
+                                                <div className="mt-3 p-3 bg-white border border-dashed border-gray-400 rounded">
+                                                    <p className="text-[10px] font-bold uppercase text-gray-500 mb-1.5">Original Template</p>
+                                                    <p className="text-xs font-mono text-gray-700 leading-relaxed">
+                                                        {getCampaignTemplateBodyText(freeformWrapper)!.split(/\{\{(\d+)\}\}/).map((part, idx) =>
+                                                            idx % 2 === 0 ? (
+                                                                <span key={idx}>{part}</span>
+                                                            ) : (
+                                                                <span key={idx} className="inline-block bg-blue-100 text-blue-700 border border-blue-300 px-1.5 py-0.5 mx-0.5 rounded font-bold text-[11px]">
+                                                                    {'{{' + part + '}}'}
+                                                                </span>
+                                                            )
+                                                        )}
+                                                    </p>
+                                                </div>
+                                            )}
                                         </div>
                                     )}
 
@@ -1020,17 +1079,36 @@ export default function CampaignsPage() {
                                                     </select>
 
                                                     {selectedTemplateName && (
-                                                        <div className="flex items-center gap-2 text-xs font-mono">
-                                                            <span className="bg-green-100 text-green-800 border border-green-400 px-2 py-0.5 font-bold uppercase">
-                                                                APPROVED
-                                                            </span>
-                                                            <span className="text-gray-600">
-                                                                {selectedTemplateName.replace(/_/g, ' ')}
-                                                            </span>
-                                                            <span className="text-gray-400">|</span>
-                                                            <span className="text-gray-500">
-                                                                Lang: {selectedTemplateLanguage}
-                                                            </span>
+                                                        <div className="space-y-2">
+                                                            <div className="flex items-center gap-2 text-xs font-mono">
+                                                                <span className="bg-green-100 text-green-800 border border-green-400 px-2 py-0.5 font-bold uppercase">
+                                                                    APPROVED
+                                                                </span>
+                                                                <span className="text-gray-600">
+                                                                    {selectedTemplateName.replace(/_/g, ' ')}
+                                                                </span>
+                                                                <span className="text-gray-400">|</span>
+                                                                <span className="text-gray-500">
+                                                                    Lang: {selectedTemplateLanguage}
+                                                                </span>
+                                                            </div>
+                                                            {/* Show original template body */}
+                                                            {getTemplateBodyByName(selectedTemplateName) && (
+                                                                <div className="p-3 bg-gray-50 border border-dashed border-gray-400 rounded">
+                                                                    <p className="text-[10px] font-bold uppercase text-gray-500 mb-1.5">Original Template</p>
+                                                                    <p className="text-xs font-mono text-gray-700 leading-relaxed">
+                                                                        {getTemplateBodyByName(selectedTemplateName)!.split(/\{\{(\d+)\}\}/).map((part, idx) =>
+                                                                            idx % 2 === 0 ? (
+                                                                                <span key={idx}>{part}</span>
+                                                                            ) : (
+                                                                                <span key={idx} className="inline-block bg-blue-100 text-blue-700 border border-blue-300 px-1.5 py-0.5 mx-0.5 rounded font-bold text-[11px]">
+                                                                                    {'{{' + part + '}}'}
+                                                                                </span>
+                                                                            )
+                                                                        )}
+                                                                    </p>
+                                                                </div>
+                                                            )}
                                                         </div>
                                                     )}
                                                 </>
@@ -1056,7 +1134,7 @@ export default function CampaignsPage() {
                                         />
                                         {messageMode === 'template' && (
                                             <p className="text-xs text-gray-400 font-mono mt-2">
-                                                This text fills the {'{{1}}'} placeholder in the selected template body. Buttons defined in the template will be shown automatically.
+                                                Your text will replace the <span className="bg-blue-100 text-blue-700 px-1 rounded">{'{{1}}'}</span> placeholder in the template above. Buttons defined in the template will be shown automatically.
                                             </p>
                                         )}
                                     </div>

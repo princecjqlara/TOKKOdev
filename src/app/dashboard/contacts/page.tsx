@@ -28,6 +28,61 @@ import {
 } from '@/lib/send-errors';
 import { createRequestGate } from '@/lib/request-gate';
 import { getSupabaseClient } from '@/lib/supabase';
+import { UTILITY_TEMPLATES } from '@/lib/facebook-templates';
+
+// Map envelope wrapper values to template names
+const ENVELOPE_TEMPLATE_MAP: Record<string, string> = {
+    // Legacy Templates
+    msg: 'general_msg_v1',
+    notice: 'general_notice_v1',
+    alert: 'general_alert_v1',
+    btn_join: 'instant_meeting_btn_v1',
+    btn_details: 'instant_meeting_btn_v2',
+    btn_book: 'instant_meeting_btn_v3',
+    // New Natural Templates
+    friendly_1: 'friendly_msg_v1',
+    friendly_2: 'friendly_msg_v2',
+    friendly_3: 'friendly_msg_v3',
+    friendly_4: 'friendly_msg_v4',
+    friendly_5: 'friendly_msg_v5',
+    friendly_6: 'friendly_msg_v6',
+    casual_1: 'casual_update_v1',
+    casual_2: 'casual_update_v3',
+    casual_3: 'casual_update_v4',
+    simple_1: 'simple_msg_v4',
+};
+
+// Map wrapper keys to human-readable names
+function getEnvelopeName(key: string): string {
+    switch (key) {
+        case 'msg': return 'Standard Message';
+        case 'notice': return 'System Notice';
+        case 'alert': return 'System Alert';
+        case 'btn_join': return 'Join Meeting Button';
+        case 'btn_details': return 'Update Details Button';
+        case 'btn_book': return 'Book Now Button';
+        case 'friendly_1': return 'Friendly 1 (Just let you know)';
+        case 'friendly_2': return 'Friendly 2 (Hi there)';
+        case 'friendly_3': return 'Friendly 3 (Quick heads up)';
+        case 'friendly_4': return 'Friendly 4 (Quick update)';
+        case 'friendly_5': return 'Friendly 5 (In the loop)';
+        case 'friendly_6': return 'Friendly 6 (Thought you should know)';
+        case 'casual_1': return 'Casual 1 (Good news)';
+        case 'casual_2': return 'Casual 2 (Checking in)';
+        case 'casual_3': return 'Casual 3 (Quick reminder)';
+        case 'simple_1': return 'Simple 1 (Just a note)';
+        default: return key;
+    }
+}
+
+function getTemplateBodyText(envelopeKey: string): string | null {
+    const templateName = ENVELOPE_TEMPLATE_MAP[envelopeKey];
+    if (!templateName) return null;
+    const tmpl = UTILITY_TEMPLATES.find(t => t.name === templateName);
+    if (!tmpl) return null;
+    const bodyComponent = tmpl.components.find(c => c.type === 'BODY');
+    return bodyComponent && 'text' in bodyComponent ? (bodyComponent.text ?? null) : null;
+}
 
 type MessageButton = {
     type: 'URL' | 'QUICK_REPLY';
@@ -1858,6 +1913,19 @@ export default function ContactsPage() {
                             value={envelopeWrapper}
                             onChange={(e) => setEnvelopeWrapper(e.target.value)}
                         >
+                            <option value="template">Original Template (Auto-select approved template)</option>
+                            <option disabled>────── Natural Conversations ──────</option>
+                            <option value="friendly_1">Friendly (Just wanted to let you know)</option>
+                            <option value="friendly_2">Friendly (Hi there)</option>
+                            <option value="friendly_3">Friendly (Quick heads up)</option>
+                            <option value="friendly_4">Friendly (Quick update)</option>
+                            <option value="friendly_5">Friendly (Keeping you in the loop)</option>
+                            <option value="friendly_6">Friendly (Thought you should know)</option>
+                            <option value="casual_1">Casual (Good news)</option>
+                            <option value="casual_2">Casual (Just checking in)</option>
+                            <option value="casual_3">Casual (Quick reminder)</option>
+                            <option value="simple_1">Simple (Just a note)</option>
+                            <option disabled>────── Legacy Wrappers ──────</option>
                             <option value="msg">Standard Message (&quot;Message from our team: [Your Text]&quot;)</option>
                             <option value="notice">System Notice (&quot;Important notice: [Your Text]&quot;)</option>
                             <option value="alert">System Alert (&quot;[Your Text]. This is an automated notification.&quot;)</option>
@@ -1870,9 +1938,28 @@ export default function ContactsPage() {
                         </select>
                         <p className="text-xs text-gray-500 font-mono">
                             {envelopeWrapper === 'none' 
-                                ? 'Warning: Unwrapped messages will ONLY reach contacts who interacted with you in the last 24 hours.' 
+                                ? 'Warning: Unwrapped messages will ONLY reach contacts who interacted with you in the last 24 hours.'
+                                : envelopeWrapper === 'template'
+                                ? 'The system will automatically pick a compatible approved template from this page.'
                                 : 'This wrapper bypasses the 24-hour limit, allowing you to blast all contacts anytime.'}
                         </p>
+                        {/* Show original template body when a template-backed wrapper is selected */}
+                        {envelopeWrapper !== 'none' && envelopeWrapper !== 'template' && getTemplateBodyText(envelopeWrapper) && (
+                            <div className="mt-3 p-3 bg-white border border-dashed border-gray-400 rounded">
+                                <p className="text-[10px] font-bold uppercase text-gray-500 mb-1.5">Original Template</p>
+                                <p className="text-xs font-mono text-gray-700 leading-relaxed">
+                                    {getTemplateBodyText(envelopeWrapper)!.split(/\{\{(\d+)\}\}/).map((part, idx) =>
+                                        idx % 2 === 0 ? (
+                                            <span key={idx}>{part}</span>
+                                        ) : (
+                                            <span key={idx} className="inline-block bg-blue-100 text-blue-700 border border-blue-300 px-1.5 py-0.5 mx-0.5 rounded font-bold text-[11px]">
+                                                {'{{' + part + '}}'}
+                                            </span>
+                                        )
+                                    )}
+                                </p>
+                            </div>
+                        )}
                     </div>
                     {failedContactErrors.length > 0 && (
                         <div className="bg-red-50 border-2 border-red-300 p-3 rounded">
@@ -1914,29 +2001,64 @@ export default function ContactsPage() {
                         </div>
                     )}
                     <div className="space-y-3">
-                        <div>
-                            <label className="block text-xs font-bold uppercase mb-1">Message (Part 1)</label>
-                            <textarea
-                                value={messagePart1}
-                                onChange={(e) => setMessagePart1(e.target.value)}
-                                placeholder="Hi {name}, your message starts here..."
-                                rows={3}
-                                className="input-wireframe w-full h-auto p-3 resize-none"
-                            />
-                        </div>
-                        <div className="text-center text-xs text-gray-400 font-mono">
-                            — Message from {pages.find(p => p.id === selectedPageId)?.name || 'Page'} support team —
-                        </div>
-                        <div>
-                            <label className="block text-xs font-bold uppercase mb-1">Message (Part 2)</label>
-                            <textarea
-                                value={messagePart2}
-                                onChange={(e) => setMessagePart2(e.target.value)}
-                                placeholder="Optional closing message..."
-                                rows={2}
-                                className="input-wireframe w-full h-auto p-3 resize-none"
-                            />
-                        </div>
+                        {envelopeWrapper !== 'none' && envelopeWrapper !== 'template' && envelopeWrapper !== 'msg' && getTemplateBodyText(envelopeWrapper) ? (
+                            /* Template-backed wrapper: show a single input for {{1}} with the template preview above */
+                            <div>
+                                <label className="block text-xs font-bold uppercase mb-1">
+                                    Your Message (replaces {'{{1}}'})
+                                </label>
+                                <textarea
+                                    value={messagePart1}
+                                    onChange={(e) => setMessagePart1(e.target.value)}
+                                    placeholder="Hi {name}, type your message here..."
+                                    rows={4}
+                                    className="input-wireframe w-full h-auto p-3 resize-none"
+                                />
+                                <p className="text-[11px] text-gray-400 font-mono mt-1">
+                                    Your text will replace the <span className="bg-blue-100 text-blue-700 px-1 rounded">{'{{1}}'}</span> placeholder in the template above.
+                                </p>
+                            </div>
+                        ) : ['msg', 'template', 'none'].includes(envelopeWrapper) ? (
+                            <>
+                                <div>
+                                    <label className="block text-xs font-bold uppercase mb-1">Message (Part 1)</label>
+                                    <textarea
+                                        value={messagePart1}
+                                        onChange={(e) => setMessagePart1(e.target.value)}
+                                        placeholder="Hi {name}, your message starts here..."
+                                        rows={3}
+                                        className="input-wireframe w-full h-auto p-3 resize-none"
+                                    />
+                                </div>
+                                <div className="text-center text-xs text-gray-400 font-mono">
+                                    — Message from {pages.find(p => p.id === selectedPageId)?.name || 'Page'} support team —
+                                </div>
+                                <div>
+                                    <label className="block text-xs font-bold uppercase mb-1">Message (Part 2)</label>
+                                    <textarea
+                                        value={messagePart2}
+                                        onChange={(e) => setMessagePart2(e.target.value)}
+                                        placeholder="Optional closing message..."
+                                        rows={2}
+                                        className="input-wireframe w-full h-auto p-3 resize-none"
+                                    />
+                                </div>
+                            </>
+                        ) : (
+                            <div>
+                                <label className="block text-xs font-bold uppercase mb-1">Your Message</label>
+                                <textarea
+                                    value={messagePart1}
+                                    onChange={(e) => setMessagePart1(e.target.value)}
+                                    placeholder="Hi {name}, type your full message here..."
+                                    rows={4}
+                                    className="input-wireframe w-full h-auto p-3 resize-none"
+                                />
+                                <p className="text-[11px] text-gray-400 font-mono mt-1">
+                                    This message will be wrapped inside the <b>{envelopeWrapper === 'notice' ? 'System Notice' : envelopeWrapper === 'alert' ? 'System Alert' : envelopeWrapper.startsWith('btn_') ? 'Action Button' : ''}</b> template as its {'{{1}}'} placeholder.
+                                </p>
+                            </div>
+                        )}
                     </div>
                     {/* Button Card Section */}
                     <div className="border border-gray-300 p-3 rounded">

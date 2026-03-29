@@ -165,6 +165,107 @@ export const UTILITY_TEMPLATES: TemplateDefinition[] = [
         }]
     },
 
+    {
+        name: 'friendly_msg_v1',
+        category: 'UTILITY',
+        paramCount: 1,
+        components: [{
+            type: 'BODY',
+            text: 'Hey! Just wanted to let you know — {{1}}. Feel free to reply if you have any questions!',
+            example: { body_text: [['we just restocked the items you were looking at and they are available again']] }
+        }]
+    },
+    {
+        name: 'friendly_msg_v2',
+        category: 'UTILITY',
+        paramCount: 1,
+        components: [{
+            type: 'BODY',
+            text: 'Hi there! {{1}}. Let us know if there is anything else we can help with.',
+            example: { body_text: [['Your order has been prepared and is ready for pickup at our main branch']] }
+        }]
+    },
+    {
+        name: 'friendly_msg_v3',
+        category: 'UTILITY',
+        paramCount: 1,
+        components: [{
+            type: 'BODY',
+            text: 'Just a quick heads up: {{1}}. Thanks!',
+            example: { body_text: [['we will be having a short maintenance window tonight from 10 PM to 11 PM']] }
+        }]
+    },
+    {
+        name: 'friendly_msg_v4',
+        category: 'UTILITY',
+        paramCount: 1,
+        components: [{
+            type: 'BODY',
+            text: 'Hi! Quick update for you — {{1}}. Hope this helps!',
+            example: { body_text: [['your refund has been processed and should appear in your account within 3 to 5 business days']] }
+        }]
+    },
+    {
+        name: 'friendly_msg_v5',
+        category: 'UTILITY',
+        paramCount: 1,
+        components: [{
+            type: 'BODY',
+            text: '{{1}} — just keeping you in the loop!',
+            example: { body_text: [['We have finished setting up your new account and everything is good to go']] }
+        }]
+    },
+    {
+        name: 'friendly_msg_v6',
+        category: 'UTILITY',
+        paramCount: 1,
+        components: [{
+            type: 'BODY',
+            text: 'Hey, just thought you should know: {{1}}.',
+            example: { body_text: [['the item you reserved has arrived and is waiting for you at the store']] }
+        }]
+    },
+    {
+        name: 'casual_update_v1',
+        category: 'UTILITY',
+        paramCount: 1,
+        components: [{
+            type: 'BODY',
+            text: 'Good news! {{1}}. Reach out if you need anything else.',
+            example: { body_text: [['Your replacement part has arrived early and we can schedule the repair at your convenience']] }
+        }]
+    },
+    {
+        name: 'casual_update_v3',
+        category: 'UTILITY',
+        paramCount: 1,
+        components: [{
+            type: 'BODY',
+            text: 'Just checking in! {{1}}. Let us know how it goes.',
+            example: { body_text: [['Your new setup should be working now and we wanted to make sure everything is running smoothly']] }
+        }]
+    },
+    {
+        name: 'casual_update_v4',
+        category: 'UTILITY',
+        paramCount: 1,
+        components: [{
+            type: 'BODY',
+            text: 'Quick reminder — {{1}}. Talk soon!',
+            example: { body_text: [['your appointment with our team is tomorrow at 3 PM so just reply if you need to reschedule']] }
+        }]
+    },
+    {
+        name: 'simple_msg_v4',
+        category: 'UTILITY',
+        paramCount: 1,
+        components: [{
+            type: 'BODY',
+            text: 'Just a note: {{1}}. Have a great day!',
+            example: { body_text: [['we have applied the discount to your next order as discussed']] }
+        }]
+    },
+
     // ===========================================================
     //  2-PARAM TEMPLATES — {{1}} and {{2}} with varied layouts
     // ===========================================================
