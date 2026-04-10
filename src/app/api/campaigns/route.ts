@@ -45,6 +45,8 @@ export async function GET(request: NextRequest) {
         const page = parseInt(searchParams.get('page') || '1');
         const pageSize = parseInt(searchParams.get('pageSize') || '25');
         const pageId = searchParams.get('pageId') || '';
+        const dateFrom = searchParams.get('dateFrom') || '';
+        const dateTo = searchParams.get('dateTo') || '';
 
         const supabase = getSupabaseAdmin();
 
@@ -73,6 +75,17 @@ export async function GET(request: NextRequest) {
 
         if (pageId && accessiblePageIds.includes(pageId)) {
             query = query.eq('page_id', pageId);
+        }
+
+        // Date range filter
+        if (dateFrom) {
+            query = query.gte('created_at', new Date(dateFrom).toISOString());
+        }
+        if (dateTo) {
+            // Add one day to include the entire end date
+            const endDate = new Date(dateTo);
+            endDate.setDate(endDate.getDate() + 1);
+            query = query.lt('created_at', endDate.toISOString());
         }
 
         // Apply pagination

@@ -3,7 +3,7 @@
 import { useSession } from 'next-auth/react';
 
 import { useEffect, useState } from 'react';
-import { Plus, Send, Trash2, Users, Clock, CheckCircle, XCircle, MessageSquare, StopCircle, FileText } from 'lucide-react';
+import { Plus, Send, Trash2, Users, Clock, CheckCircle, XCircle, MessageSquare, StopCircle, FileText, Calendar } from 'lucide-react';
 import Pagination from '@/components/Pagination';
 import Modal from '@/components/Modal';
 import { Campaign, Page, Contact, PaginatedResponse } from '@/types';
@@ -130,6 +130,10 @@ export default function CampaignsPage() {
     } | null>(null);
     const [showTemplateResultsModal, setShowTemplateResultsModal] = useState(false);
 
+    // Date filter state
+    const [dateFrom, setDateFrom] = useState('');
+    const [dateTo, setDateTo] = useState('');
+
     useEffect(() => {
         fetchPages();
     }, []);
@@ -138,7 +142,7 @@ export default function CampaignsPage() {
         if (selectedPageId) {
             fetchCampaigns();
         }
-    }, [selectedPageId, page, pageSize]);
+    }, [selectedPageId, page, pageSize, dateFrom, dateTo]);
 
     useEffect(() => {
         if (!showErrorsModal || !errorsCampaignId) return;
@@ -168,6 +172,9 @@ export default function CampaignsPage() {
                 pageSize: pageSize.toString(),
                 pageId: selectedPageId
             });
+
+            if (dateFrom) params.set('dateFrom', dateFrom);
+            if (dateTo) params.set('dateTo', dateTo);
 
             const res = await fetch(`/api/campaigns?${params}`);
             const data: PaginatedResponse<Campaign> = await res.json();
@@ -684,6 +691,39 @@ export default function CampaignsPage() {
                         )}
                     </button>
                 </div>
+            </div>
+
+            {/* Date Filter */}
+            <div className="flex flex-wrap items-center gap-3 mb-6">
+                <div className="flex items-center gap-2">
+                    <Calendar className="w-4 h-4 text-gray-500" />
+                    <span className="font-mono text-xs uppercase tracking-wider text-gray-500">Filter by date:</span>
+                </div>
+                <div className="flex items-center gap-2">
+                    <input
+                        type="date"
+                        value={dateFrom}
+                        onChange={(e) => { setDateFrom(e.target.value); setPage(1); }}
+                        className="input-wireframe h-9 text-sm w-40"
+                        placeholder="From"
+                    />
+                    <span className="text-gray-400 font-mono text-xs">→</span>
+                    <input
+                        type="date"
+                        value={dateTo}
+                        onChange={(e) => { setDateTo(e.target.value); setPage(1); }}
+                        className="input-wireframe h-9 text-sm w-40"
+                        placeholder="To"
+                    />
+                </div>
+                {(dateFrom || dateTo) && (
+                    <button
+                        onClick={() => { setDateFrom(''); setDateTo(''); setPage(1); }}
+                        className="btn-wireframe text-xs h-9 px-3"
+                    >
+                        Clear
+                    </button>
+                )}
             </div>
 
             {/* Campaigns List */}
