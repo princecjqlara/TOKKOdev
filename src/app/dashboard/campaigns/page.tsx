@@ -219,7 +219,7 @@ export default function CampaignsPage() {
         try {
             const params = new URLSearchParams({
                 page: contactsPage.toString(),
-                pageSize: '50'
+                pageSize: '10000'
             });
 
             // Add tag filter if specified
