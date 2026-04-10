@@ -3,7 +3,7 @@ import { getSupabaseAdmin } from '@/lib/supabase';
 import { getPageConversations, getUserProfile } from '@/lib/facebook';
 
 // Secret key for cron job authentication
-const CRON_SECRET = process.env.CRON_SECRET || 'your-cron-secret-key';
+const CRON_SECRET = process.env.CRON_SECRET;
 
 // GET /api/cron/sync - Sync all pages (called by external cron service)
 export async function GET(request: NextRequest) {

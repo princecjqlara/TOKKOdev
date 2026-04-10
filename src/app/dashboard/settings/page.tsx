@@ -12,8 +12,10 @@ export default function SettingsPage() {
     const [loading, setLoading] = useState(true);
     const [webhookActionPageId, setWebhookActionPageId] = useState<string | null>(null);
     const [webhookStatus, setWebhookStatus] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
+    const [origin, setOrigin] = useState('');
 
     useEffect(() => {
+        setOrigin(window.location.origin);
         fetchPages();
     }, []);
 
@@ -174,7 +176,7 @@ export default function SettingsPage() {
                 <div className="mb-4">
                     <p className="font-mono text-xs text-gray-500 mb-2 uppercase">Webhook Callback URL</p>
                     <div className="border border-black bg-gray-50 p-3 font-mono text-sm break-all">
-                        {typeof window !== 'undefined' ? window.location.origin : ''}/api/facebook/webhook
+                        {origin}/api/facebook/webhook
                     </div>
                 </div>
                 <div>

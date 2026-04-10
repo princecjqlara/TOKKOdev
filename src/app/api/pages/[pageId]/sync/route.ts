@@ -270,20 +270,11 @@ export async function POST(
             maxProcessingTimeMs: MAX_PROCESSING_TIME,
             profileFetchTimeoutMs: PROFILE_FETCH_TIMEOUT
         });
-        // #region agent log
-        fetch('http://127.0.0.1:7242/ingest/6358f30b-ef0a-4ea4-8acc-50c08c025924', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ location: 'sync/route.ts:169', message: 'Sync start', data: { totalConversations: validConversations.length, isIncremental, lastSyncedAt: page.last_synced_at, startTime }, timestamp: Date.now(), sessionId: 'debug-session', runId: 'run1', hypothesisId: 'E' }) }).catch(() => { });
-        // #endregion
 
         for (let i = 0; i < validConversations.length; i += SYNC_BATCH_SIZE) {
             // Check if we're approaching timeout
             const elapsed = Date.now() - startTime;
-            // #region agent log
-            fetch('http://127.0.0.1:7242/ingest/6358f30b-ef0a-4ea4-8acc-50c08c025924', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ location: 'sync/route.ts:174', message: 'Sync timeout check', data: { batchIndex: i, processed: i, total: validConversations.length, elapsed, MAX_PROCESSING_TIME, willTimeout: elapsed > MAX_PROCESSING_TIME }, timestamp: Date.now(), sessionId: 'debug-session', runId: 'run1', hypothesisId: 'E' }) }).catch(() => { });
-            // #endregion
             if (elapsed > MAX_PROCESSING_TIME) {
-                // #region agent log
-                fetch('http://127.0.0.1:7242/ingest/6358f30b-ef0a-4ea4-8acc-50c08c025924', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ location: 'sync/route.ts:175', message: 'Sync timeout triggered', data: { processed: i, total: validConversations.length, remaining: validConversations.length - i, elapsed, synced, failed }, timestamp: Date.now(), sessionId: 'debug-session', runId: 'run1', hypothesisId: 'E' }) }).catch(() => { });
-                // #endregion
                 const remainingConversations = validConversations.slice(i);
                 const remainingPsids = remainingConversations
                     .map(conv => {
@@ -577,9 +568,6 @@ export async function POST(
             errorCount: errors.length,
             errorSamples: errors.slice(0, 5)
         });
-        // #region agent log
-        fetch('http://127.0.0.1:7242/ingest/6358f30b-ef0a-4ea4-8acc-50c08c025924', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ location: 'sync/route.ts:291', message: 'Sync complete', data: { synced, failed, total: validConversations.length, restored: restoredCount, elapsed: Date.now() - startTime }, timestamp: Date.now(), sessionId: 'debug-session', runId: 'run1', hypothesisId: 'E' }) }).catch(() => { });
-        // #endregion
 
         // Always update last_synced_at to the start time of this sync
         // This ensures that if we retry, we won't re-fetch conversations we've already processed

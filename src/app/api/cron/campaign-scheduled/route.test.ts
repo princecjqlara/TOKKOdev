@@ -21,14 +21,9 @@ vi.mock('@/lib/campaign-send', () => ({
 
 import { GET } from './route';
 
-function createRequest(secret?: string): NextRequest {
+function createRequest(): NextRequest {
     return new Request('http://localhost:3000/api/cron/campaign-scheduled', {
-        method: 'GET',
-        headers: secret
-            ? {
-                authorization: `Bearer ${secret}`
-            }
-            : undefined
+        method: 'GET'
     }) as NextRequest;
 }
 
@@ -87,7 +82,7 @@ describe('GET /api/cron/campaign-scheduled', () => {
         vi.clearAllMocks();
     });
 
-    it('allows public requests without a cron secret', async () => {
+    it('processes due campaigns successfully', async () => {
         const supabase = createSupabaseMock();
         mocks.getSupabaseAdmin.mockReturnValue(supabase);
         mocks.resolveCampaignAudienceContactIds.mockResolvedValue(['contact_1']);

@@ -4,7 +4,7 @@ import { sendCampaignById } from '@/lib/campaign-send';
 import { getSupabaseAdmin } from '@/lib/supabase';
 
 // GET /api/cron/campaign-scheduled - Called by cronjob.org for due one-time campaigns
-export async function GET(_request: NextRequest) {
+export async function GET(request: NextRequest) {
     try {
         const supabase = getSupabaseAdmin();
         const now = new Date().toISOString();

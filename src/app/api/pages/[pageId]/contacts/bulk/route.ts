@@ -8,7 +8,7 @@ const CHUNK_SIZE = 200; // avoid PostgREST payload limits
 // DELETE /api/pages/[pageId]/contacts/bulk - Bulk delete contacts
 export async function DELETE(
     request: NextRequest,
-    { params }: { params: { pageId: string } }
+    { params }: { params: Promise<{ pageId: string }> }
 ) {
     try {
         const session = await getServerSession(authOptions);
@@ -20,7 +20,7 @@ export async function DELETE(
             );
         }
 
-        const { pageId } = params;
+        const { pageId } = await params;
         const body = await request.json();
         const { contactIds } = body as { contactIds?: string[] };
 
@@ -53,14 +53,24 @@ export async function DELETE(
             chunks.push(contactIds.slice(i, i + CHUNK_SIZE));
         }
 
-        // Delete related rows in manageable chunks
+        // Delete related rows in manageable chunks, scoping to verified page
         for (const chunk of chunks) {
-            await supabase.from('contact_tags').delete().in('contact_id', chunk);
-            await supabase.from('campaign_recipients').delete().in('contact_id', chunk);
+            // First verify these contacts belong to this page
+            const { data: validContacts } = await supabase
+                .from('contacts')
+                .select('id')
+                .in('id', chunk)
+                .eq('page_id', pageId);
+
+            const validIds = (validContacts || []).map(c => c.id);
+            if (!validIds.length) continue;
+
+            await supabase.from('contact_tags').delete().in('contact_id', validIds);
+            await supabase.from('campaign_recipients').delete().in('contact_id', validIds);
             const { error } = await supabase
                 .from('contacts')
                 .delete()
-                .in('id', chunk)
+                .in('id', validIds)
                 .eq('page_id', pageId);
             if (error) throw error;
         }

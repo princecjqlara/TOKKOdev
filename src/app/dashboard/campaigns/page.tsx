@@ -235,7 +235,7 @@ export default function CampaignsPage() {
         try {
             const res = await fetch(`/api/tags?pageId=${selectedPageId}`);
             const data = await res.json();
-            setTags(data.tags || []);
+            setTags(data.items || data.tags || []);
         } catch (error) {
             console.error('Error fetching tags:', error);
         }

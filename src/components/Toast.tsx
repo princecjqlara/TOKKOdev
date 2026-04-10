@@ -17,7 +17,7 @@ export default function Toast({ type, message, onClose }: ToastProps) {
 }
 
 // Toast context for global usage
-import { createContext, useContext, useState, useCallback } from 'react';
+import { createContext, useContext, useState, useCallback, useRef, useEffect } from 'react';
 
 interface ToastContextType {
     showToast: (type: 'success' | 'error' | 'info', message: string) => void;
@@ -27,10 +27,18 @@ const ToastContext = createContext<ToastContextType | undefined>(undefined);
 
 export function ToastProvider({ children }: { children: ReactNode }) {
     const [toast, setToast] = useState<{ type: 'success' | 'error' | 'info'; message: string } | null>(null);
+    const timerRef = useRef<ReturnType<typeof setTimeout>>();
+
+    useEffect(() => {
+        return () => {
+            if (timerRef.current) clearTimeout(timerRef.current);
+        };
+    }, []);
 
     const showToast = useCallback((type: 'success' | 'error' | 'info', message: string) => {
+        if (timerRef.current) clearTimeout(timerRef.current);
         setToast({ type, message });
-        setTimeout(() => setToast(null), 5000);
+        timerRef.current = setTimeout(() => setToast(null), 5000);
     }, []);
 
     return (

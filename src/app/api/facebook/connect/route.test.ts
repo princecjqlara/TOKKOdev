@@ -19,6 +19,10 @@ vi.mock('@/lib/facebook', () => ({
     subscribePageToAppWebhook: mocks.subscribePageToAppWebhook
 }));
 
+vi.mock('@/lib/facebook-templates', () => ({
+    UTILITY_TEMPLATES: []
+}));
+
 import { POST } from './route';
 
 function createRequest(): NextRequest {

@@ -26,25 +26,26 @@ export const authOptions: NextAuthOptions = {
 
                     // Upsert user based on email or facebook_id
                     // Using email as primary key for matching for now, but falling back to insert
+                    const userEmail = user.email || `fb_${account.providerAccountId}@facebook.local`;
+
                     const { data: dbUser, error } = await supabase
                         .from('users')
                         .select('id')
-                        .eq('email', user.email)
+                        .eq('email', userEmail)
                         .single();
 
                     if (dbUser) {
                         token.id = dbUser.id;
-                    } else {
-                        // Create new user
+                    } else if (!error || error.code === 'PGRST116') {
+                        // PGRST116 = no rows found - safe to create
                         const { data: newUser, error: createError } = await supabase
                             .from('users')
-                            .insert({
-                                email: user.email,
+                            .upsert({
+                                email: userEmail,
                                 name: user.name,
                                 image: user.image,
                                 is_active: true
-                                // role column removed, defaults to user in DB if exists or undefined
-                            })
+                            }, { onConflict: 'email' })
                             .select('id')
                             .single();
 
@@ -53,6 +54,8 @@ export const authOptions: NextAuthOptions = {
                         } else if (createError) {
                             console.error('Error creating user in Supabase:', createError);
                         }
+                    } else {
+                        console.error('Error looking up user in Supabase:', error);
                     }
                 } catch (err) {
                     console.error('Error syncing user to Supabase:', err);

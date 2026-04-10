@@ -128,7 +128,18 @@ export async function sendCampaignById({
             };
         }
 
-        const page = campaign.pages as { fb_page_id: string; access_token: string };
+        const pagesData = campaign.pages;
+        const page = (Array.isArray(pagesData) ? pagesData[0] : pagesData) as { fb_page_id: string; access_token: string } | null;
+
+        if (!page?.fb_page_id || !page?.access_token) {
+            return {
+                status: 400,
+                body: { error: 'Bad Request', message: 'Campaign page not found or missing access token' },
+                success: false,
+                sent: 0,
+                failed: 0
+            };
+        }
         let sent = 0;
         let failed = 0;
 

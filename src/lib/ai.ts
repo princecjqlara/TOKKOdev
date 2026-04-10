@@ -137,8 +137,8 @@ Write a short, friendly intro message (1-2 sentences). Output ONLY the message, 
         return generatedMessage;
     } catch (error) {
         console.error('❌ Error generating AI message:', error);
-        // Fallback: Create a simple message with the contact name
-        return `Hi ${firstName}! ${prompt}`;
+        // Fallback: Create a simple greeting (do NOT include raw prompt text)
+        return `Hi ${firstName}! Just wanted to check in with you. Hope you're doing well!`;
     }
 }
 

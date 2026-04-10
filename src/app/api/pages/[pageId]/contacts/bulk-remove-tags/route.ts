@@ -46,11 +46,23 @@ export async function POST(
             );
         }
 
-        // Delete contact_tags entries
+        // Verify contacts belong to this page before removing tags
+        const { data: validContacts } = await supabase
+            .from('contacts')
+            .select('id')
+            .in('id', contactIds)
+            .eq('page_id', pageId);
+
+        const validContactIds = (validContacts || []).map(c => c.id);
+        if (!validContactIds.length) {
+            return NextResponse.json({ success: true, removedCount: 0 });
+        }
+
+        // Delete contact_tags entries only for verified contacts
         const { error, count } = await supabase
             .from('contact_tags')
             .delete()
-            .in('contact_id', contactIds)
+            .in('contact_id', validContactIds)
             .in('tag_id', tagIds);
 
         if (error) throw error;

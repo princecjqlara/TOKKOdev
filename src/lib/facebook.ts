@@ -444,16 +444,19 @@ export function verifyWebhookSignature(
     signature: string,
     appSecret: string
 ): boolean {
+    if (!payload || !signature || !appSecret) return false;
+
     const crypto = require('crypto');
     const expectedSignature = 'sha256=' + crypto
         .createHmac('sha256', appSecret)
         .update(payload)
         .digest('hex');
 
-    return crypto.timingSafeEqual(
-        Buffer.from(signature),
-        Buffer.from(expectedSignature)
-    );
+    const sigBuf = Buffer.from(signature);
+    const expectedBuf = Buffer.from(expectedSignature);
+    if (sigBuf.length !== expectedBuf.length) return false;
+
+    return crypto.timingSafeEqual(sigBuf, expectedBuf);
 }
 
 // Utility message template types

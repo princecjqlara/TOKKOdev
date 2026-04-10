@@ -1,5 +1,6 @@
 'use client';
 
+import './globals.css';
 import { useEffect } from 'react';
 import { AlertCircle, RefreshCw, Home } from 'lucide-react';
 

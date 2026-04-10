@@ -1,4 +1,4 @@
-import { NextResponse } from 'next/server';
+import { NextRequest, NextResponse } from 'next/server';
 import { getSupabaseAdmin } from '@/lib/supabase';
 import { sendMessage } from '@/lib/facebook';
 import { generatePersonalizedMessage } from '@/lib/ai';
@@ -8,7 +8,7 @@ const MAX_MESSAGES_PER_RUN = 5;
 const MAX_CAMPAIGNS_PER_RUN = 3;
 
 // GET /api/cron/campaign-loop - Called by cron-job.org every minute
-export async function GET() {
+export async function GET(request: NextRequest) {
     const startTime = Date.now();
 
     const supabase = getSupabaseAdmin();

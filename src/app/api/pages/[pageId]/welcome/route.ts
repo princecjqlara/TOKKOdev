@@ -17,6 +17,18 @@ export async function GET(
         const { pageId } = await params;
         const supabase = getSupabaseAdmin();
 
+        // Verify user has access to this page
+        const { data: userPage } = await supabase
+            .from('user_pages')
+            .select('page_id')
+            .eq('user_id', session.user.id)
+            .eq('page_id', pageId)
+            .single();
+
+        if (!userPage) {
+            return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
+        }
+
         const { data, error } = await supabase
             .from('welcome_messages')
             .select('*')
@@ -56,10 +68,22 @@ export async function PUT(
         }
 
         const { pageId } = await params;
+        const supabase = getSupabaseAdmin();
+
+        // Verify user has access to this page
+        const { data: userPage } = await supabase
+            .from('user_pages')
+            .select('page_id')
+            .eq('user_id', session.user.id)
+            .eq('page_id', pageId)
+            .single();
+
+        if (!userPage) {
+            return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
+        }
+
         const body = await request.json();
         const { enabled, message_text, buttons } = body;
-
-        const supabase = getSupabaseAdmin();
 
         const { data, error } = await supabase
             .from('welcome_messages')
