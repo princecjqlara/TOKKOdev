@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getSupabaseAdmin } from '@/lib/supabase';
 import { getPageConversations, getUserProfile } from '@/lib/facebook';
+import { normalizeContactName, pickPreferredContactName } from '../../../../lib/contact-names';
 
 // Secret key for cron job authentication
 const CRON_SECRET = process.env.CRON_SECRET;
@@ -60,13 +61,18 @@ export async function GET(request: NextRequest) {
 
                     if (!participant) continue;
 
-                    try {
+                try {
                         let profilePic: string | undefined;
-                        let name = participant.name;
+                        const participantName = normalizeContactName(participant.name);
+                        let name = participantName;
 
                         try {
                             const profile = await getUserProfile(participant.id, page.access_token);
-                            name = profile.name || name;
+                            const first = typeof profile.first_name === 'string' ? profile.first_name.trim() : '';
+                            const last = typeof profile.last_name === 'string' ? profile.last_name.trim() : '';
+                            const composedProfileName = [first, last].filter(Boolean).join(' ');
+
+                            name = pickPreferredContactName(profile.name, composedProfileName, participantName);
                             profilePic = profile.profile_pic;
                         } catch {
                             // Profile fetch failed, use basic info
@@ -77,7 +83,7 @@ export async function GET(request: NextRequest) {
                             .upsert({
                                 page_id: page.id,
                                 psid: participant.id,
-                                name,
+                                ...(name ? { name } : {}),
                                 profile_pic: profilePic,
                                 last_interaction_at: conversation.updated_time,
                                 updated_at: new Date().toISOString()

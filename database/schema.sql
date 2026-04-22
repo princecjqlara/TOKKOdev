@@ -64,6 +64,13 @@
         last_interaction_at TIMESTAMPTZ,
         created_at TIMESTAMPTZ DEFAULT NOW(),
         updated_at TIMESTAMPTZ DEFAULT NOW(),
+        CONSTRAINT contacts_name_not_placeholder CHECK (
+            name IS NULL
+            OR (
+                btrim(name) <> ''
+                AND lower(btrim(name)) NOT IN ('unknown', 'undefined', 'null')
+            )
+        ),
         UNIQUE(page_id, psid)
     );
 

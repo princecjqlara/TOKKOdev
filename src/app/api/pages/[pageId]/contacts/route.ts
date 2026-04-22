@@ -4,6 +4,7 @@ import { authOptions } from '@/lib/auth';
 import { getSupabaseAdmin } from '@/lib/supabase';
 import { PaginatedResponse, Contact } from '@/types';
 import { buildNotInFilter } from '@/lib/tag-filters';
+import { normalizeContactName } from '../../../../../lib/contact-names';
 
 // GET /api/pages/[pageId]/contacts - Get contacts with pagination
 export async function GET(
@@ -231,6 +232,7 @@ export async function GET(
         // Transform contacts to include tags array
         const transformedContacts = contacts?.map(contact => ({
             ...contact,
+            name: normalizeContactName(contact.name),
             tags: contact.contact_tags?.map((ct: {
                 created_by?: string | null;
                 tags: Record<string, unknown>;
