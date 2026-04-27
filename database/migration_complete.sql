@@ -19,6 +19,10 @@ ALTER TABLE campaigns ADD COLUMN IF NOT EXISTS last_run_at TIMESTAMPTZ;
 -- AI personalized messages for non-loop campaigns
 ALTER TABLE campaigns ADD COLUMN IF NOT EXISTS use_ai_message BOOLEAN DEFAULT FALSE;
 
+-- Daily-recurring scheduled campaigns
+ALTER TABLE campaigns ADD COLUMN IF NOT EXISTS recurrence TEXT DEFAULT 'none';
+ALTER TABLE campaigns ADD COLUMN IF NOT EXISTS recurrence_end_at TIMESTAMPTZ;
+
 -- Campaign recipients additional columns
 ALTER TABLE campaign_recipients ADD COLUMN IF NOT EXISTS scheduled_at TIMESTAMPTZ;
 ALTER TABLE campaign_recipients ADD COLUMN IF NOT EXISTS next_scheduled_at TIMESTAMPTZ;

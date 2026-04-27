@@ -139,11 +139,15 @@ export async function POST(request: NextRequest) {
             audienceMode: rawAudienceMode,
             audienceRules: rawAudienceRules,
             templateName: rawTemplateName,
-            templateLanguage: rawTemplateLanguage
+            templateLanguage: rawTemplateLanguage,
+            recurrence: rawRecurrence,
+            recurrenceEndAt: rawRecurrenceEndAt
         } = body;
         const templateName = typeof rawTemplateName === 'string' && rawTemplateName.trim() ? rawTemplateName.trim() : null;
         const templateLanguage = typeof rawTemplateLanguage === 'string' && rawTemplateLanguage.trim() ? rawTemplateLanguage.trim() : null;
         const scheduledAt = normalizeScheduledAt(rawScheduledAt);
+        const recurrence = rawRecurrence === 'daily' ? 'daily' : 'none';
+        const recurrenceEndAt = recurrence === 'daily' ? normalizeScheduledAt(rawRecurrenceEndAt) : null;
         const audienceMode = rawAudienceMode === 'dynamic' ? 'dynamic' : 'specific';
         const audienceStartDate =
             typeof rawAudienceRules?.startDate === 'string' && rawAudienceRules.startDate.trim() !== ''
@@ -254,7 +258,9 @@ export async function POST(request: NextRequest) {
                 loop_status: isLoop ? 'active' : 'stopped',
                 use_ai_message: useAiMessage || false,
                 template_name: (!isLoop && !useAiMessage) ? templateName : null,
-                template_language: (!isLoop && !useAiMessage && templateName) ? (templateLanguage || 'en_US') : null
+                template_language: (!isLoop && !useAiMessage && templateName) ? (templateLanguage || 'en_US') : null,
+                recurrence: !isLoop && scheduledAt ? recurrence : 'none',
+                recurrence_end_at: !isLoop && scheduledAt && recurrence === 'daily' ? recurrenceEndAt : null
             })
             .select()
             .single();

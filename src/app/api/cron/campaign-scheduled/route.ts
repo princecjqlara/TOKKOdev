@@ -11,7 +11,7 @@ export async function GET(request: NextRequest) {
 
         const { data: dueCampaigns, error } = await supabase
             .from('campaigns')
-            .select('id, page_id, audience_mode, audience_start_date, audience_include_tag_ids, audience_exclude_tag_ids')
+            .select('id, page_id, audience_mode, audience_start_date, audience_include_tag_ids, audience_exclude_tag_ids, recurrence, recurrence_end_at, scheduled_at')
             .in('status', ['scheduled', 'sending'])
             .eq('is_loop', false)
             .lte('scheduled_at', now);
@@ -67,6 +67,40 @@ export async function GET(request: NextRequest) {
                 supabase,
                 allowScheduled: true
             });
+
+            // Daily-recurring campaigns: re-arm for tomorrow at the same time
+            // unless we've passed the end date.
+            if (campaign.recurrence === 'daily' && sendResult.success) {
+                const baseTime = campaign.scheduled_at ? new Date(campaign.scheduled_at) : new Date();
+                const nextRun = new Date(baseTime);
+                // Roll forward in 1-day increments until we land in the future.
+                const nowMs = Date.now();
+                while (nextRun.getTime() <= nowMs) {
+                    nextRun.setUTCDate(nextRun.getUTCDate() + 1);
+                }
+                const endsAt = campaign.recurrence_end_at ? new Date(campaign.recurrence_end_at) : null;
+
+                if (endsAt && nextRun > endsAt) {
+                    // Past the recurrence end — leave the campaign as completed.
+                } else {
+                    // Re-arm: clear sent/failed counters on recipients and reset campaign.
+                    await supabase
+                        .from('campaign_recipients')
+                        .update({ status: 'pending', sent_at: null, error_message: null })
+                        .eq('campaign_id', campaign.id);
+
+                    await supabase
+                        .from('campaigns')
+                        .update({
+                            status: 'scheduled',
+                            scheduled_at: nextRun.toISOString(),
+                            sent_count: 0,
+                            failed_count: 0,
+                            updated_at: new Date().toISOString()
+                        })
+                        .eq('id', campaign.id);
+                }
+            }
 
             results.push({
                 campaignId: campaign.id,

@@ -102,6 +102,8 @@ export interface Campaign {
   use_ai_message?: boolean;
   template_name?: string | null;
   template_language?: string | null;
+  recurrence?: 'none' | 'daily';
+  recurrence_end_at?: string | null;
 }
 
 export interface CampaignRecipient {

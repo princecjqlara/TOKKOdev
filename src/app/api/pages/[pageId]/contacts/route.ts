@@ -97,10 +97,13 @@ export async function GET(
             );
         }
 
-        // Build query
+        // Build query — fetch contacts WITHOUT the tag join. The tag join was
+        // causing failures on large pages (e.g., "Zeus Media") because the
+        // joined response could exceed Supabase row/size limits. Tags are
+        // fetched separately below for the page of contacts being returned.
         let query = supabase
             .from('contacts')
-            .select('*, contact_tags(tag_id, created_by, tags(*))', { count: 'exact' })
+            .select('*', { count: 'exact' })
             .eq('page_id', pageId)
             .order('last_interaction_at', { ascending: false, nullsFirst: false });
 
@@ -197,9 +200,55 @@ export async function GET(
         const to = from + pageSize - 1;
         query = query.range(from, to);
 
-        const { data: contacts, error, count } = await query;
+        const { data: rawContacts, error, count } = await query;
 
-        if (error) throw error;
+        if (error) {
+            logError('Supabase error fetching contacts', {
+                pageId,
+                code: (error as { code?: string }).code,
+                message: error.message,
+                details: (error as { details?: string }).details,
+                hint: (error as { hint?: string }).hint
+            });
+            throw error;
+        }
+
+        // Fetch tag relations only for the contacts on this page of results.
+        const pageContactIds = (rawContacts || []).map((c) => c.id).filter((id): id is string => typeof id === 'string');
+        const tagsByContact = new Map<string, { tag_id: string; created_by: string | null; tags: Record<string, unknown> }[]>();
+
+        if (pageContactIds.length > 0) {
+            const { data: tagRows, error: tagError } = await supabase
+                .from('contact_tags')
+                .select('contact_id, tag_id, created_by, tags(*)')
+                .in('contact_id', pageContactIds);
+
+            if (tagError) {
+                logWarn('Failed to fetch contact tags — returning contacts without tags', {
+                    pageId,
+                    message: tagError.message
+                });
+            } else {
+                for (const row of tagRows || []) {
+                    const list = tagsByContact.get(row.contact_id) || [];
+                    const tagsField = (row as { tags?: unknown }).tags;
+                    const tagsObj = tagsField && typeof tagsField === 'object' && !Array.isArray(tagsField)
+                        ? (tagsField as Record<string, unknown>)
+                        : Array.isArray(tagsField) ? (tagsField[0] as Record<string, unknown>) || {} : {};
+                    list.push({
+                        tag_id: row.tag_id,
+                        created_by: row.created_by ?? null,
+                        tags: tagsObj
+                    });
+                    tagsByContact.set(row.contact_id, list);
+                }
+            }
+        }
+
+        const contacts = (rawContacts || []).map((c) => ({
+            ...c,
+            contact_tags: tagsByContact.get(c.id) || []
+        }));
 
         const taggedByIds = [
             ...new Set(

@@ -111,6 +111,8 @@ export default function CampaignsPage() {
     const [isSelectAllMode, setIsSelectAllMode] = useState(false);
     const [deliveryMode, setDeliveryMode] = useState<'now' | 'schedule'>('now');
     const [scheduledAt, setScheduledAt] = useState('');
+    const [recurrence, setRecurrence] = useState<'none' | 'daily'>('none');
+    const [recurrenceEndAt, setRecurrenceEndAt] = useState('');
     const [audienceMode, setAudienceMode] = useState<'specific' | 'dynamic'>('specific');
     const [audienceStartDate, setAudienceStartDate] = useState('');
     const [includedAudienceTagIds, setIncludedAudienceTagIds] = useState<Set<string>>(new Set());
@@ -340,6 +342,8 @@ export default function CampaignsPage() {
         setIsSelectAllMode(false);
         setDeliveryMode('now');
         setScheduledAt('');
+        setRecurrence('none');
+        setRecurrenceEndAt('');
         setAudienceMode('specific');
         setAudienceStartDate('');
         setIncludedAudienceTagIds(new Set());
@@ -406,17 +410,29 @@ export default function CampaignsPage() {
             let contactIds = usesDynamicAudience ? [] : Array.from(selectedContactIds);
 
             if (!usesDynamicAudience && isSelectAllMode) {
-                // Fetch all contact IDs with the current filter
-                const params = new URLSearchParams({
-                    page: '1',
-                    pageSize: contactsTotal.toString()
-                });
-                if (selectedTagFilter) {
-                    params.set('tagId', selectedTagFilter);
+                // Supabase caps a single query at 1000 rows, so paginate through
+                // every page of contacts to gather all IDs when "Select All" is used.
+                const PAGE_SIZE = 1000;
+                const collected: string[] = [];
+                let currentPage = 1;
+                while (true) {
+                    const params = new URLSearchParams({
+                        page: currentPage.toString(),
+                        pageSize: PAGE_SIZE.toString()
+                    });
+                    if (selectedTagFilter) {
+                        params.set('tagId', selectedTagFilter);
+                    }
+                    const res = await fetch(`/api/pages/${selectedPageId}/contacts?${params}`);
+                    const data: PaginatedResponse<Contact> = await res.json();
+                    const items = data.items || [];
+                    for (const c of items) collected.push(c.id);
+
+                    const total = data.total ?? collected.length;
+                    if (items.length < PAGE_SIZE || collected.length >= total) break;
+                    currentPage++;
                 }
-                const res = await fetch(`/api/pages/${selectedPageId}/contacts?${params}`);
-                const data: PaginatedResponse<Contact> = await res.json();
-                contactIds = data.items.map(c => c.id);
+                contactIds = collected;
             }
 
             const useTemplateInPayload = !isLoop && !useAiMessage && messageMode === 'template' && selectedTemplateName;
@@ -468,7 +484,12 @@ export default function CampaignsPage() {
                     useAiMessage,
                     aiPrompt: (isLoop || useAiMessage) ? aiPrompt.trim() : null,
                     templateName: payloadTemplateName,
-                    templateLanguage: payloadTemplateLanguage
+                    templateLanguage: payloadTemplateLanguage,
+                    recurrence: !isLoop && deliveryMode === 'schedule' ? recurrence : 'none',
+                    recurrenceEndAt:
+                        !isLoop && deliveryMode === 'schedule' && recurrence === 'daily' && recurrenceEndAt
+                            ? new Date(recurrenceEndAt).toISOString()
+                            : null
                 })
             });
 
@@ -943,14 +964,51 @@ export default function CampaignsPage() {
                             </div>
 
                             {deliveryMode === 'schedule' && (
-                                <div>
-                                    <label className="label-wireframe">Scheduled Time</label>
-                                    <input
-                                        type="datetime-local"
-                                        value={scheduledAt}
-                                        onChange={(e) => setScheduledAt(e.target.value)}
-                                        className="input-wireframe"
-                                    />
+                                <div className="space-y-3">
+                                    <div>
+                                        <label className="label-wireframe">Scheduled Time</label>
+                                        <input
+                                            type="datetime-local"
+                                            value={scheduledAt}
+                                            onChange={(e) => setScheduledAt(e.target.value)}
+                                            className="input-wireframe"
+                                        />
+                                    </div>
+                                    <div>
+                                        <label className="label-wireframe mb-2">Repeat</label>
+                                        <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
+                                            <button
+                                                type="button"
+                                                onClick={() => setRecurrence('none')}
+                                                className={`border px-3 py-2 text-left transition-colors ${recurrence === 'none' ? 'border-black bg-white' : 'border-gray-300 bg-transparent'}`}
+                                            >
+                                                <p className="font-bold uppercase text-sm">One-time</p>
+                                                <p className="text-xs text-gray-500 font-mono mt-1">Send once at the scheduled time.</p>
+                                            </button>
+                                            <button
+                                                type="button"
+                                                onClick={() => setRecurrence('daily')}
+                                                className={`border px-3 py-2 text-left transition-colors ${recurrence === 'daily' ? 'border-black bg-white' : 'border-gray-300 bg-transparent'}`}
+                                            >
+                                                <p className="font-bold uppercase text-sm">Repeat Daily</p>
+                                                <p className="text-xs text-gray-500 font-mono mt-1">Re-send every day at the same time.</p>
+                                            </button>
+                                        </div>
+                                    </div>
+                                    {recurrence === 'daily' && (
+                                        <div>
+                                            <label className="label-wireframe">Stop Repeating After (optional)</label>
+                                            <input
+                                                type="datetime-local"
+                                                value={recurrenceEndAt}
+                                                onChange={(e) => setRecurrenceEndAt(e.target.value)}
+                                                className="input-wireframe"
+                                            />
+                                            <p className="text-xs text-gray-400 font-mono mt-2">
+                                                Leave blank to keep repeating until you stop the campaign.
+                                            </p>
+                                        </div>
+                                    )}
                                 </div>
                             )}
                         </div>
