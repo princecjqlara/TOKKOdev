@@ -3,6 +3,8 @@ import { getSupabaseAdmin } from '@/lib/supabase';
 import { getPageConversations, getUserProfile } from '@/lib/facebook';
 import { normalizeContactName, pickPreferredContactName } from '../../../../lib/contact-names';
 
+export const dynamic = 'force-dynamic';
+
 // Secret key for cron job authentication
 const CRON_SECRET = process.env.CRON_SECRET;
 

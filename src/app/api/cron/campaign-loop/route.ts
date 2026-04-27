@@ -3,6 +3,8 @@ import { getSupabaseAdmin } from '@/lib/supabase';
 import { sendMessage } from '@/lib/facebook';
 import { generatePersonalizedMessage } from '@/lib/ai';
 
+export const dynamic = 'force-dynamic';
+
 // Vercel Hobby has 10s limit - process small batches
 const MAX_MESSAGES_PER_RUN = 5;
 const MAX_CAMPAIGNS_PER_RUN = 3;

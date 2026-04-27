@@ -3,6 +3,8 @@ import { resolveCampaignAudienceContactIds } from '@/lib/campaign-audience';
 import { sendCampaignById } from '@/lib/campaign-send';
 import { getSupabaseAdmin } from '@/lib/supabase';
 
+export const dynamic = 'force-dynamic';
+
 // GET /api/cron/campaign-scheduled - Called by cronjob.org for due one-time campaigns
 export async function GET(request: NextRequest) {
     try {
