@@ -29,6 +29,7 @@ import {
 import { createRequestGate } from '@/lib/request-gate';
 import { getSupabaseClient } from '@/lib/supabase';
 import { UTILITY_TEMPLATES } from '@/lib/facebook-templates';
+import { runContactSyncToCompletion } from '@/lib/contact-sync-client';
 
 // Map envelope wrapper values to template names
 const ENVELOPE_TEMPLATE_MAP: Record<string, string> = {
@@ -547,19 +548,30 @@ export default function ContactsPage() {
 
         setSyncing(true);
         try {
-            // Manual sync button always does full sync to get all contacts
-            const res = await fetch(`/api/pages/${selectedPageId}/sync`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ forceFullSync: true }) // Full sync for manual button clicks
+            const result = await runContactSyncToCompletion(selectedPageId, {
+                onProgress: ({ attempt, totalSynced, totalFailed, remainingPsids }) => {
+                    if (remainingPsids.length > 0) {
+                        console.warn(`Sync slice ${attempt} finished. Continuing ${remainingPsids.length} remaining contacts automatically.`);
+                        return;
+                    }
+
+                    console.log(`Sync completed after ${attempt} slice(s): ${totalSynced} synced, ${totalFailed} failed.`);
+                }
             });
 
-            const data = await res.json();
+            const data = {
+                ...result.data,
+                synced: result.totalSynced,
+                failed: result.totalFailed
+            };
+            if (!result.completed) {
+                throw new Error('Sync stopped after too many continuation slices. Start sync again to continue remaining contacts.');
+            }
             if (data.success) {
                 if (data.incremental) {
-                    console.log(`✅ Incremental sync: ${data.synced} new/updated contacts synced${data.restored > 0 ? `, ${data.restored} deleted contacts restored` : ''}`);
+                    console.log(`✅ Incremental sync: ${data.synced} new/updated contacts synced${(data.restored || 0) > 0 ? `, ${data.restored} deleted contacts restored` : ''}`);
                 } else {
-                    console.log(`✅ Full sync: ${data.synced} contacts synced${data.restored > 0 ? `, ${data.restored} deleted contacts restored` : ''}`);
+                    console.log(`✅ Full sync: ${data.synced} contacts synced${(data.restored || 0) > 0 ? `, ${data.restored} deleted contacts restored` : ''}`);
                 }
             }
             await fetchContacts();

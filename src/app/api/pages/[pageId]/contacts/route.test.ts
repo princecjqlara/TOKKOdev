@@ -26,8 +26,10 @@ vi.mock('@/lib/tag-filters', () => ({
 import { GET } from './route';
 
 function createRequest(url: string): NextRequest {
-    const request = new Request(url) as NextRequest & { nextUrl?: URL };
-    request.nextUrl = new URL(url);
+    const request = new Request(url) as NextRequest;
+    Object.defineProperty(request, 'nextUrl', {
+        value: new URL(url)
+    });
     return request;
 }
 
@@ -73,7 +75,7 @@ function createSupabaseMock(options?: {
         count: contactsData.length
     });
 
-    const contactsBuilder = {
+    const contactsBuilder: any = {
         eq: vi.fn(() => contactsBuilder),
         in: vi.fn(() => contactsBuilder),
         not: vi.fn(() => contactsBuilder),
@@ -97,17 +99,41 @@ function createSupabaseMock(options?: {
 
     const includeContactIds = options?.includeContactIds ?? ['contact_1'];
     const excludeContactIds = options?.excludeContactIds ?? ['contact_2'];
-    const contactTagsEq = vi.fn()
-        .mockResolvedValueOnce({
-            data: includeContactIds.map(contactId => ({ contact_id: contactId })),
+    const tagFilterRows = [
+        includeContactIds.map(contactId => ({ contact_id: contactId })),
+        excludeContactIds.map(contactId => ({ contact_id: contactId }))
+    ];
+    let tagFilterIndex = -1;
+    const contactTagsFilterQuery = {
+        range: vi.fn((from: number, to: number) => Promise.resolve({
+            data: (tagFilterRows[tagFilterIndex] || []).slice(from, to + 1),
             error: null
-        })
-        .mockResolvedValueOnce({
-            data: excludeContactIds.map(contactId => ({ contact_id: contactId })),
-            error: null
-        });
+        }))
+    };
+    const contactTagsEq = vi.fn(() => {
+        tagFilterIndex += 1;
+        return contactTagsFilterQuery;
+    });
     const contactTagsIn = vi.fn().mockReturnValue({ eq: contactTagsEq });
-    const contactTagsSelect = vi.fn().mockReturnValue({ in: contactTagsIn });
+    const contactTagRows = contactsData.flatMap((contact) =>
+        Array.isArray(contact.contact_tags)
+            ? contact.contact_tags.map((tagRow) => ({
+                contact_id: contact.id,
+                ...(tagRow as Record<string, unknown>)
+            }))
+            : []
+    );
+    const contactTagRowsIn = vi.fn().mockResolvedValue({
+        data: contactTagRows,
+        error: null
+    });
+    const contactTagsSelect = vi.fn((columns: string) => {
+        if (columns.includes('tag_id')) {
+            return { in: contactTagRowsIn };
+        }
+
+        return { in: contactTagsIn };
+    });
 
     const from = vi.fn((table: string) => {
         if (table === 'user_pages') {

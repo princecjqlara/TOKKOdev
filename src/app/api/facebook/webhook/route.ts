@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getSupabaseAdmin } from '@/lib/supabase';
 import { verifyWebhookSignature, generateVerifyToken, sendMessage, getUserProfile } from '@/lib/facebook';
 import { replaceTemplateVariables } from '@/lib/placeholders';
-import { hasUsableContactName, normalizeContactName, pickPreferredContactName } from '../../../../lib/contact-names';
+import { composeContactName, hasUsableContactName, normalizeContactName, pickPreferredContactName } from '../../../../lib/contact-names';
 
 // GET /api/facebook/webhook - Verify webhook
 export async function GET(request: NextRequest) {
@@ -287,17 +287,10 @@ export async function POST(request: NextRequest) {
                                 const profile = await getUserProfile(senderId, page.access_token);
                                 profileName = normalizeContactName(profile.name);
 
-                                // Facebook often omits the combined `name` field for
-                                // page-scoped user IDs due to privacy restrictions, but
-                                // still returns first_name / last_name separately.
-                                if (!profileName) {
-                                    const first = typeof profile.first_name === 'string' ? profile.first_name.trim() : '';
-                                    const last = typeof profile.last_name === 'string' ? profile.last_name.trim() : '';
-                                    const composed = [first, last].filter(Boolean).join(' ');
-                                    if (composed) {
-                                        profileName = normalizeContactName(composed);
-                                    }
-                                }
+                                profileName = pickPreferredContactName(
+                                    profileName,
+                                    composeContactName(profile.first_name, profile.last_name)
+                                );
 
                                 profilePic = typeof profile.profile_pic === 'string' ? profile.profile_pic.trim() || null : null;
                             } catch (profileError) {

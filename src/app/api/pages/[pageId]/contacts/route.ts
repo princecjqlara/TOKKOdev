@@ -5,6 +5,7 @@ import { getSupabaseAdmin } from '@/lib/supabase';
 import { PaginatedResponse, Contact } from '@/types';
 import { buildNotInFilter } from '@/lib/tag-filters';
 import { normalizeContactName } from '../../../../../lib/contact-names';
+import { fetchAllSupabaseRows } from '../../../../../lib/supabase-pagination';
 
 // GET /api/pages/[pageId]/contacts - Get contacts with pagination
 export async function GET(
@@ -131,18 +132,18 @@ export async function GET(
 
         // Apply include tag filter (OR logic — contacts with ANY of the selected tags)
         if (tagIds.length > 0) {
-            const { data: taggedContacts, error: taggedContactsError } = await supabase
-                .from('contact_tags')
-                .select('contact_id, contacts!inner(page_id)')
-                .in('tag_id', tagIds)
-                .eq('contacts.page_id', pageId);
-
-            if (taggedContactsError) throw taggedContactsError;
+            const taggedContacts = await fetchAllSupabaseRows<{ contact_id?: string | null }>(
+                supabase
+                    .from('contact_tags')
+                    .select('contact_id, contacts!inner(page_id)')
+                    .in('tag_id', tagIds)
+                    .eq('contacts.page_id', pageId)
+            );
 
             // Deduplicate contact IDs (a contact may have multiple matching tags)
             const contactIds = [
                 ...new Set(
-                    (taggedContacts || [])
+                    taggedContacts
                         .map((tc) => tc.contact_id)
                         .filter((contactId): contactId is string => typeof contactId === 'string' && contactId.trim() !== '')
                 )
@@ -170,17 +171,17 @@ export async function GET(
 
         // Apply exclude tag filter (OR logic — exclude contacts with ANY of the excluded tags)
         if (excludeTagIds.length > 0) {
-            const { data: excludedContacts, error: excludedError } = await supabase
-                .from('contact_tags')
-                .select('contact_id, contacts!inner(page_id)')
-                .in('tag_id', excludeTagIds)
-                .eq('contacts.page_id', pageId);
-
-            if (excludedError) throw excludedError;
+            const excludedContacts = await fetchAllSupabaseRows<{ contact_id?: string | null }>(
+                supabase
+                    .from('contact_tags')
+                    .select('contact_id, contacts!inner(page_id)')
+                    .in('tag_id', excludeTagIds)
+                    .eq('contacts.page_id', pageId)
+            );
 
             const excludedIds = [
                 ...new Set(
-                    (excludedContacts || [])
+                    excludedContacts
                         .map((tc) => tc.contact_id)
                         .filter((contactId): contactId is string => typeof contactId === 'string' && contactId.trim() !== '')
                 )

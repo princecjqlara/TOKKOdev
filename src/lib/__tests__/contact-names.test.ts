@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+    composeContactName,
     hasUsableContactName,
     normalizeContactName,
     pickPreferredContactName
@@ -33,5 +34,16 @@ describe('pickPreferredContactName', () => {
 
     it('returns null when all candidates are unusable', () => {
         expect(pickPreferredContactName('unknown', '', undefined)).toBeNull();
+    });
+});
+
+describe('composeContactName', () => {
+    it('builds a usable name from first and last name fields', () => {
+        expect(composeContactName(' Jane ', ' Doe ')).toBe('Jane Doe');
+    });
+
+    it('returns null when both name parts are empty or placeholders', () => {
+        expect(composeContactName('', ' ')).toBeNull();
+        expect(composeContactName('Unknown', '')).toBeNull();
     });
 });

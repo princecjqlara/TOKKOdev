@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getSupabaseAdmin } from '@/lib/supabase';
 import { getPageConversations, getUserProfile } from '@/lib/facebook';
-import { normalizeContactName, pickPreferredContactName } from '../../../../lib/contact-names';
+import { composeContactName, normalizeContactName, pickPreferredContactName } from '../../../../lib/contact-names';
 
 export const dynamic = 'force-dynamic';
 
@@ -70,11 +70,11 @@ export async function GET(request: NextRequest) {
 
                         try {
                             const profile = await getUserProfile(participant.id, page.access_token);
-                            const first = typeof profile.first_name === 'string' ? profile.first_name.trim() : '';
-                            const last = typeof profile.last_name === 'string' ? profile.last_name.trim() : '';
-                            const composedProfileName = [first, last].filter(Boolean).join(' ');
-
-                            name = pickPreferredContactName(profile.name, composedProfileName, participantName);
+                            name = pickPreferredContactName(
+                                profile.name,
+                                composeContactName(profile.first_name, profile.last_name),
+                                participantName
+                            );
                             profilePic = profile.profile_pic;
                         } catch {
                             // Profile fetch failed, use basic info

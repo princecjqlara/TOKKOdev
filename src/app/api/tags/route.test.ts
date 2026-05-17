@@ -23,8 +23,10 @@ vi.mock('@/lib/supabase', () => ({
 import { GET, POST } from './route';
 
 function createRequest(url: string, init?: RequestInit): NextRequest {
-    const request = new Request(url, init) as NextRequest & { nextUrl?: URL };
-    request.nextUrl = new URL(url);
+    const request = new Request(url, init) as NextRequest;
+    Object.defineProperty(request, 'nextUrl', {
+        value: new URL(url)
+    });
     return request;
 }
 
@@ -32,7 +34,7 @@ function createFilterableQuery(rows: Row[]) {
     const filters: Array<(row: Row) => boolean> = [];
     const applyFilters = () => rows.filter((row) => filters.every((filter) => filter(row)));
 
-    const builder = {
+    const builder: any = {
         select: vi.fn(() => builder),
         eq: vi.fn((column: string, value: unknown) => {
             filters.push((row) => row[column] === value);

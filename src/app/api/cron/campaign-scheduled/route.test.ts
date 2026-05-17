@@ -142,4 +142,24 @@ describe('GET /api/cron/campaign-scheduled', () => {
         });
         expect(supabase.campaignsUpdate).toHaveBeenCalled();
     });
+
+    it('upserts large dynamic audiences in batches', async () => {
+        const supabase = createSupabaseMock();
+        const contactIds = Array.from({ length: 1001 }, (_, index) => `contact_${index + 1}`);
+        mocks.getSupabaseAdmin.mockReturnValue(supabase);
+        mocks.resolveCampaignAudienceContactIds.mockResolvedValue(contactIds);
+        mocks.sendCampaignById.mockResolvedValue({
+            success: true,
+            sent: 1001,
+            failed: 0
+        });
+
+        const response = await GET(createRequest());
+
+        expect(response.status).toBe(200);
+        expect(supabase.campaignRecipientsUpsert).toHaveBeenCalledTimes(3);
+        expect(supabase.campaignRecipientsUpsert.mock.calls[0][0]).toHaveLength(500);
+        expect(supabase.campaignRecipientsUpsert.mock.calls[1][0]).toHaveLength(500);
+        expect(supabase.campaignRecipientsUpsert.mock.calls[2][0]).toHaveLength(1);
+    });
 });

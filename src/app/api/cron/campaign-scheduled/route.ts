@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { resolveCampaignAudienceContactIds } from '@/lib/campaign-audience';
 import { sendCampaignById } from '@/lib/campaign-send';
 import { getSupabaseAdmin } from '@/lib/supabase';
+import { chunkArray } from '../../../../lib/chunking';
 
 export const dynamic = 'force-dynamic';
 
@@ -36,9 +37,9 @@ export async function GET(request: NextRequest) {
                     }
                 });
 
-                if (contactIds.length > 0) {
+                for (const contactIdBatch of chunkArray(contactIds, 500)) {
                     const { error: upsertError } = await supabase.from('campaign_recipients').upsert(
-                        contactIds.map((contactId) => ({
+                        contactIdBatch.map((contactId) => ({
                             campaign_id: campaign.id,
                             contact_id: contactId,
                             status: 'pending'

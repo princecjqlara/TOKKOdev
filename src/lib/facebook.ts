@@ -72,9 +72,16 @@ export async function getPageConversations(
     }
 
     let nextUrl: string | null = baseUrl;
+    const seenPageUrls = new Set<string>();
 
     let pageCount = 0;
     while (nextUrl) {
+        if (seenPageUrls.has(nextUrl)) {
+            console.warn('Facebook conversation pagination returned a repeated page URL; stopping to avoid a loop');
+            break;
+        }
+        seenPageUrls.add(nextUrl);
+
         pageCount++;
         const res: Response = await fetch(nextUrl);
 
@@ -118,9 +125,9 @@ export async function getPageConversations(
             console.log(`📄 Pagination complete: no more pages available`);
         }
 
-        // Safety limit to prevent infinite loops (max 10000 conversations)
-        if (allConversations.length >= 10000) {
-            console.warn(`⚠️ Hit conversation limit of 10000 (stopping pagination)`);
+        // Safety limit to prevent infinite pagination loops.
+        if (pageCount >= 1000) {
+            console.warn(`Hit conversation pagination safety limit after ${pageCount} Facebook API pages`);
             break;
         }
     }

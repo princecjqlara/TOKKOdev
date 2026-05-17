@@ -4,6 +4,7 @@ import { useSession, signIn } from 'next-auth/react';
 import { useEffect, useState } from 'react';
 import { FacebookPage } from '@/types';
 import { Check, Facebook, RefreshCw, AlertCircle } from 'lucide-react';
+import { runContactSyncToCompletion } from '@/lib/contact-sync-client';
 
 export default function ConnectPage() {
     const { data: session } = useSession();
@@ -73,7 +74,28 @@ export default function ConnectPage() {
 
             if (data.success) {
                 setConnectedPages(prev => new Set([...prev, page.id]));
-                setSuccess(`Successfully connected "${page.name}"`);
+                setSuccess(`Successfully connected "${page.name}". Syncing contacts...`);
+
+                try {
+                    const syncResult = await runContactSyncToCompletion(data.pageId, {
+                        onProgress: ({ attempt, remainingPsids }) => {
+                            if (remainingPsids.length > 0) {
+                                setSuccess(`Successfully connected "${page.name}". Syncing contacts... continuing ${remainingPsids.length} remaining contacts (slice ${attempt + 1}).`);
+                            }
+                        }
+                    });
+
+                    if (!syncResult.completed) {
+                        throw new Error('Initial contact sync stopped after too many continuation slices');
+                    }
+
+                    setSuccess(
+                        `Successfully connected "${page.name}" and synced ${syncResult.totalSynced} contacts${syncResult.totalFailed > 0 ? ` (${syncResult.totalFailed} failed)` : ''}.`
+                    );
+                } catch (syncError) {
+                    console.error('Error running initial contact sync:', syncError);
+                    setSuccess(`Successfully connected "${page.name}". Initial contact sync can be retried from Contacts.`);
+                }
             } else {
                 setError(data.message || 'Failed to connect page');
             }

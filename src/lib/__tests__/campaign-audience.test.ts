@@ -11,6 +11,10 @@ function createSupabaseMock(options?: {
         { id: 'contact_2' }
     ];
 
+    const contactsRange = vi.fn((from: number, to: number) => Promise.resolve({
+        data: contactsData.slice(from, to + 1),
+        error: null
+    }));
     const contactsThen = vi.fn((resolve: (value: { data: Array<{ id: string }>; error: null }) => void) => {
         resolve({
             data: contactsData,
@@ -18,25 +22,32 @@ function createSupabaseMock(options?: {
         });
         return Promise.resolve();
     });
-    const contactsQuery = {
+    const contactsQuery: any = {
         eq: vi.fn(() => contactsQuery),
         in: vi.fn(() => contactsQuery),
         not: vi.fn(() => contactsQuery),
         neq: vi.fn(() => contactsQuery),
         or: vi.fn(() => contactsQuery),
+        range: contactsRange,
         then: contactsThen
     };
     const contactsSelect = vi.fn(() => contactsQuery);
 
-    const contactTagsEq = vi.fn()
-        .mockResolvedValueOnce({
-            data: (options?.includeContactIds ?? ['contact_1', 'contact_2']).map((contact_id) => ({ contact_id })),
+    const tagResultSets = [
+        (options?.includeContactIds ?? ['contact_1', 'contact_2']).map((contact_id) => ({ contact_id })),
+        (options?.excludeContactIds ?? ['contact_2']).map((contact_id) => ({ contact_id }))
+    ];
+    let tagResultSetIndex = -1;
+    const contactTagsQuery = {
+        range: vi.fn((from: number, to: number) => Promise.resolve({
+            data: (tagResultSets[tagResultSetIndex] || []).slice(from, to + 1),
             error: null
-        })
-        .mockResolvedValueOnce({
-            data: (options?.excludeContactIds ?? ['contact_2']).map((contact_id) => ({ contact_id })),
-            error: null
-        });
+        }))
+    };
+    const contactTagsEq = vi.fn(() => {
+        tagResultSetIndex += 1;
+        return contactTagsQuery;
+    });
     const contactTagsIn = vi.fn().mockReturnValue({ eq: contactTagsEq });
     const contactTagsSelect = vi.fn().mockReturnValue({ in: contactTagsIn });
 
@@ -60,7 +71,9 @@ function createSupabaseMock(options?: {
         from,
         contactsBuilder: contactsQuery,
         contactTagsIn,
-        contactTagsEq
+        contactTagsEq,
+        contactsRange,
+        contactTagsRange: contactTagsQuery.range
     };
 }
 
@@ -106,7 +119,20 @@ describe('resolveCampaignAudienceContactIds', () => {
         expect(supabase.contactTagsIn).toHaveBeenNthCalledWith(2, 'tag_id', ['tag_x']);
         expect(supabase.contactTagsEq).toHaveBeenNthCalledWith(1, 'contacts.page_id', 'page_1');
         expect(supabase.contactTagsEq).toHaveBeenNthCalledWith(2, 'contacts.page_id', 'page_1');
-        expect(supabase.contactsBuilder.in).toHaveBeenCalledWith('id', ['contact_1', 'contact_2']);
-        expect(supabase.contactsBuilder.not).toHaveBeenCalledWith('id', 'in', '("contact_2")');
+    });
+
+    it('paginates through every contact instead of stopping at Supabase default row limits', async () => {
+        const contacts = Array.from({ length: 1005 }, (_, index) => ({ id: `contact_${index + 1}` }));
+        const supabase = createSupabaseMock({ contacts });
+
+        const contactIds = await resolveCampaignAudienceContactIds({
+            supabase: supabase as never,
+            pageId: 'page_1'
+        });
+
+        expect(contactIds).toHaveLength(1005);
+        expect(contactIds[1004]).toBe('contact_1005');
+        expect(supabase.contactsRange).toHaveBeenNthCalledWith(1, 0, 999);
+        expect(supabase.contactsRange).toHaveBeenNthCalledWith(2, 1000, 1999);
     });
 });

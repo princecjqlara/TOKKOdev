@@ -1,4 +1,4 @@
-import { buildNotInFilter } from './tag-filters';
+import { fetchAllSupabaseRows } from './supabase-pagination';
 
 export interface CampaignAudienceRules {
     startDate?: string | null;
@@ -26,17 +26,15 @@ async function getTaggedContactIds(
         return [];
     }
 
-    const { data, error } = await supabase
+    const query = supabase
         .from('contact_tags')
         .select('contact_id, contacts!inner(page_id)')
         .in('tag_id', normalizedTagIds)
         .eq('contacts.page_id', pageId);
 
-    if (error) {
-        throw new Error(error.message || 'Failed to resolve tagged contacts');
-    }
+    const data = await fetchAllSupabaseRows<{ contact_id?: string | null }>(query);
 
-    return normalizeIds((data || []).map((row: { contact_id?: string | null }) => row.contact_id));
+    return normalizeIds(data.map((row) => row.contact_id));
 }
 
 export async function resolveCampaignAudienceContactIds({
@@ -67,26 +65,27 @@ export async function resolveCampaignAudienceContactIds({
         );
     }
 
-    if (includeTagIds.length > 0) {
-        const includedContactIds = await getTaggedContactIds(supabase, pageId, includeTagIds);
-        if (includedContactIds.length === 0) {
-            return [];
-        }
-        query = query.in('id', includedContactIds);
+    const includedContactIdSet = includeTagIds.length > 0
+        ? new Set(await getTaggedContactIds(supabase, pageId, includeTagIds))
+        : null;
+    if (includedContactIdSet && includedContactIdSet.size === 0) {
+        return [];
     }
 
-    if (excludeTagIds.length > 0) {
-        const excludedContactIds = await getTaggedContactIds(supabase, pageId, excludeTagIds);
-        const notInFilter = buildNotInFilter(excludedContactIds);
-        if (notInFilter) {
-            query = query.not('id', 'in', notInFilter);
-        }
-    }
+    const excludedContactIdSet = excludeTagIds.length > 0
+        ? new Set(await getTaggedContactIds(supabase, pageId, excludeTagIds))
+        : null;
 
-    const { data, error } = await query;
-    if (error) {
-        throw new Error(error.message || 'Failed to resolve campaign audience');
-    }
+    const data = await fetchAllSupabaseRows<{ id?: string | null }>(query);
 
-    return normalizeIds((data || []).map((row: { id?: string | null }) => row.id));
+    return normalizeIds(
+        data
+            .map((row) => row.id)
+            .filter((id): id is string => {
+                if (!id) return false;
+                if (includedContactIdSet && !includedContactIdSet.has(id)) return false;
+                if (excludedContactIdSet && excludedContactIdSet.has(id)) return false;
+                return true;
+            })
+    );
 }

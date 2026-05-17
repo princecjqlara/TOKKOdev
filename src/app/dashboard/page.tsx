@@ -4,6 +4,7 @@ import { useSession } from 'next-auth/react';
 import { useEffect, useState } from 'react';
 import { Users, Tag, MessageSquare, RefreshCw, Clock, ArrowUpRight } from 'lucide-react';
 import { Page } from '@/types';
+import { runContactSyncToCompletion } from '@/lib/contact-sync-client';
 
 interface Stats {
     totalContacts: number;
@@ -84,114 +85,30 @@ export default function DashboardPage() {
         setSyncing(true);
 
         try {
-            // Manual sync button always does full sync to get all contacts
-            const forceFullSync = true;
-            
-            const res = await fetch(`/api/pages/${selectedPageId}/sync`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                credentials: 'include',
-                body: JSON.stringify({ forceFullSync })
+            const result = await runContactSyncToCompletion(selectedPageId, {
+                onProgress: ({ attempt, totalSynced, totalFailed, remainingPsids }) => {
+                    if (remainingPsids.length > 0) {
+                        console.warn(`Sync slice ${attempt} finished. Continuing ${remainingPsids.length} remaining contacts automatically.`);
+                        return;
+                    }
+
+                    console.log(`Sync completed after ${attempt} slice(s): ${totalSynced} synced, ${totalFailed} failed.`);
+                }
             });
 
-            const resClone = res.clone();
-            let rawBody = '';
-            let data: any = null;
-            try {
-                rawBody = await resClone.text();
-                data = rawBody ? JSON.parse(rawBody) : null;
-            } catch {
-                // ignore parse/read errors; rawBody may stay empty
+            if (!result.completed) {
+                throw new Error('Sync stopped after too many continuation slices. Start sync again to continue remaining contacts.');
             }
 
-            if (!res.ok) {
-                const msg = data?.message || rawBody || `Sync failed with status ${res.status}`;
-                throw new Error(msg);
+            const data = result.data;
+            const syncType = data.incremental ? 'Incremental' : 'Full';
+            let message = `${syncType} sync complete!\n\nSynced: ${result.totalSynced}\nFailed: ${result.totalFailed}\nTotal: ${data.total || result.totalSynced + result.totalFailed}`;
+            if ((data.restored || 0) > 0) {
+                message += `\n\nRestored: ${data.restored} previously deleted contacts`;
             }
-
-            if (data?.success) {
-                if (data.partial) {
-                    console.warn(`⚠️ Sync timed out. Processed ${data.processed}/${data.total}. Auto-retrying...`);
-                    console.log(`📊 Initial sync results: ${data.synced} synced, ${data.failed} failed, ${data.remaining || 0} remaining`);
-                    
-                    // Auto-retry sync for remaining conversations
-                    let retryAttempt = 1;
-                    const MAX_SYNC_RETRIES = 5;
-                    let currentSynced = data.synced;
-                    let currentFailed = data.failed;
-                    
-                    while (retryAttempt <= MAX_SYNC_RETRIES) {
-                        console.log(`🔄 Auto-retry sync attempt ${retryAttempt}/${MAX_SYNC_RETRIES}`);
-                        
-                        try {
-                            // Continue sync - use forceFullSync=true to ensure we get all conversations
-                            // The sync endpoint will skip already-processed conversations via upsert
-                            console.log(`🔄 Retry ${retryAttempt}: Continuing sync with forceFullSync=true`);
-                            const retryRes = await fetch(`/api/pages/${selectedPageId}/sync`, {
-                                method: 'POST',
-                                headers: { 'Content-Type': 'application/json' },
-                                credentials: 'include',
-                                body: JSON.stringify({ forceFullSync: true }) // Full sync to get all conversations
-                            });
-
-                            const retryResClone = retryRes.clone();
-                            let retryRawBody = '';
-                            let retryData: any = null;
-                            try {
-                                retryRawBody = await retryResClone.text();
-                                retryData = retryRawBody ? JSON.parse(retryRawBody) : null;
-                            } catch {
-                                // ignore parse errors
-                            }
-
-                            if (!retryRes.ok) {
-                                throw new Error(retryData?.message || `HTTP ${retryRes.status}`);
-                            }
-
-                            if (retryData?.success) {
-                                currentSynced += retryData.synced || 0;
-                                currentFailed += retryData.failed || 0;
-                                
-                                // If retry also timed out, continue retrying
-                                if (retryData.partial) {
-                                    retryAttempt++;
-                                    console.warn(`⚠️ Retry attempt ${retryAttempt - 1} also timed out. ${retryData.remaining || 0} conversations still remaining.`);
-                                } else {
-                                    // Successfully completed
-                                    console.log(`✅ Auto-retry sync completed: ${retryData.synced} synced, ${retryData.failed} failed`);
-                                    const syncType = retryData.incremental ? 'Incremental' : 'Full';
-                                    let message = `${syncType} sync complete (with auto-retry)!\n\nTotal synced: ${currentSynced}\nTotal failed: ${currentFailed}\nTotal: ${retryData.total || data.total}`;
-                                    if (retryData.restored > 0) {
-                                        message += `\n\n✅ Restored: ${retryData.restored} previously deleted contacts`;
-                                    }
-                                    alert(message);
-                                    break;
-                                }
-                            } else {
-                                throw new Error(retryData?.message || 'Retry failed');
-                            }
-                        } catch (retryError) {
-                            console.error(`❌ Auto-retry sync attempt ${retryAttempt} failed:`, retryError);
-                            retryAttempt++;
-                            
-                            if (retryAttempt > MAX_SYNC_RETRIES) {
-                                alert(`Partial sync complete with auto-retry!\n\nSynced: ${currentSynced}\nFailed: ${currentFailed}\nProcessed: ${data.processed} of ${data.total}\n\nMax retries reached. Some contacts may still need syncing.`);
-                            }
-                        }
-                    }
-                } else {
-                    const syncType = data.incremental ? 'Incremental' : 'Full';
-                    let message = `${syncType} sync complete!\n\nSynced: ${data.synced}\nFailed: ${data.failed}\nTotal: ${data.total}`;
-                    if (data.restored > 0) {
-                        message += `\n\n✅ Restored: ${data.restored} previously deleted contacts`;
-                    }
-                    message += `\n\n${data.incremental ? 'Only new/updated contacts were synced. Use full sync to sync all contacts.' : 'All contacts have been synced.'}`;
-                    alert(message);
-                }
-                await fetchStats(selectedPageId);
-            } else {
-                throw new Error(data?.message || rawBody || 'Sync failed');
-            }
+            message += '\n\nAll available contacts have been synced.';
+            alert(message);
+            await fetchStats(selectedPageId);
         } catch (error) {
             const message = error instanceof Error ? error.message : 'Unknown error';
             console.error('Error syncing contacts:', error);
@@ -200,7 +117,6 @@ export default function DashboardPage() {
             setSyncing(false);
         }
     };
-
     if (loading) {
         return (
             <div className="flex items-center justify-center h-64">

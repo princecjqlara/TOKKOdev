@@ -31,3 +31,9 @@ export function pickPreferredContactName(...candidates: unknown[]): string | nul
 
     return null;
 }
+
+export function composeContactName(firstName: unknown, lastName: unknown): string | null {
+    const first = typeof firstName === 'string' ? firstName.trim() : '';
+    const last = typeof lastName === 'string' ? lastName.trim() : '';
+    return normalizeContactName([first, last].filter(Boolean).join(' '));
+}

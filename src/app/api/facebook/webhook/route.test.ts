@@ -354,7 +354,7 @@ function createSupabaseMockWithGenericUpsertFailure() {
 describe('POST /api/facebook/webhook', () => {
     beforeEach(() => {
         vi.clearAllMocks();
-        process.env.NODE_ENV = 'test';
+        vi.stubEnv('NODE_ENV', 'test');
     });
 
     afterEach(() => {

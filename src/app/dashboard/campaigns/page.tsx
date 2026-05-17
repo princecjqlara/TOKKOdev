@@ -215,13 +215,14 @@ export default function CampaignsPage() {
         }
     };
 
-    const fetchContacts = async (tagFilter?: string) => {
+    const fetchContacts = async (tagFilter = selectedTagFilter, targetPage = contactsPage) => {
         if (!selectedPageId) return;
 
         try {
             const params = new URLSearchParams({
-                page: contactsPage.toString(),
-                pageSize: '10000'
+                page: targetPage.toString(),
+                pageSize: '50',
+                sendable: 'true'
             });
 
             // Add tag filter if specified
@@ -351,7 +352,7 @@ export default function CampaignsPage() {
         setSelectedTemplateName(null);
         setSelectedTemplateLanguage('en_US');
         setMessageMode('freeform');
-        await Promise.all([fetchContacts(), fetchTags()]);
+        await Promise.all([fetchContacts('', 1), fetchTags()]);
         fetchTemplates();
         setShowCreateModal(true);
     };
@@ -418,7 +419,8 @@ export default function CampaignsPage() {
                 while (true) {
                     const params = new URLSearchParams({
                         page: currentPage.toString(),
-                        pageSize: PAGE_SIZE.toString()
+                        pageSize: PAGE_SIZE.toString(),
+                        sendable: 'true'
                     });
                     if (selectedTagFilter) {
                         params.set('tagId', selectedTagFilter);
@@ -1417,7 +1419,7 @@ export default function CampaignsPage() {
                                         setContactsPage(1);
                                         setSelectedContactIds(new Set());
                                         setIsSelectAllMode(false);
-                                        fetchContacts(e.target.value);
+                                        fetchContacts(e.target.value, 1);
                                     }}
                                     className="input-wireframe h-8 text-xs w-auto"
                                 >
@@ -1477,8 +1479,9 @@ export default function CampaignsPage() {
                                 <div className="flex gap-2">
                                     <button
                                         onClick={() => {
-                                            setContactsPage(p => Math.max(1, p - 1));
-                                            fetchContacts();
+                                            const nextPage = Math.max(1, contactsPage - 1);
+                                            setContactsPage(nextPage);
+                                            fetchContacts(selectedTagFilter, nextPage);
                                         }}
                                         disabled={contactsPage === 1}
                                         className="btn-ghost-wireframe text-xs px-2 py-1 h-auto"
@@ -1487,8 +1490,9 @@ export default function CampaignsPage() {
                                     </button>
                                     <button
                                         onClick={() => {
-                                            setContactsPage(p => p + 1);
-                                            fetchContacts();
+                                            const nextPage = contactsPage + 1;
+                                            setContactsPage(nextPage);
+                                            fetchContacts(selectedTagFilter, nextPage);
                                         }}
                                         disabled={contactsPage >= Math.ceil(contactsTotal / 50)}
                                         className="btn-ghost-wireframe text-xs px-2 py-1 h-auto"

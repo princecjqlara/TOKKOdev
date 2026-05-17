@@ -2,7 +2,8 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getSessionFromRequest } from '@/lib/get-session';
 import { getSupabaseAdmin } from '@/lib/supabase';
 import { getPageConversations, getUserProfile, getConversationMessages, subscribePageToAppWebhook } from '@/lib/facebook';
-import { hasUsableContactName, normalizeContactName, pickPreferredContactName } from '../../../../../lib/contact-names';
+import { chunkArray } from '../../../../../lib/chunking';
+import { composeContactName, hasUsableContactName, normalizeContactName, pickPreferredContactName } from '../../../../../lib/contact-names';
 
 // Increase timeout for sync operations (up to 5 minutes)
 export const maxDuration = 300;
@@ -66,9 +67,19 @@ export async function POST(
 
         // Check if user wants to force a full sync (optional body parameter)
         let forceFullSync = false;
+        let resumePsids: string[] = [];
         try {
             const body = await request.json();
             forceFullSync = (body as { forceFullSync?: boolean })?.forceFullSync === true;
+            resumePsids = Array.isArray((body as { resumePsids?: unknown }).resumePsids)
+                ? [
+                    ...new Set(
+                        ((body as { resumePsids?: unknown[] }).resumePsids || [])
+                            .map((value) => (typeof value === 'string' ? value.trim() : ''))
+                            .filter(Boolean)
+                    )
+                ]
+                : [];
         } catch {
             // No body provided, use default (incremental sync)
         }
@@ -76,7 +87,8 @@ export async function POST(
         logInfo('Sync request received', {
             userId,
             pageId,
-            forceFullSync
+            forceFullSync,
+            resumePsidCount: resumePsids.length
         });
 
         // Verify user has access to page
@@ -188,16 +200,25 @@ export async function POST(
         }
 
         // Filter valid conversations first
-        const validConversations = conversations.filter(conv => {
+        let validConversations = conversations.filter(conv => {
             const participant = conv.participants?.data?.find(p => p.id !== page.fb_page_id);
             return participant && participant.id;
         });
+
+        if (resumePsids.length > 0) {
+            const resumePsidSet = new Set(resumePsids);
+            validConversations = validConversations.filter(conv => {
+                const participant = conv.participants?.data?.find(p => p.id !== page.fb_page_id);
+                return participant?.id ? resumePsidSet.has(participant.id) : false;
+            });
+        }
 
         const invalidConversationCount = conversations.length - validConversations.length;
         logInfo('Conversation validation complete', {
             totalConversations: conversations.length,
             validConversations: validConversations.length,
-            invalidConversations: invalidConversationCount
+            invalidConversations: invalidConversationCount,
+            resumePsidCount: resumePsids.length
         });
 
         // Check for deleted contacts that should be re-added
@@ -215,11 +236,20 @@ export async function POST(
         const existingContactsByPsid = new Map<string, { name: string | null; profile_pic: string | null }>();
         if (conversationPsids.size > 0) {
             try {
-                const { data: existingContacts } = await supabase
-                    .from('contacts')
-                    .select('psid,name,profile_pic')
-                    .eq('page_id', pageId)
-                    .in('psid', Array.from(conversationPsids));
+                const existingContacts: Array<{ psid?: string | null; name?: string | null; profile_pic?: string | null }> = [];
+                for (const psidBatch of chunkArray(Array.from(conversationPsids), 500)) {
+                    const { data: batchContacts, error: existingContactsError } = await supabase
+                        .from('contacts')
+                        .select('psid,name,profile_pic')
+                        .eq('page_id', pageId)
+                        .in('psid', psidBatch);
+
+                    if (existingContactsError) {
+                        throw existingContactsError;
+                    }
+
+                    existingContacts.push(...(batchContacts || []));
+                }
 
                 for (const existingContact of existingContacts || []) {
                     if (typeof existingContact.psid !== 'string' || existingContact.psid.trim() === '') {
@@ -259,7 +289,7 @@ export async function POST(
         // Process contacts in parallel batches to avoid timeout
         const SYNC_BATCH_SIZE = 15; // Process 15 contacts in parallel (increased for faster processing)
         const DELAY_BETWEEN_BATCHES = 20; // 20ms delay between batches (reduced for faster processing)
-        const MAX_PROCESSING_TIME = 270000; // 4.5 minutes (leave 30 seconds buffer before 5 min timeout)
+        const MAX_PROCESSING_TIME = 45000; // Return partials early so the client can continue before hosting timeouts.
         const PROFILE_FETCH_TIMEOUT = 4000; // 4 seconds max per profile fetch for more reliable name enrichment
         const startTime = Date.now();
 
@@ -347,8 +377,17 @@ export async function POST(
                                 setTimeout(() => reject(new Error('Profile fetch timeout')), PROFILE_FETCH_TIMEOUT)
                             );
 
-                            const profile = await Promise.race([profilePromise, timeoutPromise]) as { name: string; profile_pic?: string };
-                            name = pickPreferredContactName(profile.name, name);
+                            const profile = await Promise.race([profilePromise, timeoutPromise]) as {
+                                name?: string;
+                                first_name?: string;
+                                last_name?: string;
+                                profile_pic?: string;
+                            };
+                            name = pickPreferredContactName(
+                                profile.name,
+                                composeContactName(profile.first_name, profile.last_name),
+                                name
+                            );
                             profilePic =
                                 typeof profile.profile_pic === 'string' && profile.profile_pic.trim().length > 0
                                     ? profile.profile_pic.trim()
