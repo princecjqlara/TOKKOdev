@@ -4,6 +4,34 @@ import { authOptions } from '@/lib/auth';
 import { getSupabaseAdmin } from '@/lib/supabase';
 import { getPageTemplates } from '@/lib/facebook';
 
+function getTemplateFetchFailure(error: unknown) {
+    const message = (error as Error).message || 'Failed to fetch templates from Facebook';
+    const isTokenError =
+        message.includes('code=190') ||
+        message.toLowerCase().includes('validating access token') ||
+        message.toLowerCase().includes('access token');
+
+    if (isTokenError) {
+        return NextResponse.json(
+            {
+                error: 'Facebook Token Invalid',
+                message: 'Facebook rejected this page token. Reconnect this page to refresh permissions before submitting or checking templates.',
+                detail: message
+            },
+            { status: 502 }
+        );
+    }
+
+    return NextResponse.json(
+        {
+            error: 'Facebook Template Fetch Failed',
+            message: 'Facebook could not return templates for this page right now.',
+            detail: message
+        },
+        { status: 502 }
+    );
+}
+
 export async function GET(request: NextRequest) {
     try {
         const session = await getServerSession(authOptions);
@@ -54,7 +82,17 @@ export async function GET(request: NextRequest) {
             );
         }
 
-        const rawTemplates = await getPageTemplates(page.fb_page_id, page.access_token);
+        let rawTemplates: Record<string, unknown>[];
+        try {
+            rawTemplates = await getPageTemplates(page.fb_page_id, page.access_token);
+        } catch (error) {
+            console.warn('[TEMPLATE_STATUS] Failed to fetch Facebook templates:', {
+                pageId,
+                fbPageId: page.fb_page_id,
+                error: (error as Error).message
+            });
+            return getTemplateFetchFailure(error);
+        }
 
         const templates = rawTemplates.map((t: Record<string, unknown>) => {
             const status = typeof t.status === 'string' ? t.status.toUpperCase() : 'UNKNOWN';

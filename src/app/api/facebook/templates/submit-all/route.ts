@@ -5,6 +5,14 @@ import { createUtilityTemplate, getPageTemplates, UTILITY_TEMPLATES, UtilityTemp
 
 const SENDABLE_STATUSES = new Set(['APPROVED', 'ACTIVE']);
 
+function isFacebookTokenError(message: string) {
+    return (
+        message.includes('code=190') ||
+        message.toLowerCase().includes('validating access token') ||
+        message.toLowerCase().includes('access token')
+    );
+}
+
 // POST /api/facebook/templates/submit-all
 // Submits all predefined UTILITY_TEMPLATES to a Facebook page for approval.
 // Body: { pageId: string }
@@ -65,7 +73,19 @@ export async function POST(request: NextRequest) {
         try {
             existingTemplates = await getPageTemplates(page.fb_page_id, page.access_token);
         } catch (err) {
-            console.warn('[SUBMIT_ALL] Failed to fetch existing templates:', (err as Error).message);
+            const message = (err as Error).message;
+            console.warn('[SUBMIT_ALL] Failed to fetch existing templates:', message);
+
+            if (isFacebookTokenError(message)) {
+                return NextResponse.json(
+                    {
+                        error: 'Facebook Token Invalid',
+                        message: 'Facebook rejected this page token. Reconnect this page to refresh permissions before submitting templates.',
+                        detail: message
+                    },
+                    { status: 502 }
+                );
+            }
         }
 
         const existingNames = new Set(

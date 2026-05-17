@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useCallback } from 'react';
 import { RefreshCw, CheckCircle, XCircle, Clock, FileText, AlertTriangle } from 'lucide-react';
+import { UTILITY_TEMPLATES } from '@/lib/facebook-templates';
 
 type Page = {
     id: string;
@@ -18,21 +19,7 @@ type TemplateStatus = {
     bodyText: string;
 };
 
-// Known template names from our system (the ones we care about)
-const SYSTEM_TEMPLATE_NAMES = new Set([
-    // Legacy wrappers
-    'general_msg_v1', 'general_notice_v1', 'general_alert_v1',
-    'instant_meeting_btn_v1', 'instant_meeting_btn_v2', 'instant_meeting_btn_v3',
-    // Natural conversational
-    'friendly_msg_v1', 'friendly_msg_v2', 'friendly_msg_v3',
-    'friendly_msg_v4', 'friendly_msg_v5', 'friendly_msg_v6',
-    'casual_update_v1', 'casual_update_v3', 'casual_update_v4',
-    'simple_msg_v4',
-    // 2-param (usually rejected but we track them)
-    'general_msg_v2', 'general_notice_v2', 'general_alert_v2',
-    'general_msg_v3', 'general_notice_v3',
-    'status_update_v1', 'support_team_v1',
-]);
+const SYSTEM_TEMPLATE_NAMES = new Set(UTILITY_TEMPLATES.map((template) => template.name));
 
 export default function TemplatesPage() {
     const [pages, setPages] = useState<Page[]>([]);
@@ -41,6 +28,7 @@ export default function TemplatesPage() {
     const [loading, setLoading] = useState(false);
     const [submitting, setSubmitting] = useState(false);
     const [filter, setFilter] = useState<'all' | 'system' | 'approved' | 'rejected'>('system');
+    const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
     // Fetch pages
     useEffect(() => {
@@ -63,12 +51,18 @@ export default function TemplatesPage() {
     const fetchTemplates = useCallback(async () => {
         if (!selectedPageId) return;
         setLoading(true);
+        setErrorMessage(null);
         try {
             const res = await fetch(`/api/facebook/templates/status?pageId=${selectedPageId}`);
             const data = await res.json();
+            if (!res.ok) {
+                throw new Error(data.message || data.detail || 'Failed to fetch templates');
+            }
             setTemplates(data.templates || []);
         } catch (err) {
             console.error('Failed to fetch templates:', err);
+            setTemplates([]);
+            setErrorMessage((err as Error).message);
         } finally {
             setLoading(false);
         }
@@ -89,7 +83,7 @@ export default function TemplatesPage() {
                 body: JSON.stringify({ pageId: selectedPageId })
             });
             const data = await res.json();
-            if (data.success) {
+            if (res.ok && data.success) {
                 let msg = `Templates submitted!\n\n✅ Approved: ${data.summary.approved}\n⏳ Pending: ${data.summary.pending}\n❌ Errors: ${data.summary.errors}\n📋 Already existed: ${data.summary.alreadyExisted}`;
 
                 // Show first error reason if there are errors
@@ -104,6 +98,9 @@ export default function TemplatesPage() {
                 await fetchTemplates();
             } else {
                 alert(`Failed: ${data.message || 'Unknown error'}`);
+                if (data.message) {
+                    setErrorMessage(data.message);
+                }
             }
         } catch (err) {
             alert(`Error: ${(err as Error).message}`);
@@ -199,6 +196,18 @@ export default function TemplatesPage() {
                     </button>
                 </div>
             </div>
+
+            {errorMessage && (
+                <div className="mb-6 border border-red-700 bg-red-50 p-4 text-sm text-red-800">
+                    <div className="flex items-start gap-2">
+                        <AlertTriangle className="w-4 h-4 mt-0.5 flex-shrink-0" />
+                        <div>
+                            <p className="font-bold uppercase mb-1">Template Status Unavailable</p>
+                            <p className="font-mono text-xs leading-relaxed">{errorMessage}</p>
+                        </div>
+                    </div>
+                </div>
+            )}
 
             {/* Stats Cards */}
             <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-6">

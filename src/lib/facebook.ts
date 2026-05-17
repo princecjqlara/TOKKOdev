@@ -565,7 +565,20 @@ export async function getPageTemplates(
 
         if (!response.ok) {
             const errorData = await response.json().catch(() => ({ error: { message: 'Unknown error' } }));
-            throw new Error(errorData.error?.message || 'Failed to fetch templates');
+            const errorMessage = errorData.error?.message || 'Failed to fetch templates';
+            const errorCode = errorData.error?.code;
+            const errorSubcode = errorData.error?.error_subcode;
+            const errorDetails =
+                errorData.error?.error_data?.details ||
+                errorData.error?.error_user_msg ||
+                null;
+            const diagnosticParts = [
+                errorMessage,
+                typeof errorCode !== 'undefined' ? `code=${errorCode}` : null,
+                typeof errorSubcode !== 'undefined' ? `subcode=${errorSubcode}` : null,
+                errorDetails ? `details=${errorDetails}` : null
+            ].filter(Boolean);
+            throw new Error(diagnosticParts.join(' | '));
         }
 
         const data: { data?: any[]; paging?: { next?: string } } = await response.json();
