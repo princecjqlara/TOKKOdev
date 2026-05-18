@@ -21,6 +21,18 @@ type TemplateStatus = {
 
 const SYSTEM_TEMPLATE_NAMES = new Set(UTILITY_TEMPLATES.map((template) => template.name));
 
+async function readApiResponse(response: Response) {
+    const contentType = response.headers.get('content-type') || '';
+    if (contentType.includes('application/json')) {
+        return response.json();
+    }
+
+    const text = await response.text();
+    return {
+        message: text || `Request failed with status ${response.status}`
+    };
+}
+
 export default function TemplatesPage() {
     const [pages, setPages] = useState<Page[]>([]);
     const [selectedPageId, setSelectedPageId] = useState<string>('');
@@ -54,7 +66,7 @@ export default function TemplatesPage() {
         setErrorMessage(null);
         try {
             const res = await fetch(`/api/facebook/templates/status?pageId=${selectedPageId}`);
-            const data = await res.json();
+            const data = await readApiResponse(res);
             if (!res.ok) {
                 throw new Error(data.message || data.detail || 'Failed to fetch templates');
             }
@@ -76,34 +88,55 @@ export default function TemplatesPage() {
     const handleSubmitAll = async () => {
         if (!selectedPageId || submitting) return;
         setSubmitting(true);
+        setErrorMessage(null);
         try {
-            const res = await fetch('/api/facebook/templates/submit-all', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ pageId: selectedPageId })
-            });
-            const data = await res.json();
-            if (res.ok && data.success) {
-                let msg = `Templates submitted!\n\n✅ Approved: ${data.summary.approved}\n⏳ Pending: ${data.summary.pending}\n❌ Errors: ${data.summary.errors}\n📋 Already existed: ${data.summary.alreadyExisted}`;
+            const totals = {
+                submitted: 0,
+                errors: 0,
+                alreadyExisted: 0
+            };
+            let firstError: string | null = null;
+            const templateNames = UTILITY_TEMPLATES.map((template) => template.name);
+            const batchSize = 10;
 
-                // Show first error reason if there are errors
-                if (data.summary.errors > 0 && Array.isArray(data.results)) {
-                    const firstError = data.results.find((r: any) => r.action === 'error');
-                    if (firstError?.error) {
-                        msg += `\n\n⚠️ Error reason: ${firstError.error}`;
-                    }
+            for (let index = 0; index < templateNames.length; index += batchSize) {
+                const batchTemplateNames = templateNames.slice(index, index + batchSize);
+                const res = await fetch('/api/facebook/templates/submit-all', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        pageId: selectedPageId,
+                        limit: batchSize,
+                        templateNames: batchTemplateNames
+                    })
+                });
+                const data = await readApiResponse(res);
+                if (!res.ok || !data.success) {
+                    const message = data.message || data.detail || 'Unknown error';
+                    setErrorMessage(message);
+                    throw new Error(message);
                 }
 
-                alert(msg);
-                await fetchTemplates();
-            } else {
-                alert(`Failed: ${data.message || 'Unknown error'}`);
-                if (data.message) {
-                    setErrorMessage(data.message);
+                totals.submitted += data.summary.submittedThisRequest || 0;
+                totals.errors += data.summary.errors || 0;
+                totals.alreadyExisted = data.summary.alreadyExisted || totals.alreadyExisted;
+
+                if (!firstError && data.summary.errors > 0 && Array.isArray(data.results)) {
+                    const errorResult = data.results.find((r: any) => r.action === 'error');
+                    firstError = errorResult?.error || null;
                 }
             }
+
+            let msg = `Templates submitted!\n\nSubmitted this run: ${totals.submitted}\nErrors: ${totals.errors}\nAlready existed: ${totals.alreadyExisted}`;
+            if (firstError) {
+                msg += `\n\nError reason: ${firstError}`;
+            }
+            alert(msg);
+            await fetchTemplates();
+            return;
         } catch (err) {
             alert(`Error: ${(err as Error).message}`);
+            return;
         } finally {
             setSubmitting(false);
         }

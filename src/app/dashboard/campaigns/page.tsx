@@ -31,6 +31,18 @@ const CAMPAIGN_ENVELOPE_MAP: Record<string, string> = {
     simple_1: 'simple_msg_v4',
 };
 
+async function readApiResponse(response: Response) {
+    const contentType = response.headers.get('content-type') || '';
+    if (contentType.includes('application/json')) {
+        return response.json();
+    }
+
+    const text = await response.text();
+    return {
+        message: text || `Request failed with status ${response.status}`
+    };
+}
+
 function getCampaignTemplateBodyText(key: string): string | null {
     const templateName = CAMPAIGN_ENVELOPE_MAP[key];
     if (!templateName) return null;
@@ -298,7 +310,10 @@ export default function CampaignsPage() {
         setTemplatesLoading(true);
         try {
             const res = await fetch(`/api/facebook/templates/status?pageId=${selectedPageId}`);
-            const data = await res.json();
+            const data = await readApiResponse(res);
+            if (!res.ok) {
+                throw new Error(data.message || data.detail || 'Failed to fetch templates');
+            }
             const templates = data.templates || [];
             setAvailableTemplates(templates);
             
@@ -362,20 +377,40 @@ export default function CampaignsPage() {
         setSubmittingTemplates(true);
         setTemplateSubmitResults(null);
         try {
-            const res = await fetch('/api/facebook/templates/submit-all', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ pageId: selectedPageId })
-            });
-            const data = await res.json();
-            if (data.success) {
-                setTemplateSubmitResults(data);
-                setShowTemplateResultsModal(true);
-                // Refresh templates list
-                fetchTemplates();
-            } else {
-                alert(`Failed to submit templates: ${data.message || 'Unknown error'}`);
+            const allResults: { name: string; status: string; action: string; error?: string; hasButtons: boolean }[] = [];
+            const templateNames = UTILITY_TEMPLATES.map((template) => template.name);
+            const batchSize = 10;
+
+            for (let index = 0; index < templateNames.length; index += batchSize) {
+                const batchTemplateNames = templateNames.slice(index, index + batchSize);
+                const res = await fetch('/api/facebook/templates/submit-all', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        pageId: selectedPageId,
+                        limit: batchSize,
+                        templateNames: batchTemplateNames
+                    })
+                });
+                const data = await readApiResponse(res);
+                if (!res.ok || !data.success) {
+                    throw new Error(data.message || data.detail || 'Unknown error');
+                }
+                allResults.push(...(data.results || []));
             }
+
+            setTemplateSubmitResults({
+                summary: {
+                    total: allResults.length,
+                    approved: allResults.filter((result) => result.status === 'APPROVED' || result.status === 'ACTIVE').length,
+                    pending: allResults.filter((result) => result.status === 'PENDING').length,
+                    errors: allResults.filter((result) => result.action === 'error').length,
+                    alreadyExisted: allResults.filter((result) => result.action === 'already_exists').length
+                },
+                results: allResults
+            });
+            setShowTemplateResultsModal(true);
+            fetchTemplates();
         } catch (error) {
             alert(`Error submitting templates: ${(error as Error).message}`);
         } finally {

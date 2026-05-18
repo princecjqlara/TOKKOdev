@@ -1,9 +1,11 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getSessionFromRequest } from '@/lib/get-session';
 import { getSupabaseAdmin } from '@/lib/supabase';
-import { createUtilityTemplate, getPageTemplates, UTILITY_TEMPLATES, UtilityTemplate } from '@/lib/facebook';
+import { getPageTemplates, UTILITY_TEMPLATES, UtilityTemplate } from '@/lib/facebook';
 
 const SENDABLE_STATUSES = new Set(['APPROVED', 'ACTIVE']);
+const FACEBOOK_GRAPH_URL = 'https://graph.facebook.com/v21.0';
+const DEFAULT_BATCH_LIMIT = 10;
 
 function isFacebookTokenError(message: string) {
     return (
@@ -13,9 +15,100 @@ function isFacebookTokenError(message: string) {
     );
 }
 
+function getTemplateBody(template: UtilityTemplate) {
+    return new URLSearchParams({
+        name: template.name,
+        category: template.category,
+        language: template.language,
+        components: JSON.stringify(template.components)
+    }).toString();
+}
+
+function parseBatchEntryBody(body: unknown): Record<string, any> {
+    if (typeof body !== 'string' || body.length === 0) {
+        return {};
+    }
+
+    try {
+        return JSON.parse(body);
+    } catch {
+        return { error: { message: body } };
+    }
+}
+
+async function createUtilityTemplatesBatch(
+    pageId: string,
+    pageAccessToken: string,
+    templates: UtilityTemplate[]
+): Promise<Array<{ name: string; status: string; action: 'created' | 'already_exists' | 'error'; error?: string }>> {
+    if (templates.length === 0) {
+        return [];
+    }
+
+    const batch = templates.map((template) => ({
+        method: 'POST',
+        relative_url: `${pageId}/message_templates`,
+        body: getTemplateBody(template)
+    }));
+
+    const response = await fetch(`${FACEBOOK_GRAPH_URL}/`, {
+        method: 'POST',
+        body: new URLSearchParams({
+            access_token: pageAccessToken,
+            batch: JSON.stringify(batch),
+            include_headers: 'false'
+        })
+    });
+
+    const responseBody = await response.json().catch(() => ({}));
+
+    if (!response.ok) {
+        const message = responseBody.error?.message || `HTTP ${response.status}: ${response.statusText}`;
+        throw new Error(message);
+    }
+
+    if (!Array.isArray(responseBody)) {
+        throw new Error('Facebook returned an unexpected batch response');
+    }
+
+    return responseBody.map((entry, index) => {
+        const template = templates[index];
+        const body = parseBatchEntryBody(entry?.body);
+
+        if (entry?.code >= 200 && entry?.code < 300) {
+            return {
+                name: template.name,
+                status: typeof body.status === 'string' ? body.status.toUpperCase() : 'PENDING',
+                action: 'created' as const
+            };
+        }
+
+        const errorMessage = body.error?.message || `HTTP ${entry?.code || 'unknown'}`;
+        const alreadyExists =
+            body.error?.error_subcode === 2018423 ||
+            body.error?.error_user_msg?.includes('already exists') ||
+            errorMessage.includes('already exists');
+
+        if (alreadyExists) {
+            return {
+                name: template.name,
+                status: 'ALREADY_EXISTS',
+                action: 'already_exists' as const
+            };
+        }
+
+        return {
+            name: template.name,
+            status: 'ERROR',
+            action: 'error' as const,
+            error: errorMessage
+        };
+    });
+}
+
 // POST /api/facebook/templates/submit-all
 // Submits all predefined UTILITY_TEMPLATES to a Facebook page for approval.
-// Body: { pageId: string }
+// Body: { pageId: string, limit?: number, templateNames?: string[] }
 // Returns the status of each template submission.
 export async function POST(request: NextRequest) {
     try {
@@ -28,7 +121,11 @@ export async function POST(request: NextRequest) {
         }
 
         const body = await request.json();
-        const { pageId } = body as { pageId?: string };
+        const { pageId, limit, templateNames } = body as {
+            pageId?: string;
+            limit?: number;
+            templateNames?: string[];
+        };
 
         if (!pageId) {
             return NextResponse.json(
@@ -94,6 +191,14 @@ export async function POST(request: NextRequest) {
                 .map((t) => (t as { name: string }).name)
         );
 
+        const candidateNameSet =
+            Array.isArray(templateNames) && templateNames.length > 0
+                ? new Set(templateNames.filter((name) => typeof name === 'string'))
+                : null;
+        const candidateTemplates = candidateNameSet
+            ? UTILITY_TEMPLATES.filter((template) => candidateNameSet.has(template.name))
+            : UTILITY_TEMPLATES;
+
         const results: {
             name: string;
             status: string;
@@ -102,86 +207,83 @@ export async function POST(request: NextRequest) {
             hasButtons: boolean;
         }[] = [];
 
-        // Submit each predefined template
-        for (const template of UTILITY_TEMPLATES) {
+        const missingTemplates = candidateTemplates.filter((template) => !existingNames.has(template.name));
+        const batchLimit =
+            typeof limit === 'number' && Number.isFinite(limit)
+                ? Math.max(1, Math.min(25, Math.floor(limit)))
+                : DEFAULT_BATCH_LIMIT;
+        const templatesToCreate = missingTemplates.slice(0, batchLimit);
+
+        // Report existing templates immediately so callers still get useful status counts.
+        for (const template of candidateTemplates.filter((template) => existingNames.has(template.name))) {
             const hasButtons = template.components.some(
                 (c) => c.type === 'BUTTONS' && Array.isArray((c as any).buttons) && (c as any).buttons.length > 0
             );
+            const existing = existingTemplates.find(
+                (t) => (t as { name: string }).name === template.name
+            ) as Record<string, unknown> | undefined;
+            const existingStatus =
+                typeof existing?.status === 'string'
+                    ? existing.status.toUpperCase()
+                    : 'UNKNOWN';
 
-            // Skip if already exists on the page
-            if (existingNames.has(template.name)) {
-                const existing = existingTemplates.find(
-                    (t) => (t as { name: string }).name === template.name
-                ) as Record<string, unknown> | undefined;
-                const existingStatus =
-                    typeof existing?.status === 'string'
-                        ? existing.status.toUpperCase()
-                        : 'UNKNOWN';
+            results.push({
+                name: template.name,
+                status: existingStatus,
+                action: 'already_exists',
+                hasButtons
+            });
+        }
 
-                results.push({
-                    name: template.name,
-                    status: existingStatus,
-                    action: 'already_exists',
-                    hasButtons
-                });
-                continue;
-            }
-
-            // Submit for approval
-            try {
-                // Strip internal-only fields (paramCount) before sending to Facebook
+        try {
+            const fullTemplates: UtilityTemplate[] = templatesToCreate.map((template) => {
                 const { paramCount: _pc, ...templateFields } = template as any;
-                const fullTemplate: UtilityTemplate = {
+                return {
                     ...templateFields,
                     language: 'en_US'
                 };
+            });
+            const createdResults = await createUtilityTemplatesBatch(
+                page.fb_page_id,
+                page.access_token,
+                fullTemplates
+            );
 
-                const created = await createUtilityTemplate(
-                    page.fb_page_id,
-                    page.access_token,
-                    fullTemplate
+            for (const created of createdResults) {
+                const template = templatesToCreate.find((t) => t.name === created.name);
+                const hasButtons = !!template?.components.some(
+                    (c) => c.type === 'BUTTONS' && Array.isArray((c as any).buttons) && (c as any).buttons.length > 0
                 );
-
-                const createdStatus =
-                    typeof created.status === 'string'
-                        ? created.status.toUpperCase()
-                        : 'PENDING';
-
                 results.push({
-                    name: template.name,
-                    status: createdStatus,
-                    action: 'created',
+                    ...created,
                     hasButtons
                 });
-
-                console.log(
-                    `[SUBMIT_ALL] Template '${template.name}' created with status: ${createdStatus}`
+            }
+        } catch (err) {
+            const errorMessage = (err as Error).message || 'Unknown error';
+            if (isFacebookTokenError(errorMessage)) {
+                return NextResponse.json(
+                    {
+                        error: 'Facebook Token Invalid',
+                        message: 'Facebook rejected this page token. Reconnect this page to refresh permissions before submitting templates.',
+                        detail: errorMessage
+                    },
+                    { status: 502 }
                 );
-            } catch (err) {
-                const errorMessage = (err as Error).message || 'Unknown error';
+            }
 
-                // Treat "already exists" as a skip, not an error (race condition safe)
-                if (errorMessage.includes('2018423') || errorMessage.includes('already exists')) {
-                    results.push({
-                        name: template.name,
-                        status: 'ALREADY_EXISTS',
-                        action: 'already_exists',
-                        hasButtons
-                    });
-                } else {
-                    results.push({
-                        name: template.name,
-                        status: 'ERROR',
-                        action: 'error',
-                        error: errorMessage,
-                        hasButtons
-                    });
-
-                    console.error(
-                        `[SUBMIT_ALL] Failed to submit template '${template.name}':`,
-                        errorMessage
-                    );
-                }
+            console.error('[SUBMIT_ALL] Failed to submit template batch:', errorMessage);
+            for (const template of templatesToCreate) {
+                const hasButtons = template.components.some(
+                    (c) => c.type === 'BUTTONS' && Array.isArray((c as any).buttons) && (c as any).buttons.length > 0
+                );
+                results.push({
+                    name: template.name,
+                    status: 'ERROR',
+                    action: 'error',
+                    error: errorMessage,
+                    hasButtons
+                });
             }
         }
 
@@ -196,7 +298,10 @@ export async function POST(request: NextRequest) {
                 approved,
                 pending,
                 errors,
-                alreadyExisted: results.filter((r) => r.action === 'already_exists').length
+                alreadyExisted: results.filter((r) => r.action === 'already_exists').length,
+                submittedThisRequest: templatesToCreate.length,
+                remaining: Math.max(0, missingTemplates.length - templatesToCreate.length),
+                hasMore: missingTemplates.length > templatesToCreate.length
             },
             results
         });

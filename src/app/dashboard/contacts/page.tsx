@@ -85,6 +85,18 @@ function getTemplateBodyText(envelopeKey: string): string | null {
     return bodyComponent && 'text' in bodyComponent ? (bodyComponent.text ?? null) : null;
 }
 
+async function readApiResponse(response: Response) {
+    const contentType = response.headers.get('content-type') || '';
+    if (contentType.includes('application/json')) {
+        return response.json();
+    }
+
+    const text = await response.text();
+    return {
+        message: text || `Request failed with status ${response.status}`
+    };
+}
+
 type MessageButton = {
     type: 'URL' | 'QUICK_REPLY';
     text: string;
@@ -271,7 +283,10 @@ export default function ContactsPage() {
             const fetchTemplates = async () => {
                 try {
                     const res = await fetch(`/api/facebook/templates/status?pageId=${selectedPageId}`);
-                    const data = await res.json();
+                    const data = await readApiResponse(res);
+                    if (!res.ok) {
+                        throw new Error(data.message || data.detail || 'Failed to fetch templates');
+                    }
                     const templates = data.templates || [];
                     setAvailableTemplates(templates);
                     
