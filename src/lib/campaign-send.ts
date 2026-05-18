@@ -1,4 +1,5 @@
 import { generatePersonalizedMessage } from './ai';
+import { parseCampaignMessageSequence } from './campaign-message-sequence';
 import { getConversationIdForPsid, getConversationMessages, sendMessage, getPageTemplates, createUtilityTemplate, UTILITY_TEMPLATES } from './facebook';
 import { UTILITY_TEMPLATES as TEMPLATE_DEFS } from './facebook-templates';
 import { replaceTemplateVariables } from './placeholders';
@@ -225,7 +226,7 @@ export async function sendCampaignById({
                 }
 
                 try {
-                    let messageToSend = campaign.message_text;
+                    let messagesToSend = parseCampaignMessageSequence(campaign.message_text);
 
                     const placeholderContact = {
                         id: recipient.contact_id,
@@ -251,51 +252,57 @@ export async function sendCampaignById({
                                 );
                             }
 
-                            messageToSend = await generatePersonalizedMessage(
+                            const messageToSend = await generatePersonalizedMessage(
                                 campaign.ai_prompt,
                                 contact.name || 'Friend',
                                 messages
                             );
+                            messagesToSend = [messageToSend];
 
                             console.log(`🤖 AI generated message for ${contact.name || contact.psid}`);
                         } catch (aiError) {
                             console.warn(`⚠️ AI generation failed for ${contact.psid}, using fallback:`, (aiError as Error).message);
-                            messageToSend = replaceTemplateVariables(campaign.ai_prompt, placeholderContact);
+                            messagesToSend = [replaceTemplateVariables(campaign.ai_prompt, placeholderContact)];
                         }
-                    } else if (messageToSend) {
-                        messageToSend = replaceTemplateVariables(messageToSend, placeholderContact);
+                    } else {
+                        messagesToSend = messagesToSend.map((message) =>
+                            replaceTemplateVariables(message, placeholderContact)
+                        );
                     }
 
-                    if (!messageToSend) {
+                    if (messagesToSend.length === 0) {
                         throw new Error('No message content available');
                     }
 
                     const useTemplate = !!(campaign.template_name);
                     const messagingType = useTemplate ? 'UTILITY' : 'HUMAN_AGENT';
 
-                    // Build body parameters for UTILITY template messages
-                    // Look up paramCount from template definitions to send correct number of params
-                    let bodyParameters: string[] | undefined;
-                    if (useTemplate) {
-                        const templateDef = TEMPLATE_DEFS.find(t => t.name === campaign.template_name);
-                        const paramCount = templateDef?.paramCount ?? 1;
-                        if (paramCount === 2) {
-                            bodyParameters = [messageToSend, 'Thank you for your attention.'];
-                        } else {
-                            bodyParameters = [messageToSend];
-                        }
-                    }
+                    // Build body parameters for UTILITY template messages.
+                    // Look up paramCount from template definitions to send correct number of params.
+                    const templateDef = useTemplate ? TEMPLATE_DEFS.find(t => t.name === campaign.template_name) : undefined;
+                    const paramCount = templateDef?.paramCount ?? 1;
 
-                    await sendMessage(
-                        page.fb_page_id,
-                        page.access_token,
-                        contact.psid,
-                        messageToSend,
-                        messagingType,
-                        useTemplate ? campaign.template_name : undefined,
-                        useTemplate ? (campaign.template_language || 'en_US') : undefined,
-                        bodyParameters
-                    );
+                    for (const messageToSend of messagesToSend) {
+                        let bodyParameters: string[] | undefined;
+                        if (useTemplate) {
+                            if (paramCount === 2) {
+                                bodyParameters = [messageToSend, 'Thank you for your attention.'];
+                            } else {
+                                bodyParameters = [messageToSend];
+                            }
+                        }
+
+                        await sendMessage(
+                            page.fb_page_id,
+                            page.access_token,
+                            contact.psid,
+                            messageToSend,
+                            messagingType,
+                            useTemplate ? campaign.template_name : undefined,
+                            useTemplate ? (campaign.template_language || 'en_US') : undefined,
+                            bodyParameters
+                        );
+                    }
 
                     await supabase
                         .from('campaign_recipients')

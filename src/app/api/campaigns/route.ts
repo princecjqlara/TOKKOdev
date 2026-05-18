@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getServerSession } from 'next-auth';
 import { authOptions } from '@/lib/auth';
+import { normalizeCampaignMessageParts, serializeCampaignMessageSequence } from '../../../lib/campaign-message-sequence';
 import { getSupabaseAdmin } from '@/lib/supabase';
 import { PaginatedResponse, Campaign } from '@/types';
 
@@ -140,6 +141,7 @@ export async function POST(request: NextRequest) {
             audienceRules: rawAudienceRules,
             templateName: rawTemplateName,
             templateLanguage: rawTemplateLanguage,
+            messageParts: rawMessageParts,
             recurrence: rawRecurrence,
             recurrenceEndAt: rawRecurrenceEndAt
         } = body;
@@ -148,6 +150,12 @@ export async function POST(request: NextRequest) {
         const scheduledAt = normalizeScheduledAt(rawScheduledAt);
         const recurrence = rawRecurrence === 'daily' ? 'daily' : 'none';
         const recurrenceEndAt = recurrence === 'daily' ? normalizeScheduledAt(rawRecurrenceEndAt) : null;
+        const messageParts = normalizeCampaignMessageParts(rawMessageParts);
+        const campaignMessageText = messageParts.length > 0
+            ? serializeCampaignMessageSequence(messageParts)
+            : typeof messageText === 'string'
+                ? messageText
+                : '';
         const audienceMode = rawAudienceMode === 'dynamic' ? 'dynamic' : 'specific';
         const audienceStartDate =
             typeof rawAudienceRules?.startDate === 'string' && rawAudienceRules.startDate.trim() !== ''
@@ -181,7 +189,7 @@ export async function POST(request: NextRequest) {
         }
 
         // For non-loop, non-AI campaigns, messageText is required
-        if (!isLoop && !useAiMessage && !messageText) {
+        if (!isLoop && !useAiMessage && !campaignMessageText) {
             return NextResponse.json(
                 { error: 'Bad Request', message: 'messageText is required for regular campaigns' },
                 { status: 400 }
@@ -240,7 +248,7 @@ export async function POST(request: NextRequest) {
             .insert({
                 page_id: pageId,
                 name,
-                message_text: (isLoop || useAiMessage) ? null : messageText, // AI campaigns don't use pre-written message
+                message_text: (isLoop || useAiMessage) ? null : campaignMessageText, // AI campaigns don't use pre-written message
                 status: campaignStatus,
                 scheduled_at: scheduledAt,
                 total_recipients: shouldMaterializeRecipientsNow ? normalizedContactIds.length : 0,

@@ -1,5 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { sendCampaignById } from '../campaign-send';
+import { serializeCampaignMessageSequence } from '../campaign-message-sequence';
+import { sendMessage } from '../facebook';
 
 vi.mock('../facebook', () => ({
     sendMessage: vi.fn(),
@@ -11,12 +13,18 @@ vi.mock('../ai', () => ({
     generatePersonalizedMessage: vi.fn()
 }));
 
-function createSupabaseMock(campaignStatus: 'draft' | 'scheduled' = 'scheduled') {
+function createSupabaseMock(
+    campaignStatus: 'draft' | 'scheduled' = 'scheduled',
+    options: {
+        messageText?: string;
+        recipients?: { id: string; contact_id: string; contacts: { psid: string; name?: string } }[];
+    } = {}
+) {
     const campaignRecord = {
         id: 'campaign_1',
         page_id: 'page_1',
         status: campaignStatus,
-        message_text: 'Hello there',
+        message_text: options.messageText || 'Hello there',
         use_ai_message: false,
         is_loop: false,
         ai_prompt: null,
@@ -46,12 +54,14 @@ function createSupabaseMock(campaignStatus: 'draft' | 'scheduled' = 'scheduled')
     const userPageSelect = vi.fn().mockReturnValue({ eq: userPageEqUser });
 
     const recipientsRange = vi.fn().mockResolvedValue({
-        data: [],
+        data: options.recipients || [],
         error: null
     });
     const recipientsEqStatus = vi.fn().mockReturnValue({ range: recipientsRange });
     const recipientsEqCampaign = vi.fn().mockReturnValue({ eq: recipientsEqStatus });
     const recipientsSelect = vi.fn().mockReturnValue({ eq: recipientsEqCampaign });
+    const recipientsUpdateEq = vi.fn().mockResolvedValue({ error: null });
+    const recipientsUpdate = vi.fn().mockReturnValue({ eq: recipientsUpdateEq });
 
     const from = vi.fn((table: string) => {
         if (table === 'campaigns') {
@@ -69,7 +79,8 @@ function createSupabaseMock(campaignStatus: 'draft' | 'scheduled' = 'scheduled')
 
         if (table === 'campaign_recipients') {
             return {
-                select: recipientsSelect
+                select: recipientsSelect,
+                update: recipientsUpdate
             };
         }
 
@@ -79,7 +90,8 @@ function createSupabaseMock(campaignStatus: 'draft' | 'scheduled' = 'scheduled')
     return {
         from,
         campaignUpdate,
-        campaignUpdateEq
+        campaignUpdateEq,
+        recipientsUpdate
     };
 }
 
@@ -122,6 +134,51 @@ describe('sendCampaignById', () => {
         expect(supabase.campaignUpdate).toHaveBeenNthCalledWith(
             2,
             expect.objectContaining({ status: 'completed', failed_count: 0 })
+        );
+    });
+
+    it('sends multiple campaign message parts to each recipient in order', async () => {
+        const supabase = createSupabaseMock('draft', {
+            messageText: serializeCampaignMessageSequence(['First message', 'Second message']),
+            recipients: [{
+                id: 'recipient_1',
+                contact_id: 'contact_1',
+                contacts: {
+                    psid: 'psid_1',
+                    name: 'Alex'
+                }
+            }]
+        });
+        vi.mocked(sendMessage).mockResolvedValue({ message_id: 'mid_1' });
+
+        const result = await sendCampaignById({
+            campaignId: 'campaign_1',
+            supabase: supabase as never
+        });
+
+        expect(result.status).toBe(200);
+        expect(sendMessage).toHaveBeenCalledTimes(2);
+        expect(sendMessage).toHaveBeenNthCalledWith(
+            1,
+            'fb_page_1',
+            'page_token',
+            'psid_1',
+            'First message',
+            'HUMAN_AGENT',
+            undefined,
+            undefined,
+            undefined
+        );
+        expect(sendMessage).toHaveBeenNthCalledWith(
+            2,
+            'fb_page_1',
+            'page_token',
+            'psid_1',
+            'Second message',
+            'HUMAN_AGENT',
+            undefined,
+            undefined,
+            undefined
         );
     });
 });

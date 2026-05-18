@@ -7,6 +7,7 @@ import { Plus, Send, Trash2, Users, Clock, CheckCircle, XCircle, MessageSquare, 
 import Pagination from '@/components/Pagination';
 import Modal from '@/components/Modal';
 import { Campaign, Page, Contact, PaginatedResponse } from '@/types';
+import { getCampaignMessagePreview } from '@/lib/campaign-message-sequence';
 import { UTILITY_TEMPLATES } from '@/lib/facebook-templates';
 
 // Map freeform wrapper values to template names
@@ -41,6 +42,32 @@ async function readApiResponse(response: Response) {
     return {
         message: text || `Request failed with status ${response.status}`
     };
+}
+
+function getNextDailyScheduledAt(timeValue: string): string | null {
+    const match = /^(\d{2}):(\d{2})$/.exec(timeValue);
+    if (!match) return null;
+
+    const hours = Number(match[1]);
+    const minutes = Number(match[2]);
+    if (hours > 23 || minutes > 59) return null;
+
+    const nextRun = new Date();
+    nextRun.setHours(hours, minutes, 0, 0);
+    if (nextRun.getTime() <= Date.now()) {
+        nextRun.setDate(nextRun.getDate() + 1);
+    }
+
+    return nextRun.toISOString();
+}
+
+function getEndOfLocalDate(dateValue: string): string | null {
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(dateValue)) return null;
+
+    const endDate = new Date(`${dateValue}T23:59:59.999`);
+    if (Number.isNaN(endDate.getTime())) return null;
+
+    return endDate.toISOString();
 }
 
 function getCampaignTemplateBodyText(key: string): string | null {
@@ -123,6 +150,7 @@ export default function CampaignsPage() {
     const [isSelectAllMode, setIsSelectAllMode] = useState(false);
     const [deliveryMode, setDeliveryMode] = useState<'now' | 'schedule'>('now');
     const [scheduledAt, setScheduledAt] = useState('');
+    const [dailySendTime, setDailySendTime] = useState('');
     const [recurrence, setRecurrence] = useState<'none' | 'daily'>('none');
     const [recurrenceEndAt, setRecurrenceEndAt] = useState('');
     const [audienceMode, setAudienceMode] = useState<'specific' | 'dynamic'>('specific');
@@ -137,6 +165,7 @@ export default function CampaignsPage() {
     const [templatesLoading, setTemplatesLoading] = useState(false);
     const [messageMode, setMessageMode] = useState<'freeform' | 'template'>('freeform');
     const [freeformWrapper, setFreeformWrapper] = useState<string>('msg');
+    const [messageParts, setMessageParts] = useState<string[]>(['']);
     const [submittingTemplates, setSubmittingTemplates] = useState(false);
     const [templateSubmitResults, setTemplateSubmitResults] = useState<{
         summary: { total: number; approved: number; pending: number; errors: number; alreadyExisted: number };
@@ -346,9 +375,28 @@ export default function CampaignsPage() {
         }
     };
 
+    const updateMessagePart = (index: number, value: string) => {
+        setMessageParts((parts) => parts.map((part, partIndex) => partIndex === index ? value : part));
+        if (index === 0) {
+            setMessageText(value);
+        }
+    };
+
+    const addMessagePart = () => {
+        setMessageParts((parts) => [...parts, '']);
+    };
+
+    const removeMessagePart = (index: number) => {
+        setMessageParts((parts) => {
+            const nextParts = parts.filter((_, partIndex) => partIndex !== index);
+            return nextParts.length > 0 ? nextParts : [''];
+        });
+    };
+
     const handleOpenCreateModal = async () => {
         setCampaignName('');
         setMessageText('');
+        setMessageParts(['']);
         setSelectedContactIds(new Set());
         setContactsPage(1);
         setIsLoop(false);
@@ -358,6 +406,7 @@ export default function CampaignsPage() {
         setIsSelectAllMode(false);
         setDeliveryMode('now');
         setScheduledAt('');
+        setDailySendTime('');
         setRecurrence('none');
         setRecurrenceEndAt('');
         setAudienceMode('specific');
@@ -423,6 +472,7 @@ export default function CampaignsPage() {
         const hasRecipients = usesDynamicAudience
             ? true
             : (isSelectAllMode ? contactsTotal > 0 : selectedContactIds.size > 0);
+        const cleanedMessageParts = messageParts.map((part) => part.trim()).filter(Boolean);
         if (!campaignName.trim() || !hasRecipients) return;
 
         // For loop campaigns, need aiPrompt
@@ -431,10 +481,12 @@ export default function CampaignsPage() {
         if (isLoop && !aiPrompt.trim()) return;
         if (!isLoop && useAiMessage && !aiPrompt.trim()) return;
         if (!isLoop && !useAiMessage && messageMode === 'template' && !selectedTemplateName) return;
-        if (!isLoop && !useAiMessage && !messageText.trim()) return;
+        if (!isLoop && !useAiMessage && cleanedMessageParts.length === 0) return;
 
         const resolvedScheduledAt =
-            !isLoop && deliveryMode === 'schedule' && scheduledAt
+            !isLoop && deliveryMode === 'schedule' && recurrence === 'daily'
+                ? getNextDailyScheduledAt(dailySendTime)
+                : !isLoop && deliveryMode === 'schedule' && scheduledAt
                 ? new Date(scheduledAt).toISOString()
                 : null;
 
@@ -508,7 +560,8 @@ export default function CampaignsPage() {
                 body: JSON.stringify({
                     pageId: selectedPageId,
                     name: campaignName.trim(),
-                    messageText: (isLoop || useAiMessage) ? null : messageText.trim(),
+                    messageText: (isLoop || useAiMessage) ? null : cleanedMessageParts[0],
+                    messageParts: (isLoop || useAiMessage) ? undefined : cleanedMessageParts,
                     contactIds,
                     scheduledAt: resolvedScheduledAt,
                     audienceMode: usesDynamicAudience ? 'dynamic' : 'specific',
@@ -525,7 +578,7 @@ export default function CampaignsPage() {
                     recurrence: !isLoop && deliveryMode === 'schedule' ? recurrence : 'none',
                     recurrenceEndAt:
                         !isLoop && deliveryMode === 'schedule' && recurrence === 'daily' && recurrenceEndAt
-                            ? new Date(recurrenceEndAt).toISOString()
+                            ? getEndOfLocalDate(recurrenceEndAt)
                             : null
                 })
             });
@@ -816,7 +869,11 @@ export default function CampaignsPage() {
                                         {getLoopBadge(campaign)}
                                     </div>
                                     <p className="text-sm font-mono text-gray-600 line-clamp-2 border-l-2 border-gray-200 pl-3">
-                                        {campaign.is_loop ? `🤖 AI Prompt: "${campaign.ai_prompt}"` : campaign.template_name ? `📋 Template: ${campaign.template_name.replace(/_/g, ' ')} — "${campaign.message_text}"` : `"${campaign.message_text}"`}
+                                        {campaign.is_loop
+                                            ? `AI Prompt: "${campaign.ai_prompt}"`
+                                            : campaign.template_name
+                                                ? `Template: ${campaign.template_name.replace(/_/g, ' ')} - "${getCampaignMessagePreview(campaign.message_text)}"`
+                                                : `"${getCampaignMessagePreview(campaign.message_text)}"`}
                                     </p>
                                     <div className="flex flex-wrap items-center gap-6 text-sm font-bold uppercase tracking-wider text-gray-500">
                                         <span className="flex items-center gap-1">
@@ -1003,15 +1060,6 @@ export default function CampaignsPage() {
                             {deliveryMode === 'schedule' && (
                                 <div className="space-y-3">
                                     <div>
-                                        <label className="label-wireframe">Scheduled Time</label>
-                                        <input
-                                            type="datetime-local"
-                                            value={scheduledAt}
-                                            onChange={(e) => setScheduledAt(e.target.value)}
-                                            className="input-wireframe"
-                                        />
-                                    </div>
-                                    <div>
                                         <label className="label-wireframe mb-2">Repeat</label>
                                         <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
                                             <button
@@ -1024,7 +1072,12 @@ export default function CampaignsPage() {
                                             </button>
                                             <button
                                                 type="button"
-                                                onClick={() => setRecurrence('daily')}
+                                                onClick={() => {
+                                                    if (!dailySendTime && scheduledAt.includes('T')) {
+                                                        setDailySendTime(scheduledAt.split('T')[1]?.slice(0, 5) || '');
+                                                    }
+                                                    setRecurrence('daily');
+                                                }}
                                                 className={`border px-3 py-2 text-left transition-colors ${recurrence === 'daily' ? 'border-black bg-white' : 'border-gray-300 bg-transparent'}`}
                                             >
                                                 <p className="font-bold uppercase text-sm">Repeat Daily</p>
@@ -1032,11 +1085,28 @@ export default function CampaignsPage() {
                                             </button>
                                         </div>
                                     </div>
+                                    <div>
+                                        <label className="label-wireframe">
+                                            {recurrence === 'daily' ? 'Daily Send Time' : 'Scheduled Time'}
+                                        </label>
+                                        <input
+                                            type={recurrence === 'daily' ? 'time' : 'datetime-local'}
+                                            value={recurrence === 'daily' ? dailySendTime : scheduledAt}
+                                            onChange={(e) => {
+                                                if (recurrence === 'daily') {
+                                                    setDailySendTime(e.target.value);
+                                                } else {
+                                                    setScheduledAt(e.target.value);
+                                                }
+                                            }}
+                                            className="input-wireframe"
+                                        />
+                                    </div>
                                     {recurrence === 'daily' && (
                                         <div>
                                             <label className="label-wireframe">Stop Repeating After (optional)</label>
                                             <input
-                                                type="datetime-local"
+                                                type="date"
                                                 value={recurrenceEndAt}
                                                 onChange={(e) => setRecurrenceEndAt(e.target.value)}
                                                 className="input-wireframe"
@@ -1315,24 +1385,52 @@ export default function CampaignsPage() {
                                     )}
 
                                     {/* Message Text Input */}
-                                    <div>
-                                        <label className="label-wireframe">
-                                            {messageMode === 'template'
-                                                ? 'Template Body Text (replaces {{1}})'
-                                                : 'Message Content'}
-                                        </label>
-                                        <textarea
-                                            value={messageText}
-                                            onChange={(e) => setMessageText(e.target.value)}
-                                            placeholder={messageMode === 'template'
-                                                ? 'Enter the text that will replace {{1}} in the template body...'
-                                                : 'TYPE YOUR MESSAGE HERE...'}
-                                            rows={4}
-                                            className="input-wireframe resize-none h-auto p-3"
-                                        />
+                                    <div className="space-y-3">
+                                        <div className="flex items-center justify-between gap-3">
+                                            <label className="label-wireframe mb-0">
+                                                {messageMode === 'template'
+                                                    ? 'Template Body Sequence'
+                                                    : 'Message Sequence'}
+                                            </label>
+                                            <button
+                                                type="button"
+                                                onClick={addMessagePart}
+                                                className="btn-wireframe text-xs h-8 px-3"
+                                            >
+                                                <Plus className="w-3 h-3 mr-1" />
+                                                Add Message
+                                            </button>
+                                        </div>
+                                        {messageParts.map((part, index) => (
+                                            <div key={index} className="border border-gray-200 bg-gray-50 p-3">
+                                                <div className="flex items-center justify-between gap-3 mb-2">
+                                                    <span className="text-xs font-bold uppercase tracking-wide">
+                                                        Message {index + 1}
+                                                    </span>
+                                                    {messageParts.length > 1 && (
+                                                        <button
+                                                            type="button"
+                                                            onClick={() => removeMessagePart(index)}
+                                                            className="btn-wireframe text-xs h-7 px-2 bg-white"
+                                                        >
+                                                            <Trash2 className="w-3 h-3" />
+                                                        </button>
+                                                    )}
+                                                </div>
+                                                <textarea
+                                                    value={part}
+                                                    onChange={(e) => updateMessagePart(index, e.target.value)}
+                                                    placeholder={messageMode === 'template'
+                                                        ? `Text for template send #${index + 1}...`
+                                                        : `TYPE MESSAGE #${index + 1} HERE...`}
+                                                    rows={index === 0 ? 4 : 3}
+                                                    className="input-wireframe resize-none h-auto p-3"
+                                                />
+                                            </div>
+                                        ))}
                                         {messageMode === 'template' && (
-                                            <p className="text-xs text-gray-400 font-mono mt-2">
-                                                Your text will replace the <span className="bg-blue-100 text-blue-700 px-1 rounded">{'{{1}}'}</span> placeholder in the template above. Buttons defined in the template will be shown automatically.
+                                            <p className="text-xs text-gray-400 font-mono">
+                                                Each message is sent in order using the selected template and replaces the <span className="bg-blue-100 text-blue-700 px-1 rounded">{'{{1}}'}</span> placeholder.
                                             </p>
                                         )}
                                     </div>
@@ -1556,11 +1654,12 @@ export default function CampaignsPage() {
                             (isLoop && !aiPrompt.trim()) ||
                             (!isLoop && useAiMessage && !aiPrompt.trim()) ||
                             (!isLoop && !useAiMessage && messageMode === 'template' && !selectedTemplateName) ||
-                            (!isLoop && !useAiMessage && !messageText.trim()) ||
+                            (!isLoop && !useAiMessage && !messageParts.some((part) => part.trim())) ||
                             ((isLoop || audienceMode === 'specific') &&
                                 ((!isSelectAllMode && selectedContactIds.size === 0) ||
                                     (isSelectAllMode && contactsTotal === 0))) ||
-                            (!isLoop && audienceMode === 'dynamic' && (deliveryMode !== 'schedule' || !scheduledAt))
+                            (!isLoop && deliveryMode === 'schedule' && (recurrence === 'daily' ? !dailySendTime : !scheduledAt)) ||
+                            (!isLoop && audienceMode === 'dynamic' && deliveryMode !== 'schedule')
                         }
                         className="btn-wireframe bg-black text-white hover:bg-gray-800"
                     >

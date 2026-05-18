@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { NextRequest } from 'next/server';
+import { parseCampaignMessageSequence } from '../../../lib/campaign-message-sequence';
 
 const mocks = vi.hoisted(() => ({
     getServerSession: vi.fn(),
@@ -119,5 +120,26 @@ describe('POST /api/campaigns', () => {
             })
         );
         expect(supabase.campaignRecipientsInsert).not.toHaveBeenCalled();
+    });
+
+    it('stores multiple message parts in order', async () => {
+        const supabase = createSupabaseMock();
+        mocks.getSupabaseAdmin.mockReturnValue(supabase);
+
+        const response = await POST(createRequest({
+            pageId: 'page_1',
+            name: 'Multi-step follow-up',
+            messageText: 'fallback',
+            messageParts: ['Send this', 'Then this', 'Then this too'],
+            contactIds: ['contact_1']
+        }));
+
+        expect(response.status).toBe(200);
+        const inserted = supabase.campaignsInsert.mock.calls[0][0];
+        expect(parseCampaignMessageSequence(inserted.message_text)).toEqual([
+            'Send this',
+            'Then this',
+            'Then this too'
+        ]);
     });
 });
