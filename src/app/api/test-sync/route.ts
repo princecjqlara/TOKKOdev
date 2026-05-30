@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getSessionFromRequest } from '@/lib/get-session';
 
+export const dynamic = 'force-dynamic';
+
 // GET /api/test-sync - Test endpoint to verify sync API is accessible
 export async function GET(request: NextRequest) {
     try {

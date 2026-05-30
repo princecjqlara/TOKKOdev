@@ -84,7 +84,7 @@ export async function GET(request: NextRequest) {
                 `)
                 .eq('campaign_id', campaign.id)
                 .or(`scheduled_at.lte.${now},next_scheduled_at.lte.${now}`)
-                .is('status', 'pending')
+                .eq('status', 'pending')
                 .limit(MAX_MESSAGES_PER_RUN);
 
             if (recipientError) {

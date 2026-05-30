@@ -104,6 +104,14 @@ type MessageButton = {
     payload: string;
 };
 
+type AvailableTemplate = {
+    name: string;
+    status: string;
+    language?: string;
+    category?: string;
+    bodyText?: string;
+};
+
 const URL_SCHEME_REGEX = /^[a-z][a-z\d+\-.]*:/i;
 
 function normalizeButtonUrlForUi(rawUrl: string): string | null {
@@ -211,7 +219,9 @@ export default function ContactsPage() {
     const [tags, setTags] = useState<TagType[]>([]);
     const [loading, setLoading] = useState(true);
     const [syncing, setSyncing] = useState(false);
-    const [availableTemplates, setAvailableTemplates] = useState<{name: string, status: string}[]>([]);
+    const [availableTemplates, setAvailableTemplates] = useState<AvailableTemplate[]>([]);
+    const [selectedTemplateName, setSelectedTemplateName] = useState<string | null>(null);
+    const [selectedTemplateLanguage, setSelectedTemplateLanguage] = useState('en_US');
 
     // Pagination
     const [page, setPage] = useState(1);
@@ -249,18 +259,21 @@ export default function ContactsPage() {
     const [failedContactIds, setFailedContactIds] = useState<string[]>([]);
     const [failedContactErrors, setFailedContactErrors] = useState<SendError[]>([]);
     const [lastSendResults, setLastSendResults] = useState<{ sent: number; failed: number } | null>(null);
+    const customButtonsDisabled = envelopeWrapper === 'template' || envelopeWrapper.startsWith('btn_');
     const firstMessageButtonError =
-        messageButtons
-            .map((button, index) =>
-                getMessageButtonError(button, index, {
-                    usePart2AsButtonValue,
-                    messagePart2
-                })
-            )
-            .find((error): error is string => Boolean(error)) || null;
-    const hasMessageButtonErrors = firstMessageButtonError !== null;
+        customButtonsDisabled
+            ? null
+            : messageButtons
+                .map((button, index) =>
+                    getMessageButtonError(button, index, {
+                        usePart2AsButtonValue,
+                        messagePart2
+                    })
+                )
+                .find((error): error is string => Boolean(error)) || null;
+    const hasMessageButtonErrors = !customButtonsDisabled && firstMessageButtonError !== null;
     const dynamicModeMissingButton =
-        usePart2AsButtonValue && messageButtons.length === 0;
+        !customButtonsDisabled && usePart2AsButtonValue && messageButtons.length === 0;
     const realtimeRefreshTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
     const realtimeFallbackIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
     const realtimeSubscribeTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -287,8 +300,29 @@ export default function ContactsPage() {
                     if (!res.ok) {
                         throw new Error(data.message || data.detail || 'Failed to fetch templates');
                     }
-                    const templates = data.templates || [];
+                    const templates = ((data.templates || []) as AvailableTemplate[]).filter(
+                        (template) =>
+                            typeof template.name === 'string' &&
+                            template.name.trim().length > 0 &&
+                            typeof template.status === 'string' &&
+                            template.status.trim().length > 0
+                    );
                     setAvailableTemplates(templates);
+                    const approvedTemplates = templates.filter((template: AvailableTemplate) =>
+                        template.status === 'APPROVED' || template.status === 'ACTIVE'
+                    );
+                    setSelectedTemplateName((current) => {
+                        if (current && approvedTemplates.some((template: AvailableTemplate) => template.name === current)) {
+                            return current;
+                        }
+                        const firstApproved = approvedTemplates[0];
+                        if (firstApproved) {
+                            setSelectedTemplateLanguage(firstApproved.language || 'en_US');
+                            return firstApproved.name;
+                        }
+                        setSelectedTemplateLanguage('en_US');
+                        return null;
+                    });
                     
                     setEnvelopeWrapper(current => {
                         if (current === 'template' || current === 'none') return current;
@@ -302,6 +336,8 @@ export default function ContactsPage() {
                 } catch (error) {
                     console.error('Error fetching templates:', error);
                     setAvailableTemplates([]);
+                    setSelectedTemplateName(null);
+                    setSelectedTemplateLanguage('en_US');
                 }
             };
             fetchTemplates();
@@ -667,6 +703,15 @@ export default function ContactsPage() {
         setExcludedIds(new Set());
     };
 
+    const approvedTemplates = availableTemplates.filter(
+        (template) => template.status === 'APPROVED' || template.status === 'ACTIVE'
+    );
+
+    const getAvailableTemplateBody = (templateName: string | null): string | null => {
+        if (!templateName) return null;
+        return availableTemplates.find((template) => template.name === templateName)?.bodyText || null;
+    };
+
     const getSelectedContactIds = async (): Promise<string[]> => {
         if (selectAllMode) {
             const allIds = await fetchAllContactIds();
@@ -747,8 +792,13 @@ export default function ContactsPage() {
             return;
         }
 
-        if (usePart2AsButtonValue && normalizedMessageButtons.length === 0) {
+        if (!customButtonsDisabled && usePart2AsButtonValue && normalizedMessageButtons.length === 0) {
             alert('Dynamic button mode requires at least one button. Add a Link or Quick Reply button first.');
+            return;
+        }
+
+        if (envelopeWrapper === 'template' && !selectedTemplateName) {
+            alert('Pick an approved template before sending.');
             return;
         }
 
@@ -850,10 +900,12 @@ export default function ContactsPage() {
                             messageText: messageText.trim(),
                             messagePart1,
                             messagePart2,
-                            buttons: envelopeWrapper.startsWith('btn_') ? [] : normalizedMessageButtons,
+                            buttons: customButtonsDisabled ? [] : normalizedMessageButtons,
                             buttonMode: usePart2AsButtonValue ? 'RESPONSE_DYNAMIC' : 'TEMPLATE_STATIC',
                             buttonPlaceholderMode: false,
-                            envelopeWrapper
+                            envelopeWrapper,
+                            templateName: envelopeWrapper === 'template' ? selectedTemplateName : undefined,
+                            templateLanguage: envelopeWrapper === 'template' ? selectedTemplateLanguage : undefined
                         })
                     });
 
@@ -948,9 +1000,12 @@ export default function ContactsPage() {
                                             messageText: messageText.trim(),
                                             messagePart1,
                                             messagePart2,
-                                            buttons: normalizedMessageButtons,
+                                            buttons: customButtonsDisabled ? [] : normalizedMessageButtons,
                                             buttonMode: usePart2AsButtonValue ? 'RESPONSE_DYNAMIC' : 'TEMPLATE_STATIC',
-                                            buttonPlaceholderMode: false
+                                            buttonPlaceholderMode: false,
+                                            envelopeWrapper,
+                                            templateName: envelopeWrapper === 'template' ? selectedTemplateName : undefined,
+                                            templateLanguage: envelopeWrapper === 'template' ? selectedTemplateLanguage : undefined
                                         })
                                     });
 
@@ -1229,8 +1284,13 @@ export default function ContactsPage() {
             return;
         }
 
-        if (usePart2AsButtonValue && normalizedMessageButtons.length === 0) {
+        if (!customButtonsDisabled && usePart2AsButtonValue && normalizedMessageButtons.length === 0) {
             alert('Dynamic button mode requires at least one button. Add a Link or Quick Reply button first.');
+            return;
+        }
+
+        if (envelopeWrapper === 'template' && !selectedTemplateName) {
+            alert('Pick an approved template before sending.');
             return;
         }
 
@@ -1245,9 +1305,12 @@ export default function ContactsPage() {
                     messageText: messageText.trim(),
                     messagePart1,
                     messagePart2,
-                    buttons: normalizedMessageButtons,
+                    buttons: customButtonsDisabled ? [] : normalizedMessageButtons,
                     buttonMode: usePart2AsButtonValue ? 'RESPONSE_DYNAMIC' : 'TEMPLATE_STATIC',
-                    buttonPlaceholderMode: false
+                    buttonPlaceholderMode: false,
+                    envelopeWrapper,
+                    templateName: envelopeWrapper === 'template' ? selectedTemplateName : undefined,
+                    templateLanguage: envelopeWrapper === 'template' ? selectedTemplateLanguage : undefined
                 })
             });
 
@@ -2036,9 +2099,62 @@ export default function ContactsPage() {
                             {envelopeWrapper === 'none' 
                                 ? 'Warning: Unwrapped messages will ONLY reach contacts who interacted with you in the last 24 hours.'
                                 : envelopeWrapper === 'template'
-                                ? 'The system will automatically pick a compatible approved template from this page.'
+                                ? 'Pick one approved template from this page for this bulk send.'
                                 : 'This wrapper bypasses the 24-hour limit, allowing you to blast all contacts anytime.'}
                         </p>
+                        {envelopeWrapper === 'template' && (
+                            <div className="mt-3 space-y-3">
+                                {approvedTemplates.length === 0 ? (
+                                    <div className="text-xs font-mono text-red-700 bg-red-50 border border-red-200 p-3">
+                                        No approved templates were returned for this page. Reconnect the page with messaging permissions, then refresh templates.
+                                    </div>
+                                ) : (
+                                    <>
+                                        <select
+                                            className="input-wireframe"
+                                            value={selectedTemplateName || ''}
+                                            onChange={(event) => {
+                                                const name = event.target.value || null;
+                                                setSelectedTemplateName(name);
+                                                if (name) {
+                                                    const template = approvedTemplates.find((item) => item.name === name);
+                                                    setSelectedTemplateLanguage(template?.language || 'en_US');
+                                                } else {
+                                                    setSelectedTemplateLanguage('en_US');
+                                                }
+                                            }}
+                                        >
+                                            <option value="">-- Pick a template --</option>
+                                            {approvedTemplates.map((template) => (
+                                                <option
+                                                    key={`${template.name}-${template.language || 'en_US'}`}
+                                                    value={template.name}
+                                                >
+                                                    {template.name.replace(/_/g, ' ')} ({template.language || 'en_US'})
+                                                </option>
+                                            ))}
+                                        </select>
+
+                                        {selectedTemplateName && getAvailableTemplateBody(selectedTemplateName) && (
+                                            <div className="p-3 bg-white border border-dashed border-gray-400 rounded">
+                                                <p className="text-[10px] font-bold uppercase text-gray-500 mb-1.5">Selected Template</p>
+                                                <p className="text-xs font-mono text-gray-700 leading-relaxed">
+                                                    {getAvailableTemplateBody(selectedTemplateName)!.split(/\{\{(\d+)\}\}/).map((part, idx) =>
+                                                        idx % 2 === 0 ? (
+                                                            <span key={idx}>{part}</span>
+                                                        ) : (
+                                                            <span key={idx} className="inline-block bg-blue-100 text-blue-700 border border-blue-300 px-1.5 py-0.5 mx-0.5 rounded font-bold text-[11px]">
+                                                                {'{{' + part + '}}'}
+                                                            </span>
+                                                        )
+                                                    )}
+                                                </p>
+                                            </div>
+                                        )}
+                                    </>
+                                )}
+                            </div>
+                        )}
                         {/* Show original template body when a template-backed wrapper is selected */}
                         {envelopeWrapper !== 'none' && envelopeWrapper !== 'template' && getTemplateBodyText(envelopeWrapper) && (
                             <div className="mt-3 p-3 bg-white border border-dashed border-gray-400 rounded">
@@ -2162,6 +2278,12 @@ export default function ContactsPage() {
                             <div className="bg-blue-50 text-blue-800 p-3 border border-blue-200">
                                 <p className="text-xs font-mono">
                                     <b>Note:</b> You selected a pre-approved Button Wrapper. Custom inline link buttons are disabled because Facebook requires hardcoded action buttons outside the 24-hour messaging window.
+                                </p>
+                            </div>
+                        ) : envelopeWrapper === 'template' ? (
+                            <div className="bg-blue-50 text-blue-800 p-3 border border-blue-200">
+                                <p className="text-xs font-mono">
+                                    <b>Note:</b> Custom inline buttons are disabled when sending with a selected approved template. Use a template that already includes its own buttons.
                                 </p>
                             </div>
                         ) : (

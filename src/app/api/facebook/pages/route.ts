@@ -3,6 +3,8 @@ import { getServerSession } from 'next-auth';
 import { authOptions } from '@/lib/auth';
 import { getFacebookPages } from '@/lib/facebook';
 
+export const dynamic = 'force-dynamic';
+
 // GET /api/facebook/pages - Get user's Facebook pages
 export async function GET(request: NextRequest) {
     try {

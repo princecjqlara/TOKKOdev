@@ -4,6 +4,8 @@ import { authOptions } from '@/lib/auth';
 import { getSupabaseAdmin } from '@/lib/supabase';
 import { getPageTemplates } from '@/lib/facebook';
 
+export const dynamic = 'force-dynamic';
+
 function getTemplateFetchFailure(error: unknown) {
     const message = (error as Error).message || 'Failed to fetch templates from Facebook';
     const isTokenError =

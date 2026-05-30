@@ -276,7 +276,9 @@ export async function POST(request: NextRequest) {
             buttons: rawButtons,
             buttonMode: rawButtonMode,
             buttonPlaceholderMode: rawButtonPlaceholderMode,
-            envelopeWrapper: rawEnvelopeWrapper
+            envelopeWrapper: rawEnvelopeWrapper,
+            templateName: rawTemplateName,
+            templateLanguage: rawTemplateLanguage
         } = body as {
             pageId?: string;
             contactIds?: string[];
@@ -287,6 +289,8 @@ export async function POST(request: NextRequest) {
             buttonMode?: string;
             buttonPlaceholderMode?: boolean;
             envelopeWrapper?: string;
+            templateName?: string;
+            templateLanguage?: string;
         };
 
         const resolvedMessage = resolveMessageParts(rawMessageText, rawMessagePart1, rawMessagePart2);
@@ -321,9 +325,17 @@ export async function POST(request: NextRequest) {
             rawButtonPlaceholderMode === true &&
             requestedButtons.length > 0;
             
+        const requestedExactTemplateName =
+            typeof rawTemplateName === 'string' && rawTemplateName.trim()
+                ? rawTemplateName.trim()
+                : undefined;
+        const requestedExactTemplateLanguage = normalizeLanguageCode(rawTemplateLanguage);
+
         // Map envelopeWrapper to target template name
         let targetEnvelopeTemplateName: string | undefined = undefined;
-        if (rawEnvelopeWrapper && rawEnvelopeWrapper !== 'none' && rawEnvelopeWrapper !== 'template') {
+        if (requestedExactTemplateName) {
+            targetEnvelopeTemplateName = requestedExactTemplateName;
+        } else if (rawEnvelopeWrapper && rawEnvelopeWrapper !== 'none' && rawEnvelopeWrapper !== 'template') {
             switch(rawEnvelopeWrapper) {
                 case 'notice': targetEnvelopeTemplateName = 'general_notice_v1'; break;
                 case 'alert': targetEnvelopeTemplateName = 'general_alert_v1'; break;
@@ -345,9 +357,9 @@ export async function POST(request: NextRequest) {
             }
         }
         // When envelopeWrapper is 'template', force UTILITY messaging type to use auto-selected template
-        const forceUtilityMode = rawEnvelopeWrapper === 'template';
+        const forceUtilityMode = rawEnvelopeWrapper === 'template' || !!targetEnvelopeTemplateName;
 
-        const messagingType = targetEnvelopeTemplateName ? 'UTILITY' : getMessagingType(buttonMode, requestedButtons.length);
+        const messagingType = forceUtilityMode ? 'UTILITY' : getMessagingType(buttonMode, requestedButtons.length);
         const allowDualTemplateBodyModes =
             messagingType === 'UTILITY' &&
             resolvedMessage.isTwoPart &&
@@ -755,8 +767,31 @@ export async function POST(request: NextRequest) {
                         });
 
                         const exactEnvelopeTemplate = targetEnvelopeTemplateName
-                            ? sendableTemplates.find(t => typeof (t as any).name === 'string' && (t as any).name === targetEnvelopeTemplateName)
+                            ? sendableTemplates.find(t => {
+                                const nameMatches =
+                                    typeof (t as any).name === 'string' &&
+                                    (t as any).name === targetEnvelopeTemplateName;
+                                if (!nameMatches) return false;
+                                if (!requestedExactTemplateLanguage) return true;
+                                const templateLanguage = extractTemplateLanguageCode(t);
+                                return !templateLanguage || templateLanguage === requestedExactTemplateLanguage;
+                            })
                             : undefined;
+
+                        if (requestedExactTemplateName && !exactEnvelopeTemplate) {
+                            const statuses = utilityTemplates
+                                .filter((template) => (template as any).name === requestedExactTemplateName)
+                                .map((template) => {
+                                    const status = normalizeTemplateStatus(template.status) || 'UNKNOWN';
+                                    const language = extractTemplateLanguageCode(template) || 'unknown';
+                                    return `${language}:${status}`;
+                                })
+                                .join(', ');
+                            utilityTemplateBootstrapError = statuses
+                                ? `Selected template '${requestedExactTemplateName}' is not approved/active for this page. Existing statuses: ${statuses}`
+                                : `Selected template '${requestedExactTemplateName}' was not found on this page.`;
+                            return false;
+                        }
 
                         const selectedTemplate = exactEnvelopeTemplate || (requiresSupportTeamTemplate
                             ? supportTeamTemplate || twoPlaceholderTemplate || anyApprovedWithPlaceholder
