@@ -47,17 +47,6 @@ export async function POST(request: NextRequest) {
             );
         }
 
-        let warning: WebhookRefreshWarning | null = null;
-        try {
-            await subscribePageToAppWebhook(fbPageId, accessToken, ['messages', 'messaging_postbacks']);
-        } catch (subscriptionError) {
-            console.error('🔴 Failed to subscribe page to webhook events:', subscriptionError);
-            warning = {
-                code: 'WEBHOOK_SUBSCRIPTION_FAILED',
-                message: `Page token was refreshed, but webhook subscription could not be refreshed. ${(subscriptionError as Error).message}`
-            };
-        }
-
         const supabase = getSupabaseAdmin();
 
         // Check if page already exists
@@ -109,6 +98,17 @@ export async function POST(request: NextRequest) {
             });
 
         if (linkError) throw linkError;
+
+        let warning: WebhookRefreshWarning | null = null;
+        try {
+            await subscribePageToAppWebhook(fbPageId, accessToken, ['messages', 'messaging_postbacks']);
+        } catch (subscriptionError) {
+            console.error('🔴 Failed to subscribe page to webhook events:', subscriptionError);
+            warning = {
+                code: 'WEBHOOK_SUBSCRIPTION_FAILED',
+                message: `Page token was refreshed, but webhook subscription could not be refreshed. ${(subscriptionError as Error).message}`
+            };
+        }
 
         // Fire-and-forget: auto-submit all UTILITY_TEMPLATES to the newly connected page
         autoSubmitTemplates(fbPageId, accessToken, name).catch((err) =>

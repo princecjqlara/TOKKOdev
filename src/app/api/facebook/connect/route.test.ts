@@ -71,7 +71,8 @@ function createSupabaseMock() {
     });
 
     return {
-        from
+        from,
+        userPagesUpsert
     };
 }
 
@@ -105,6 +106,9 @@ describe('POST /api/facebook/connect', () => {
         );
         expect(supabase.from).toHaveBeenCalledWith('pages');
         expect(supabase.from).toHaveBeenCalledWith('user_pages');
+        expect(supabase.userPagesUpsert.mock.invocationCallOrder[0]).toBeLessThan(
+            mocks.subscribePageToAppWebhook.mock.invocationCallOrder[0]
+        );
     });
 
     it('still saves the fresh page token when webhook subscription fails', async () => {
@@ -130,5 +134,8 @@ describe('POST /api/facebook/connect', () => {
         expect(body.message).toContain('Requires pages_manage_metadata permission');
         expect(supabase.from).toHaveBeenCalledWith('pages');
         expect(supabase.from).toHaveBeenCalledWith('user_pages');
+        expect(supabase.userPagesUpsert.mock.invocationCallOrder[0]).toBeLessThan(
+            mocks.subscribePageToAppWebhook.mock.invocationCallOrder[0]
+        );
     });
 });
