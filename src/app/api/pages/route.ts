@@ -42,14 +42,22 @@ export async function GET(request: NextRequest) {
           fb_page_id,
           name,
           business_id,
-          created_at
+          created_at,
+          updated_at
         )
       `)
             .eq('user_id', userId);
 
         if (error) throw error;
 
-        const pages = userPages?.map(up => up.pages) || [];
+        const pages = (userPages
+            ?.map((up) => Array.isArray(up.pages) ? up.pages[0] : up.pages)
+            .filter(Boolean) || [])
+            .sort((a, b) => {
+                const updatedDiff = new Date(b.updated_at || b.created_at).getTime() - new Date(a.updated_at || a.created_at).getTime();
+                if (updatedDiff !== 0) return updatedDiff;
+                return a.name.localeCompare(b.name);
+            });
 
         return NextResponse.json({ pages });
     } catch (error) {
