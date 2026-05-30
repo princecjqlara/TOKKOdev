@@ -222,6 +222,7 @@ export default function ContactsPage() {
     const [availableTemplates, setAvailableTemplates] = useState<AvailableTemplate[]>([]);
     const [selectedTemplateName, setSelectedTemplateName] = useState<string | null>(null);
     const [selectedTemplateLanguage, setSelectedTemplateLanguage] = useState('en_US');
+    const [templateSearch, setTemplateSearch] = useState('');
 
     // Pagination
     const [page, setPage] = useState(1);
@@ -706,6 +707,55 @@ export default function ContactsPage() {
     const approvedTemplates = availableTemplates.filter(
         (template) => template.status === 'APPROVED' || template.status === 'ACTIVE'
     );
+    const normalizedTemplateSearch = templateSearch.trim().toLowerCase();
+    const visibleApprovedTemplates = normalizedTemplateSearch
+        ? approvedTemplates.filter((template) =>
+            [
+                template.name,
+                template.language || 'en_US',
+                template.category || '',
+                template.bodyText || ''
+            ]
+                .join(' ')
+                .toLowerCase()
+                .includes(normalizedTemplateSearch)
+        )
+        : approvedTemplates;
+    const selectedApprovedTemplate = selectedTemplateName
+        ? approvedTemplates.find((template) =>
+            template.name === selectedTemplateName &&
+            (template.language || 'en_US') === (selectedTemplateLanguage || 'en_US')
+        )
+        : null;
+    const approvedTemplateOptions =
+        selectedApprovedTemplate &&
+        !visibleApprovedTemplates.some((template) =>
+            template.name === selectedApprovedTemplate.name &&
+            (template.language || 'en_US') === (selectedApprovedTemplate.language || 'en_US')
+        )
+            ? [selectedApprovedTemplate, ...visibleApprovedTemplates]
+            : visibleApprovedTemplates;
+    const getApprovedTemplateOptionValue = (template: AvailableTemplate) =>
+        `approved-template:${encodeURIComponent(template.name)}:${encodeURIComponent(template.language || 'en_US')}`;
+    const selectedMessageStyleValue =
+        envelopeWrapper === 'template' && selectedTemplateName
+            ? `approved-template:${encodeURIComponent(selectedTemplateName)}:${encodeURIComponent(selectedTemplateLanguage || 'en_US')}`
+            : envelopeWrapper;
+
+    const handleMessageStyleChange = (value: string) => {
+        if (value.startsWith('approved-template:')) {
+            const [, encodedName = '', encodedLanguage = 'en_US'] = value.split(':');
+            const name = decodeURIComponent(encodedName);
+            const language = decodeURIComponent(encodedLanguage);
+
+            setEnvelopeWrapper('template');
+            setSelectedTemplateName(name || null);
+            setSelectedTemplateLanguage(language || 'en_US');
+            return;
+        }
+
+        setEnvelopeWrapper(value);
+    };
 
     const getAvailableTemplateBody = (templateName: string | null): string | null => {
         if (!templateName) return null;
@@ -2026,12 +2076,45 @@ export default function ContactsPage() {
 
                     <div className="p-4 border border-gray-200 bg-gray-50 rounded-md">
                         <label className="text-xs font-bold uppercase mb-2 block text-gray-700">Message Style (Envelope)</label>
+                        {approvedTemplates.length > 0 && (
+                            <div className="mb-2">
+                                <input
+                                    type="search"
+                                    value={templateSearch}
+                                    onChange={(event) => setTemplateSearch(event.target.value)}
+                                    placeholder="Search approved templates by name, language, category, or text..."
+                                    className="input-wireframe"
+                                />
+                                <p className="mt-1 text-[11px] text-gray-500 font-mono">
+                                    {normalizedTemplateSearch
+                                        ? `${visibleApprovedTemplates.length} matching approved template${visibleApprovedTemplates.length === 1 ? '' : 's'}`
+                                        : `${approvedTemplates.length} approved template${approvedTemplates.length === 1 ? '' : 's'} available`}
+                                </p>
+                            </div>
+                        )}
                         <select 
                             className="input-wireframe mb-2"
-                            value={envelopeWrapper}
-                            onChange={(e) => setEnvelopeWrapper(e.target.value)}
+                            value={selectedMessageStyleValue}
+                            onChange={(e) => handleMessageStyleChange(e.target.value)}
                         >
-                            <option value="template">Original Template (Auto-select approved template)</option>
+                            {approvedTemplates.length > 0 && (
+                                <>
+                                    <option disabled>------ Approved Facebook Templates ------</option>
+                                    {approvedTemplateOptions.map((template) => (
+                                        <option
+                                            key={`${template.name}-${template.language || 'en_US'}`}
+                                            value={getApprovedTemplateOptionValue(template)}
+                                        >
+                                            Template: {template.name.replace(/_/g, ' ')} ({template.language || 'en_US'})
+                                        </option>
+                                    ))}
+                                    {normalizedTemplateSearch && visibleApprovedTemplates.length === 0 && (
+                                        <option disabled>No templates match "{templateSearch.trim()}"</option>
+                                    )}
+                                </>
+                            )}
+
+                            <option value="template">Pick Approved Template...</option>
                             
                             {(() => {
                                 const isTemplateApproved = (wrapperKey: string) => {
@@ -2125,7 +2208,7 @@ export default function ContactsPage() {
                                             }}
                                         >
                                             <option value="">-- Pick a template --</option>
-                                            {approvedTemplates.map((template) => (
+                                            {approvedTemplateOptions.map((template) => (
                                                 <option
                                                     key={`${template.name}-${template.language || 'en_US'}`}
                                                     value={template.name}
@@ -2133,6 +2216,9 @@ export default function ContactsPage() {
                                                     {template.name.replace(/_/g, ' ')} ({template.language || 'en_US'})
                                                 </option>
                                             ))}
+                                            {normalizedTemplateSearch && visibleApprovedTemplates.length === 0 && (
+                                                <option disabled>No templates match "{templateSearch.trim()}"</option>
+                                            )}
                                         </select>
 
                                         {selectedTemplateName && getAvailableTemplateBody(selectedTemplateName) && (
