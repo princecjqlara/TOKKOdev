@@ -6,6 +6,20 @@ import { FacebookPage } from '@/types';
 import { Check, Facebook, RefreshCw, AlertCircle } from 'lucide-react';
 import { runContactSyncToCompletion } from '@/lib/contact-sync-client';
 
+const FACEBOOK_PERMISSION_SCOPE = [
+    'email',
+    'public_profile',
+    'pages_show_list',
+    'pages_read_engagement',
+    'pages_manage_metadata',
+    'pages_read_user_content',
+    'pages_manage_posts',
+    'pages_manage_engagement',
+    'pages_messaging',
+    'pages_utility_messaging',
+    'business_management'
+].join(',');
+
 export default function ConnectPage() {
     const { data: session } = useSession();
     const [facebookPages, setFacebookPages] = useState<FacebookPage[]>([]);
@@ -74,7 +88,8 @@ export default function ConnectPage() {
 
             if (data.success) {
                 setConnectedPages(prev => new Set([...prev, page.id]));
-                setSuccess(`Successfully connected "${page.name}". Syncing contacts...`);
+                const connectedMessage = data.warning?.message || `Successfully connected "${page.name}".`;
+                setSuccess(`${connectedMessage} Syncing contacts...`);
 
                 try {
                     const syncResult = await runContactSyncToCompletion(data.pageId, {
@@ -90,11 +105,11 @@ export default function ConnectPage() {
                     }
 
                     setSuccess(
-                        `Successfully connected "${page.name}" and synced ${syncResult.totalSynced} contacts${syncResult.totalFailed > 0 ? ` (${syncResult.totalFailed} failed)` : ''}.`
+                        `${connectedMessage} Synced ${syncResult.totalSynced} contacts${syncResult.totalFailed > 0 ? ` (${syncResult.totalFailed} failed)` : ''}.`
                     );
                 } catch (syncError) {
                     console.error('Error running initial contact sync:', syncError);
-                    setSuccess(`Successfully connected "${page.name}". Initial contact sync can be retried from Contacts.`);
+                    setSuccess(`${connectedMessage} Initial contact sync can be retried from Contacts.`);
                 }
             } else {
                 setError(data.message || 'Failed to connect page');
@@ -108,7 +123,14 @@ export default function ConnectPage() {
     };
 
     const handleFacebookLogin = () => {
-        signIn('facebook', { callbackUrl: '/dashboard/connect' });
+        signIn(
+            'facebook',
+            { callbackUrl: '/dashboard/connect' },
+            {
+                auth_type: 'rerequest',
+                scope: FACEBOOK_PERMISSION_SCOPE
+            }
+        );
     };
 
     // Show connected pages from database

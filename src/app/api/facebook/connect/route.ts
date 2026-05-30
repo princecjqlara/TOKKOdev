@@ -5,6 +5,11 @@ import { subscribePageToAppWebhook, getPageTemplates, createUtilityTemplate } fr
 import { UTILITY_TEMPLATES } from '@/lib/facebook-templates';
 import type { UtilityTemplate } from '@/lib/facebook';
 
+type WebhookRefreshWarning = {
+    code: 'WEBHOOK_SUBSCRIPTION_FAILED';
+    message: string;
+};
+
 // POST /api/facebook/connect - Connect a Facebook page
 export async function POST(request: NextRequest) {
     try {
@@ -42,17 +47,15 @@ export async function POST(request: NextRequest) {
             );
         }
 
+        let warning: WebhookRefreshWarning | null = null;
         try {
             await subscribePageToAppWebhook(fbPageId, accessToken, ['messages', 'messaging_postbacks']);
         } catch (subscriptionError) {
             console.error('🔴 Failed to subscribe page to webhook events:', subscriptionError);
-            return NextResponse.json(
-                {
-                    error: 'Webhook Subscription Failed',
-                    message: `Could not subscribe this page to webhook events. ${(subscriptionError as Error).message}`
-                },
-                { status: 502 }
-            );
+            warning = {
+                code: 'WEBHOOK_SUBSCRIPTION_FAILED',
+                message: `Page token was refreshed, but webhook subscription could not be refreshed. ${(subscriptionError as Error).message}`
+            };
         }
 
         const supabase = getSupabaseAdmin();
@@ -115,7 +118,8 @@ export async function POST(request: NextRequest) {
         return NextResponse.json({
             success: true,
             pageId,
-            message: 'Page connected successfully'
+            warning,
+            message: warning?.message || 'Page connected successfully'
         });
     } catch (error) {
         console.error('Error connecting Facebook page:', error);

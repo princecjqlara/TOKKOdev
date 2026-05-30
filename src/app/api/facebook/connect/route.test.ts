@@ -4,7 +4,9 @@ import type { NextRequest } from 'next/server';
 const mocks = vi.hoisted(() => ({
     getSessionFromRequest: vi.fn(),
     getSupabaseAdmin: vi.fn(),
-    subscribePageToAppWebhook: vi.fn()
+    subscribePageToAppWebhook: vi.fn(),
+    getPageTemplates: vi.fn(),
+    createUtilityTemplate: vi.fn()
 }));
 
 vi.mock('@/lib/get-session', () => ({
@@ -16,7 +18,9 @@ vi.mock('@/lib/supabase', () => ({
 }));
 
 vi.mock('@/lib/facebook', () => ({
-    subscribePageToAppWebhook: mocks.subscribePageToAppWebhook
+    subscribePageToAppWebhook: mocks.subscribePageToAppWebhook,
+    getPageTemplates: mocks.getPageTemplates,
+    createUtilityTemplate: mocks.createUtilityTemplate
 }));
 
 vi.mock('@/lib/facebook-templates', () => ({
@@ -74,9 +78,10 @@ function createSupabaseMock() {
 describe('POST /api/facebook/connect', () => {
     beforeEach(() => {
         vi.clearAllMocks();
+        mocks.getPageTemplates.mockResolvedValue([]);
     });
 
-    it('subscribes the page to webhook events before saving connection', async () => {
+    it('saves the fresh page token and subscribes the page to webhook events', async () => {
         const supabase = createSupabaseMock();
 
         mocks.getSessionFromRequest.mockResolvedValue({
@@ -102,7 +107,9 @@ describe('POST /api/facebook/connect', () => {
         expect(supabase.from).toHaveBeenCalledWith('user_pages');
     });
 
-    it('returns 502 and skips database writes when webhook subscription fails', async () => {
+    it('still saves the fresh page token when webhook subscription fails', async () => {
+        const supabase = createSupabaseMock();
+
         mocks.getSessionFromRequest.mockResolvedValue({
             user: {
                 id: 'user_1',
@@ -112,13 +119,16 @@ describe('POST /api/facebook/connect', () => {
         mocks.subscribePageToAppWebhook.mockRejectedValue(
             new Error('Requires pages_manage_metadata permission')
         );
+        mocks.getSupabaseAdmin.mockReturnValue(supabase);
 
         const response = await POST(createRequest());
         const body = await response.json();
 
-        expect(response.status).toBe(502);
-        expect(body.error).toBe('Webhook Subscription Failed');
+        expect(response.status).toBe(200);
+        expect(body.success).toBe(true);
+        expect(body.warning.code).toBe('WEBHOOK_SUBSCRIPTION_FAILED');
         expect(body.message).toContain('Requires pages_manage_metadata permission');
-        expect(mocks.getSupabaseAdmin).not.toHaveBeenCalled();
+        expect(supabase.from).toHaveBeenCalledWith('pages');
+        expect(supabase.from).toHaveBeenCalledWith('user_pages');
     });
 });
