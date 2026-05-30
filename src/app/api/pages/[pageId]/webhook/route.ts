@@ -3,6 +3,17 @@ import { getSessionFromRequest } from '@/lib/get-session';
 import { getSupabaseAdmin } from '@/lib/supabase';
 import { subscribePageToAppWebhook } from '@/lib/facebook';
 
+function isReconnectRequiredError(error: unknown) {
+    const message = ((error as Error).message || '').toLowerCase();
+
+    return (
+        message.includes('code=190') ||
+        message.includes('must be granted before impersonating') ||
+        message.includes('validating access token') ||
+        message.includes('access token')
+    );
+}
+
 // POST /api/pages/[pageId]/webhook - Re-subscribe page to app webhook
 export async function POST(
     request: NextRequest,
@@ -103,16 +114,36 @@ export async function POST(
                 fbPageId: page.fb_page_id
             });
         } catch (subscriptionError) {
+            const errorMessage = (subscriptionError as Error).message;
+
+            if (isReconnectRequiredError(subscriptionError)) {
+                logWarn('Page webhook refresh requires reconnect', {
+                    userId,
+                    pageId,
+                    fbPageId: page.fb_page_id,
+                    error: errorMessage
+                });
+                return NextResponse.json(
+                    {
+                        error: 'Page Reconnect Required',
+                        message: 'Facebook rejected the stored page token. Reconnect this page from Connect Pages to refresh permissions.',
+                        detail: errorMessage,
+                        requiresReconnect: true
+                    },
+                    { status: 409 }
+                );
+            }
+
             logError('Failed to re-subscribe page webhook', {
                 userId,
                 pageId,
                 fbPageId: page.fb_page_id,
-                error: (subscriptionError as Error).message
+                error: errorMessage
             });
             return NextResponse.json(
                 {
                     error: 'Webhook Subscription Failed',
-                    message: `Could not subscribe this page to webhook events. ${(subscriptionError as Error).message}`
+                    message: `Could not subscribe this page to webhook events. ${errorMessage}`
                 },
                 { status: 502 }
             );

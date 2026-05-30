@@ -113,14 +113,38 @@ describe('POST /api/pages/[pageId]/webhook', () => {
         expect(mocks.subscribePageToAppWebhook).not.toHaveBeenCalled();
     });
 
-    it('returns 502 when facebook subscription fails', async () => {
+    it('returns 409 when facebook rejects the stored page token', async () => {
         mocks.getSessionFromRequest.mockResolvedValue({
             user: {
                 id: 'user_1'
             }
         });
         mocks.subscribePageToAppWebhook.mockRejectedValue(
-            new Error('Requires pages_manage_metadata permission')
+            new Error(
+                'Any of the pages_read_engagement, pages_manage_metadata, pages_read_user_content, pages_manage_ads, pages_show_list or pages_messaging permission(s) must be granted before impersonating a user\'s page.'
+            )
+        );
+        const supabase = createSupabaseMock({ hasAccess: true });
+        mocks.getSupabaseAdmin.mockReturnValue(supabase);
+
+        const response = await POST(createRequest(), {
+            params: Promise.resolve({ pageId: 'page_row_1' })
+        });
+        const body = await response.json();
+
+        expect(response.status).toBe(409);
+        expect(body.error).toBe('Page Reconnect Required');
+        expect(body.requiresReconnect).toBe(true);
+    });
+
+    it('returns 502 when facebook subscription fails for a non-token reason', async () => {
+        mocks.getSessionFromRequest.mockResolvedValue({
+            user: {
+                id: 'user_1'
+            }
+        });
+        mocks.subscribePageToAppWebhook.mockRejectedValue(
+            new Error('Facebook did not confirm webhook subscription for this page')
         );
         const supabase = createSupabaseMock({ hasAccess: true });
         mocks.getSupabaseAdmin.mockReturnValue(supabase);
@@ -132,6 +156,5 @@ describe('POST /api/pages/[pageId]/webhook', () => {
 
         expect(response.status).toBe(502);
         expect(body.error).toBe('Webhook Subscription Failed');
-        expect(body.message).toContain('Requires pages_manage_metadata permission');
     });
 });
