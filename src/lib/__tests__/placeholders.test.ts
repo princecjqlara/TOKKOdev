@@ -60,4 +60,10 @@ describe('replaceTemplateVariables', () => {
         const template = 'Hello {first_name}!';
         expect(replaceTemplateVariables(template, emptyContact)).toBe('Hello there!');
     });
+
+    it('should use "there" as fallback for placeholder contact names', () => {
+        const placeholderContact = { ...contact, name: 'Unknown Name' };
+        const template = 'Hello {name}!';
+        expect(replaceTemplateVariables(template, placeholderContact)).toBe('Hello there!');
+    });
 });

@@ -1,3 +1,5 @@
+import { normalizeContactName } from './contact-names';
+
 export interface ContactRecord {
     id: string;
     psid: string;
@@ -13,7 +15,7 @@ export interface ContactRecord {
 export function replaceTemplateVariables(template: string, contact: ContactRecord): string {
     let message = template;
 
-    const name = contact.name || 'there';
+    const name = normalizeContactName(contact.name) || 'there';
     const nameParts = name.split(' ');
     const firstName = nameParts[0] || 'there';
     const lastName = nameParts.length > 1 ? nameParts.slice(1).join(' ') : '';

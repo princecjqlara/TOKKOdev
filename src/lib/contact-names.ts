@@ -1,4 +1,11 @@
-const PLACEHOLDER_NAME_VALUES = new Set(['unknown', 'undefined', 'null']);
+const PLACEHOLDER_NAME_VALUES = new Set([
+    'unknown',
+    'unknown name',
+    'unknown user',
+    'facebook user',
+    'undefined',
+    'null'
+]);
 
 export function normalizeContactName(value: unknown): string | null {
     if (typeof value !== 'string') {

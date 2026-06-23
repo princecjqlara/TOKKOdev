@@ -425,6 +425,33 @@ describe('POST /api/facebook/webhook', () => {
         );
     });
 
+    it('refreshes existing contacts that still have placeholder Unknown Name values', async () => {
+        const supabase = createSupabaseMock({
+            existingContact: {
+                id: 'contact_row_1',
+                name: 'Unknown Name',
+                profile_pic: null
+            }
+        });
+        mocks.getSupabaseAdmin.mockReturnValue(supabase);
+        mocks.getUserProfile.mockResolvedValue({
+            id: 'contact_psid_1',
+            name: 'Recovered Contact Name',
+            profile_pic: 'https://example.com/recovered.jpg'
+        });
+
+        const response = await POST(createWebhookRequest());
+        const body = await response.json();
+
+        expect(response.status).toBe(200);
+        expect(body.success).toBe(true);
+        expect(mocks.getUserProfile).toHaveBeenCalledWith('contact_psid_1', 'page_access_token_1');
+
+        const payload = supabase.contactsUpsert.mock.calls[0][0] as Record<string, unknown>;
+        expect(payload.name).toBe('Recovered Contact Name');
+        expect(payload.profile_pic).toBe('https://example.com/recovered.jpg');
+    });
+
     it('does not persist placeholder UNKNOWN name values from profile fetch', async () => {
         const supabase = createSupabaseMock({
             existingContact: {

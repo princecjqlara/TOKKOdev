@@ -68,7 +68,7 @@
             name IS NULL
             OR (
                 btrim(name) <> ''
-                AND lower(btrim(name)) NOT IN ('unknown', 'undefined', 'null')
+                AND lower(btrim(name)) NOT IN ('unknown', 'unknown name', 'unknown user', 'facebook user', 'undefined', 'null')
             )
         ),
         UNIQUE(page_id, psid)

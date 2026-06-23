@@ -240,7 +240,7 @@ describe('GET /api/pages/[pageId]/contacts', () => {
                     id: 'contact_1',
                     page_id: 'page_1',
                     psid: 'psid_1',
-                    name: 'UNKNOWN',
+                    name: 'Unknown Name',
                     created_at: '2026-01-01T00:00:00.000Z',
                     updated_at: '2026-01-01T00:00:00.000Z',
                     contact_tags: []

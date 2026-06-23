@@ -2,6 +2,7 @@ import { generatePersonalizedMessage } from './ai';
 import { parseCampaignMessageSequence } from './campaign-message-sequence';
 import { getConversationIdForPsid, getConversationMessages, sendMessage, getPageTemplates, createUtilityTemplate, UTILITY_TEMPLATES } from './facebook';
 import { UTILITY_TEMPLATES as TEMPLATE_DEFS } from './facebook-templates';
+import { normalizeContactName } from './contact-names';
 import { replaceTemplateVariables } from './placeholders';
 import { getSupabaseAdmin } from './supabase';
 
@@ -228,11 +229,12 @@ export async function sendCampaignById({
                 try {
                     let messagesToSend = parseCampaignMessageSequence(campaign.message_text);
 
+                    const normalizedContactName = normalizeContactName(contact.name);
                     const placeholderContact = {
                         id: recipient.contact_id,
                         psid: contact.psid,
                         page_id: campaign.page_id,
-                        name: contact.name || null,
+                        name: normalizedContactName,
                         last_interaction_at: null
                     };
 
@@ -254,7 +256,7 @@ export async function sendCampaignById({
 
                             const messageToSend = await generatePersonalizedMessage(
                                 campaign.ai_prompt,
-                                contact.name || 'Friend',
+                                normalizedContactName || 'Friend',
                                 messages
                             );
                             messagesToSend = [messageToSend];
