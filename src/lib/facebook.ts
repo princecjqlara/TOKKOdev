@@ -60,6 +60,10 @@ export async function getPageConversations(
     sinceTimestamp?: string // ISO timestamp - only fetch conversations updated after this
 ): Promise<FacebookConversation[]> {
     const allConversations: FacebookConversation[] = [];
+    const configuredLimit = Number.parseInt(process.env.FACEBOOK_CONVERSATION_SYNC_LIMIT || '250000', 10);
+    const conversationSafetyLimit = Number.isFinite(configuredLimit) && configuredLimit > 0
+        ? configuredLimit
+        : 250000;
 
     // Build initial URL with optional since parameter
     let baseUrl = `${FACEBOOK_GRAPH_URL}/${pageId}/conversations?fields=id,participants,updated_time&limit=${limit}&access_token=${pageAccessToken}`;
@@ -125,9 +129,14 @@ export async function getPageConversations(
             console.log(`📄 Pagination complete: no more pages available`);
         }
 
-        // Safety limit to prevent infinite pagination loops.
+        // Safety limits to prevent infinite pagination loops on very large pages.
         if (pageCount >= 1000) {
             console.warn(`Hit conversation pagination safety limit after ${pageCount} Facebook API pages`);
+            break;
+        }
+
+        if (allConversations.length >= conversationSafetyLimit) {
+            console.warn(`Hit conversation limit of ${conversationSafetyLimit} (stopping pagination)`);
             break;
         }
     }

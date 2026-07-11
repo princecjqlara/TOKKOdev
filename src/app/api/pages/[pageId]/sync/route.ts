@@ -221,6 +221,49 @@ export async function POST(
             resumePsidCount: resumePsids.length
         });
 
+        // Persist basic contact rows before slower enrichment work. Large pages can exceed
+        // serverless time limits while fetching profiles/messages, but the leads should
+        // still appear as soon as conversations have been fetched from Facebook.
+        const basicContactRows = validConversations
+            .map(conversation => {
+                const participant = conversation.participants?.data?.find(p => p.id !== page.fb_page_id);
+                if (!participant?.id) return null;
+
+                const interactionDate = conversation.updated_time ? new Date(conversation.updated_time) : null;
+                const bestContactHour = interactionDate && !Number.isNaN(interactionDate.getTime())
+                    ? interactionDate.getUTCHours()
+                    : null;
+
+                return {
+                    page_id: pageId,
+                    psid: participant.id,
+                    last_interaction_at: conversation.updated_time,
+                    best_contact_hour: bestContactHour,
+                    best_contact_confidence: bestContactHour === null ? 'none' : 'inferred',
+                    best_contact_hours: bestContactHour === null ? [] : [{ hour: bestContactHour, count: 1 }],
+                    interaction_count: bestContactHour === null ? 0 : 1,
+                    updated_at: new Date().toISOString()
+                };
+            })
+            .filter((contact): contact is NonNullable<typeof contact> => contact !== null);
+
+        const BASIC_CONTACT_UPSERT_CHUNK_SIZE = 500;
+        for (let i = 0; i < basicContactRows.length; i += BASIC_CONTACT_UPSERT_CHUNK_SIZE) {
+            const chunk = basicContactRows.slice(i, i + BASIC_CONTACT_UPSERT_CHUNK_SIZE);
+            const { error: basicUpsertError } = await supabase
+                .from('contacts')
+                .upsert(chunk, {
+                    onConflict: 'page_id,psid',
+                    ignoreDuplicates: false
+                });
+
+            if (basicUpsertError) throw basicUpsertError;
+        }
+
+        logInfo('Basic contact sync persisted contacts before enrichment', {
+            contactCount: basicContactRows.length
+        });
+
         // Check for deleted contacts that should be re-added
         // Get all PSIDs from fetched conversations
         const conversationPsids = new Set<string>();
