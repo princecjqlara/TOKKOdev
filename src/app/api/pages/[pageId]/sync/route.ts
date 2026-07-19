@@ -233,10 +233,12 @@ export async function POST(
                 const bestContactHour = interactionDate && !Number.isNaN(interactionDate.getTime())
                     ? interactionDate.getUTCHours()
                     : null;
+                const participantName = normalizeContactName(participant.name);
 
                 return {
                     page_id: pageId,
                     psid: participant.id,
+                    ...(participantName ? { name: participantName } : {}),
                     last_interaction_at: conversation.updated_time,
                     best_contact_hour: bestContactHour,
                     best_contact_confidence: bestContactHour === null ? 'none' : 'inferred',
@@ -248,16 +250,23 @@ export async function POST(
             .filter((contact): contact is NonNullable<typeof contact> => contact !== null);
 
         const BASIC_CONTACT_UPSERT_CHUNK_SIZE = 500;
-        for (let i = 0; i < basicContactRows.length; i += BASIC_CONTACT_UPSERT_CHUNK_SIZE) {
-            const chunk = basicContactRows.slice(i, i + BASIC_CONTACT_UPSERT_CHUNK_SIZE);
-            const { error: basicUpsertError } = await supabase
-                .from('contacts')
-                .upsert(chunk, {
-                    onConflict: 'page_id,psid',
-                    ignoreDuplicates: false
-                });
+        const basicContactRowGroups = [
+            basicContactRows.filter((contact) => Object.prototype.hasOwnProperty.call(contact, 'name')),
+            basicContactRows.filter((contact) => !Object.prototype.hasOwnProperty.call(contact, 'name'))
+        ];
 
-            if (basicUpsertError) throw basicUpsertError;
+        for (const rows of basicContactRowGroups) {
+            for (let i = 0; i < rows.length; i += BASIC_CONTACT_UPSERT_CHUNK_SIZE) {
+                const chunk = rows.slice(i, i + BASIC_CONTACT_UPSERT_CHUNK_SIZE);
+                const { error: basicUpsertError } = await supabase
+                    .from('contacts')
+                    .upsert(chunk, {
+                        onConflict: 'page_id,psid',
+                        ignoreDuplicates: false
+                    });
+
+                if (basicUpsertError) throw basicUpsertError;
+            }
         }
 
         logInfo('Basic contact sync persisted contacts before enrichment', {
