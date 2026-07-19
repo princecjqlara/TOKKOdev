@@ -10,7 +10,7 @@ const MAX_MESSAGES_PER_RUN = 5;
 const MAX_CAMPAIGNS_PER_RUN = 3;
 
 // GET /api/cron/campaign-loop - Called by cron-job.org every minute
-export async function GET(request: NextRequest) {
+export async function GET(_request: NextRequest) {
     const startTime = Date.now();
 
     const supabase = getSupabaseAdmin();

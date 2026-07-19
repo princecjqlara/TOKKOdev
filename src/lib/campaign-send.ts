@@ -13,6 +13,8 @@ type SendCampaignByIdOptions = {
     supabase?: SupabaseLike;
     userId?: string;
     allowScheduled?: boolean;
+    dueAt?: string;
+    includeUnscheduledRecipients?: boolean;
 };
 
 type SendCampaignByIdResult = {
@@ -27,7 +29,9 @@ export async function sendCampaignById({
     campaignId,
     supabase = getSupabaseAdmin(),
     userId,
-    allowScheduled = false
+    allowScheduled = false,
+    dueAt,
+    includeUnscheduledRecipients = false
 }: SendCampaignByIdOptions): Promise<SendCampaignByIdResult> {
     try {
         const { data: campaign } = await supabase
@@ -83,11 +87,25 @@ export async function sendCampaignById({
         console.log(`📤 Fetching all recipients for campaign ${campaignId}...`);
 
         while (hasMore) {
-            const { data: recipientBatch, error: recipientError } = await supabase
+            let recipientQuery = supabase
                 .from('campaign_recipients')
                 .select('id, contact_id, contacts(psid, name)')
                 .eq('campaign_id', campaignId)
-                .eq('status', 'pending')
+                .eq('status', 'pending');
+
+            if (dueAt) {
+                const dueFilters = [
+                    includeUnscheduledRecipients ? 'scheduled_at.is.null' : null,
+                    `scheduled_at.lte.${dueAt}`,
+                    `next_scheduled_at.lte.${dueAt}`
+                ].filter(Boolean);
+
+                recipientQuery = recipientQuery.or(
+                    dueFilters.join(',')
+                );
+            }
+
+            const { data: recipientBatch, error: recipientError } = await recipientQuery
                 .range(offset, offset + BATCH_SIZE - 1);
 
             if (recipientError) {
@@ -110,10 +128,29 @@ export async function sendCampaignById({
 
         const recipients = allRecipients;
 
+        async function getRemainingPendingRecipientCount() {
+            const { count, error } = await supabase
+                .from('campaign_recipients')
+                .select('id', { count: 'exact', head: true })
+                .eq('campaign_id', campaignId)
+                .eq('status', 'pending');
+
+            if (error) {
+                throw error;
+            }
+
+            return count || 0;
+        }
+
         if (!recipients?.length) {
+            const remainingPending = dueAt ? await getRemainingPendingRecipientCount() : 0;
             await supabase
                 .from('campaigns')
-                .update({ status: 'completed', failed_count: 0, updated_at: new Date().toISOString() })
+                .update({
+                    status: remainingPending > 0 ? 'scheduled' : 'completed',
+                    failed_count: 0,
+                    updated_at: new Date().toISOString()
+                })
                 .eq('id', campaignId);
 
             return {
@@ -122,7 +159,9 @@ export async function sendCampaignById({
                     success: true,
                     sent: 0,
                     failed: 0,
-                    message: 'No recipients to send to'
+                    message: remainingPending > 0
+                        ? 'No recipients are due yet'
+                        : 'No recipients to send to'
                 },
                 success: true,
                 sent: 0,
@@ -372,10 +411,11 @@ export async function sendCampaignById({
             .single();
 
         if (finalStatus?.status !== 'cancelled') {
+            const remainingPending = dueAt ? await getRemainingPendingRecipientCount() : 0;
             await supabase
                 .from('campaigns')
                 .update({
-                    status: 'completed',
+                    status: remainingPending > 0 ? 'scheduled' : 'completed',
                     sent_count: sent,
                     failed_count: failed,
                     updated_at: new Date().toISOString()

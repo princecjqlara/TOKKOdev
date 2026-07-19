@@ -19,7 +19,19 @@ vi.mock('@/lib/campaign-send', () => ({
     sendCampaignById: mocks.sendCampaignById
 }));
 
-import { GET } from './route';
+type CampaignRow = {
+    id: string;
+    page_id: string;
+    status: 'scheduled' | 'sending';
+    audience_mode: 'specific' | 'dynamic';
+    audience_start_date: string | null;
+    audience_include_tag_ids: string[];
+    audience_exclude_tag_ids: string[];
+    recurrence: 'none' | 'daily';
+    recurrence_end_at: string | null;
+    scheduled_at: string | null;
+    updated_at: string;
+};
 
 function createRequest(): NextRequest {
     return new Request('http://localhost:3000/api/cron/campaign-scheduled', {
@@ -27,30 +39,86 @@ function createRequest(): NextRequest {
     }) as NextRequest;
 }
 
-function createSupabaseMock() {
-    const dueCampaigns = [
-        {
-            id: 'campaign_1',
-            page_id: 'page_1',
-            audience_mode: 'dynamic',
-            audience_start_date: '2026-03-01',
-            audience_include_tag_ids: ['tag_a'],
-            audience_exclude_tag_ids: ['tag_x']
-        }
-    ];
+function createThenableQuery<T>(resultFactory: () => Promise<T>) {
+    const query: any = {
+        eq: vi.fn(() => query),
+        lte: vi.fn(() => query),
+        in: vi.fn(() => query),
+        select: vi.fn(() => query),
+        then: (resolve: (value: T) => unknown, reject: (error: unknown) => unknown) =>
+            resultFactory().then(resolve, reject)
+    };
 
-    const campaignsLte = vi.fn().mockResolvedValue({
-        data: dueCampaigns,
-        error: null
+    return query;
+}
+
+function createCampaign(overrides: Partial<CampaignRow> = {}): CampaignRow {
+    return {
+        id: 'campaign_1',
+        page_id: 'page_1',
+        status: 'scheduled',
+        audience_mode: 'dynamic',
+        audience_start_date: '2026-03-01',
+        audience_include_tag_ids: ['tag_a'],
+        audience_exclude_tag_ids: ['tag_x'],
+        recurrence: 'none',
+        recurrence_end_at: null,
+        scheduled_at: '2026-03-22T10:30:00.000Z',
+        updated_at: '2026-03-22T10:00:00.000Z',
+        ...overrides
+    };
+}
+
+function createSupabaseMock(options: {
+    campaignLevelCampaigns?: CampaignRow[];
+    staleSendingCampaigns?: CampaignRow[];
+    dueRecipientCampaigns?: CampaignRow[];
+    claimSucceeds?: boolean;
+} = {}) {
+    const campaignLevelCampaigns = options.campaignLevelCampaigns ?? [createCampaign()];
+    const staleSendingCampaigns = options.staleSendingCampaigns ?? [];
+    const dueRecipientCampaigns = options.dueRecipientCampaigns ?? [];
+    const claimSucceeds = options.claimSucceeds ?? true;
+
+    let campaignSelectCount = 0;
+    const campaignsSelect = vi.fn(() => {
+        campaignSelectCount += 1;
+        return createThenableQuery(async () => ({
+            data: campaignSelectCount === 1 ? campaignLevelCampaigns : staleSendingCampaigns,
+            error: null
+        }));
     });
-    const campaignsEqIsLoop = vi.fn().mockReturnValue({ lte: campaignsLte });
-    const campaignsInStatus = vi.fn().mockReturnValue({ eq: campaignsEqIsLoop });
-    const campaignsSelect = vi.fn().mockReturnValue({ in: campaignsInStatus });
 
-    const campaignsUpdateEq = vi.fn().mockResolvedValue({ error: null });
-    const campaignsUpdate = vi.fn().mockReturnValue({ eq: campaignsUpdateEq });
+    const campaignsUpdateEq = vi.fn();
+    const campaignsUpdateSelect = vi.fn();
+    const campaignsUpdate = vi.fn((updates: Record<string, unknown>) => {
+        const query: any = {
+            eq: vi.fn(() => query),
+            lte: vi.fn(() => query),
+            select: vi.fn(() => {
+                campaignsUpdateSelect();
+                return Promise.resolve({
+                    data: updates.status === 'sending' && claimSucceeds ? [{ id: 'claimed' }] : null,
+                    error: null
+                });
+            }),
+            then: (
+                resolve: (value: { error: null }) => unknown,
+                reject: (error: unknown) => unknown
+            ) => Promise.resolve({ error: null }).then(resolve, reject)
+        };
+        campaignsUpdateEq.mockImplementation(query.eq);
+        return query;
+    });
 
     const campaignRecipientsUpsert = vi.fn().mockResolvedValue({ error: null });
+    const campaignRecipientsSelect = vi.fn(() => createThenableQuery(async () => ({
+        data: dueRecipientCampaigns.map((campaign) => ({
+            campaign_id: campaign.id,
+            campaigns: campaign
+        })),
+        error: null
+    })));
 
     const from = vi.fn((table: string) => {
         if (table === 'campaigns') {
@@ -62,6 +130,7 @@ function createSupabaseMock() {
 
         if (table === 'campaign_recipients') {
             return {
+                select: campaignRecipientsSelect,
                 upsert: campaignRecipientsUpsert
             };
         }
@@ -69,12 +138,19 @@ function createSupabaseMock() {
         throw new Error(`Unexpected table: ${table}`);
     });
 
-        return {
-            from,
-            campaignRecipientsUpsert,
-            campaignsUpdate,
-            campaignsInStatus
-        };
+    return {
+        from,
+        campaignsSelect,
+        campaignsUpdate,
+        campaignsUpdateSelect,
+        campaignRecipientsUpsert,
+        campaignRecipientsSelect
+    };
+}
+
+async function loadRoute() {
+    vi.resetModules();
+    return import('./route');
 }
 
 describe('GET /api/cron/campaign-scheduled', () => {
@@ -82,35 +158,21 @@ describe('GET /api/cron/campaign-scheduled', () => {
         vi.clearAllMocks();
     });
 
-    it('processes due campaigns successfully', async () => {
-        const supabase = createSupabaseMock();
-        mocks.getSupabaseAdmin.mockReturnValue(supabase);
-        mocks.resolveCampaignAudienceContactIds.mockResolvedValue(['contact_1']);
-        mocks.sendCampaignById.mockResolvedValue({
-            success: true,
-            sent: 1,
-            failed: 0
-        });
-
-        const response = await GET(createRequest());
-
-        expect(response.status).toBe(200);
-    });
-
-    it('materializes dynamic recipients and dispatches due campaigns', async () => {
+    it('materializes dynamic recipients and dispatches due campaign-level schedules', async () => {
+        const { GET } = await loadRoute();
         const supabase = createSupabaseMock();
         mocks.getSupabaseAdmin.mockReturnValue(supabase);
         mocks.resolveCampaignAudienceContactIds.mockResolvedValue(['contact_1', 'contact_2']);
         mocks.sendCampaignById.mockResolvedValue({
             success: true,
             sent: 2,
-            failed: 0
+            failed: 0,
+            body: { success: true, sent: 2, failed: 0 }
         });
 
         const response = await GET(createRequest());
 
         expect(response.status).toBe(200);
-        expect(supabase.campaignsInStatus).toHaveBeenCalledWith('status', ['scheduled', 'sending']);
         expect(mocks.resolveCampaignAudienceContactIds).toHaveBeenCalledWith({
             supabase,
             pageId: 'page_1',
@@ -138,12 +200,46 @@ describe('GET /api/cron/campaign-scheduled', () => {
         expect(mocks.sendCampaignById).toHaveBeenCalledWith({
             campaignId: 'campaign_1',
             supabase,
-            allowScheduled: true
+            allowScheduled: true,
+            dueAt: expect.any(String),
+            includeUnscheduledRecipients: true
         });
-        expect(supabase.campaignsUpdate).toHaveBeenCalled();
+    });
+
+    it('dispatches recipient-level scheduled campaigns such as best-time sends', async () => {
+        const { GET } = await loadRoute();
+        const bestTimeCampaign = createCampaign({
+            id: 'campaign_best_time',
+            audience_mode: 'specific',
+            scheduled_at: null
+        });
+        const supabase = createSupabaseMock({
+            campaignLevelCampaigns: [],
+            dueRecipientCampaigns: [bestTimeCampaign]
+        });
+        mocks.getSupabaseAdmin.mockReturnValue(supabase);
+        mocks.sendCampaignById.mockResolvedValue({
+            success: true,
+            sent: 1,
+            failed: 0,
+            body: { success: true, sent: 1, failed: 0 }
+        });
+
+        const response = await GET(createRequest());
+
+        expect(response.status).toBe(200);
+        expect(mocks.resolveCampaignAudienceContactIds).not.toHaveBeenCalled();
+        expect(mocks.sendCampaignById).toHaveBeenCalledWith({
+            campaignId: 'campaign_best_time',
+            supabase,
+            allowScheduled: true,
+            dueAt: expect.any(String),
+            includeUnscheduledRecipients: false
+        });
     });
 
     it('upserts large dynamic audiences in batches', async () => {
+        const { GET } = await loadRoute();
         const supabase = createSupabaseMock();
         const contactIds = Array.from({ length: 1001 }, (_, index) => `contact_${index + 1}`);
         mocks.getSupabaseAdmin.mockReturnValue(supabase);
@@ -151,7 +247,8 @@ describe('GET /api/cron/campaign-scheduled', () => {
         mocks.sendCampaignById.mockResolvedValue({
             success: true,
             sent: 1001,
-            failed: 0
+            failed: 0,
+            body: { success: true, sent: 1001, failed: 0 }
         });
 
         const response = await GET(createRequest());
@@ -161,5 +258,21 @@ describe('GET /api/cron/campaign-scheduled', () => {
         expect(supabase.campaignRecipientsUpsert.mock.calls[0][0]).toHaveLength(500);
         expect(supabase.campaignRecipientsUpsert.mock.calls[1][0]).toHaveLength(500);
         expect(supabase.campaignRecipientsUpsert.mock.calls[2][0]).toHaveLength(1);
+    });
+
+    it('skips campaigns that another cron invocation already claimed', async () => {
+        const { GET } = await loadRoute();
+        const supabase = createSupabaseMock({ claimSucceeds: false });
+        mocks.getSupabaseAdmin.mockReturnValue(supabase);
+
+        const response = await GET(createRequest());
+        const body = await response.json();
+
+        expect(response.status).toBe(200);
+        expect(body.results[0]).toEqual(expect.objectContaining({
+            campaignId: 'campaign_1',
+            skipped: true
+        }));
+        expect(mocks.sendCampaignById).not.toHaveBeenCalled();
     });
 });

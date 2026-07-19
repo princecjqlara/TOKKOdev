@@ -18,6 +18,7 @@ function createSupabaseMock(
     options: {
         messageText?: string;
         recipients?: { id: string; contact_id: string; contacts: { psid: string; name?: string } }[];
+        remainingPendingCount?: number;
     } = {}
 ) {
     const campaignRecord = {
@@ -57,9 +58,21 @@ function createSupabaseMock(
         data: options.recipients || [],
         error: null
     });
-    const recipientsEqStatus = vi.fn().mockReturnValue({ range: recipientsRange });
+    const recipientsOr = vi.fn().mockReturnValue({ range: recipientsRange });
+    const recipientsEqStatus = vi.fn().mockReturnValue({ range: recipientsRange, or: recipientsOr });
     const recipientsEqCampaign = vi.fn().mockReturnValue({ eq: recipientsEqStatus });
-    const recipientsSelect = vi.fn().mockReturnValue({ eq: recipientsEqCampaign });
+    const recipientsCountEqStatus = vi.fn().mockResolvedValue({
+        count: options.remainingPendingCount || 0,
+        error: null
+    });
+    const recipientsCountEqCampaign = vi.fn().mockReturnValue({ eq: recipientsCountEqStatus });
+    const recipientsSelect = vi.fn((_columns: string, queryOptions?: { head?: boolean }) => {
+        if (queryOptions?.head) {
+            return { eq: recipientsCountEqCampaign };
+        }
+
+        return { eq: recipientsEqCampaign };
+    });
     const recipientsUpdateEq = vi.fn().mockResolvedValue({ error: null });
     const recipientsUpdate = vi.fn().mockReturnValue({ eq: recipientsUpdateEq });
 
@@ -91,7 +104,8 @@ function createSupabaseMock(
         from,
         campaignUpdate,
         campaignUpdateEq,
-        recipientsUpdate
+        recipientsUpdate,
+        recipientsOr
     };
 }
 
@@ -179,6 +193,69 @@ describe('sendCampaignById', () => {
             undefined,
             undefined,
             undefined
+        );
+    });
+
+    it('cron sends only due recipients and keeps campaign scheduled while future recipients remain', async () => {
+        const supabase = createSupabaseMock('scheduled', {
+            remainingPendingCount: 1,
+            recipients: [{
+                id: 'recipient_due',
+                contact_id: 'contact_1',
+                contacts: {
+                    psid: 'psid_1',
+                    name: 'Alex'
+                }
+            }]
+        });
+        vi.mocked(sendMessage).mockResolvedValue({ message_id: 'mid_due' });
+
+        const result = await sendCampaignById({
+            campaignId: 'campaign_1',
+            supabase: supabase as never,
+            allowScheduled: true,
+            dueAt: '2026-07-20T10:00:00.000Z'
+        });
+
+        expect(result.status).toBe(200);
+        expect(sendMessage).toHaveBeenCalledTimes(1);
+        expect(supabase.recipientsOr).toHaveBeenCalledWith(
+            'scheduled_at.lte.2026-07-20T10:00:00.000Z,next_scheduled_at.lte.2026-07-20T10:00:00.000Z'
+        );
+        expect(supabase.campaignUpdate).toHaveBeenLastCalledWith(
+            expect.objectContaining({
+                status: 'scheduled',
+                sent_count: 1,
+                failed_count: 0
+            })
+        );
+    });
+
+    it('cron includes unscheduled recipients when the campaign-level schedule is due', async () => {
+        const supabase = createSupabaseMock('scheduled', {
+            recipients: [{
+                id: 'recipient_1',
+                contact_id: 'contact_1',
+                contacts: {
+                    psid: 'psid_1',
+                    name: 'Alex'
+                }
+            }]
+        });
+        vi.mocked(sendMessage).mockResolvedValue({ message_id: 'mid_due' });
+
+        const result = await sendCampaignById({
+            campaignId: 'campaign_1',
+            supabase: supabase as never,
+            allowScheduled: true,
+            dueAt: '2026-07-20T10:00:00.000Z',
+            includeUnscheduledRecipients: true
+        });
+
+        expect(result.status).toBe(200);
+        expect(sendMessage).toHaveBeenCalledTimes(1);
+        expect(supabase.recipientsOr).toHaveBeenCalledWith(
+            'scheduled_at.is.null,scheduled_at.lte.2026-07-20T10:00:00.000Z,next_scheduled_at.lte.2026-07-20T10:00:00.000Z'
         );
     });
 });
