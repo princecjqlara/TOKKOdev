@@ -3,7 +3,7 @@
 UPDATE contacts
 SET name = NULL
 WHERE name IS NOT NULL
-  AND lower(btrim(name)) IN ('unknown', 'unknown name', 'unknown user', 'facebook user', 'undefined', 'null');
+  AND lower(btrim(name)) IN ('unknown', 'unknown name', 'unknown user', 'facebook user', 'messenger contact', 'undefined', 'null');
 
 ALTER TABLE contacts
     DROP CONSTRAINT IF EXISTS contacts_name_not_placeholder;
@@ -14,6 +14,6 @@ ALTER TABLE contacts
         name IS NULL
         OR (
             btrim(name) <> ''
-            AND lower(btrim(name)) NOT IN ('unknown', 'unknown name', 'unknown user', 'facebook user', 'undefined', 'null')
+            AND lower(btrim(name)) NOT IN ('unknown', 'unknown name', 'unknown user', 'facebook user', 'messenger contact', 'undefined', 'null')
         )
     );

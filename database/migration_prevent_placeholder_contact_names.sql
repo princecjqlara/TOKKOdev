@@ -7,7 +7,7 @@ SET name = NULL
 WHERE name IS NOT NULL
   AND (
     btrim(name) = ''
-    OR lower(btrim(name)) IN ('unknown', 'unknown name', 'unknown user', 'facebook user', 'undefined', 'null')
+    OR lower(btrim(name)) IN ('unknown', 'unknown name', 'unknown user', 'facebook user', 'messenger contact', 'undefined', 'null')
   );
 
 -- Reject future placeholder name writes at the database layer
@@ -25,7 +25,7 @@ BEGIN
             name IS NULL
             OR (
                 btrim(name) <> ''
-                AND lower(btrim(name)) NOT IN ('unknown', 'unknown name', 'unknown user', 'facebook user', 'undefined', 'null')
+                AND lower(btrim(name)) NOT IN ('unknown', 'unknown name', 'unknown user', 'facebook user', 'messenger contact', 'undefined', 'null')
             )
         );
     END IF;

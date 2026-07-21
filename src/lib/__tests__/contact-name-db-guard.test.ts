@@ -6,7 +6,7 @@ const repoRoot = process.cwd();
 const migrationPath = join(repoRoot, 'database', 'migration_prevent_placeholder_contact_names.sql');
 const extendedMigrationPath = join(repoRoot, 'database', 'migration_extend_placeholder_contact_names.sql');
 const schemaPath = join(repoRoot, 'database', 'schema.sql');
-const placeholderListPattern = /'unknown',\s*'unknown name',\s*'unknown user',\s*'facebook user',\s*'undefined',\s*'null'/i;
+const placeholderListPattern = /'unknown',\s*'unknown name',\s*'unknown user',\s*'facebook user',\s*'messenger contact',\s*'undefined',\s*'null'/i;
 
 describe('contact name database guard', () => {
     it('ships a migration that backfills placeholder names before adding the constraint', () => {

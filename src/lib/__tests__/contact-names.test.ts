@@ -13,6 +13,7 @@ describe('normalizeContactName', () => {
         expect(normalizeContactName('UNKNOWN')).toBeNull();
         expect(normalizeContactName(' Unknown Name ')).toBeNull();
         expect(normalizeContactName('unknown user')).toBeNull();
+        expect(normalizeContactName('MESSENGER CONTACT')).toBeNull();
         expect(normalizeContactName('null')).toBeNull();
         expect(normalizeContactName(undefined)).toBeNull();
     });
@@ -26,6 +27,7 @@ describe('hasUsableContactName', () => {
     it('identifies whether a name can be used', () => {
         expect(hasUsableContactName('Unknown')).toBe(false);
         expect(hasUsableContactName('Unknown Name')).toBe(false);
+        expect(hasUsableContactName('Messenger Contact')).toBe(false);
         expect(hasUsableContactName('Prince Lara')).toBe(true);
     });
 });

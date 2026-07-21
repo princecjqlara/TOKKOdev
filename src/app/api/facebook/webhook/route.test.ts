@@ -452,6 +452,32 @@ describe('POST /api/facebook/webhook', () => {
         expect(payload.profile_pic).toBe('https://example.com/recovered.jpg');
     });
 
+    it('clears existing Messenger Contact placeholders when no real name is available', async () => {
+        const supabase = createSupabaseMock({
+            existingContact: {
+                id: 'contact_row_1',
+                name: 'MESSENGER CONTACT',
+                profile_pic: null
+            }
+        });
+        mocks.getSupabaseAdmin.mockReturnValue(supabase);
+        mocks.getUserProfile.mockResolvedValue({
+            id: 'contact_psid_1',
+            name: 'MESSENGER CONTACT',
+            profile_pic: 'https://example.com/recovered.jpg'
+        });
+
+        const response = await POST(createWebhookRequest());
+        const body = await response.json();
+
+        expect(response.status).toBe(200);
+        expect(body.success).toBe(true);
+
+        const payload = supabase.contactsUpsert.mock.calls[0][0] as Record<string, unknown>;
+        expect(payload.name).toBeNull();
+        expect(payload.profile_pic).toBe('https://example.com/recovered.jpg');
+    });
+
     it('does not persist placeholder UNKNOWN name values from profile fetch', async () => {
         const supabase = createSupabaseMock({
             existingContact: {

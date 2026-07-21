@@ -3,6 +3,7 @@ const PLACEHOLDER_NAME_VALUES = new Set([
     'unknown name',
     'unknown user',
     'facebook user',
+    'messenger contact',
     'undefined',
     'null'
 ]);

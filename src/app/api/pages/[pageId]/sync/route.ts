@@ -416,6 +416,9 @@ export async function POST(
                     const existingContact = existingContactsByPsid.get(participant.id);
                     const existingName = normalizeContactName(existingContact?.name);
                     const participantName = normalizeContactName(participant.name);
+                    const existingNameShouldBeCleared =
+                        typeof existingContact?.name === 'string' &&
+                        !hasUsableContactName(existingContact.name);
 
                     let name = pickPreferredContactName(existingName, participantName);
                     let profilePic = existingContact?.profile_pic || null;
@@ -550,7 +553,7 @@ export async function POST(
                         .upsert({
                             page_id: pageId,
                             psid: participant.id,
-                            ...(name ? { name } : {}),
+                            ...(name ? { name } : existingNameShouldBeCleared ? { name: null } : {}),
                             ...(profilePic ? { profile_pic: profilePic } : {}),
                             last_interaction_at: conversation.updated_time,
                             best_contact_hour: bestContactHour,

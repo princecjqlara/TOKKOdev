@@ -305,11 +305,14 @@ export async function POST(request: NextRequest) {
                         }
 
                         const resolvedName = pickPreferredContactName(profileName, existingContact?.name);
+                        const existingNameShouldBeCleared =
+                            typeof existingContact?.name === 'string' &&
+                            !hasUsableContactName(existingContact.name);
 
                         const contactPayload: Record<string, unknown> = {
                             page_id: page.id,
                             psid: senderId,
-                            ...(resolvedName ? { name: resolvedName } : {}),
+                            ...(resolvedName ? { name: resolvedName } : existingNameShouldBeCleared ? { name: null } : {}),
                             ...(profilePic ? { profile_pic: profilePic } : {}),
                             last_interaction_at: interactionAt,
                             updated_at: new Date().toISOString(),

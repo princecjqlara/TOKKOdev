@@ -35,7 +35,9 @@ function createRequest(body: Record<string, unknown> = {}): NextRequest {
     }) as NextRequest;
 }
 
-function createSupabaseMock() {
+function createSupabaseMock(options?: {
+    existingContacts?: Array<{ psid: string; name: string | null; profile_pic: string | null }>;
+}) {
     const userPageSingle = vi.fn().mockResolvedValue({
         data: { page_id: 'page_1' },
         error: null
@@ -59,7 +61,7 @@ function createSupabaseMock() {
 
     const contactsUpsert = vi.fn().mockResolvedValue({ error: null });
     const contactsSelectIn = vi.fn().mockResolvedValue({
-        data: [
+        data: options?.existingContacts ?? [
             {
                 psid: 'contact_psid_1',
                 name: 'Jane Contact',
@@ -170,5 +172,40 @@ describe('POST /api/pages/[pageId]/sync', () => {
             psid: 'contact_psid_2'
         }));
         expect(basicNamelessRows[0]).not.toHaveProperty('name');
+    });
+
+    it('clears existing Messenger Contact placeholders during enrichment', async () => {
+        const { POST } = await loadRoute();
+        const supabase = createSupabaseMock({
+            existingContacts: [
+                {
+                    psid: 'contact_psid_1',
+                    name: 'MESSENGER CONTACT',
+                    profile_pic: null
+                }
+            ]
+        });
+        mocks.getSupabaseAdmin.mockReturnValue(supabase);
+        mocks.getPageConversations.mockResolvedValue([
+            {
+                id: 'conversation_1',
+                updated_time: '2026-04-07T02:00:00.000Z',
+                participants: {
+                    data: [
+                        { id: 'fb_page_1', name: 'Test Page' },
+                        { id: 'contact_psid_1', name: 'MESSENGER CONTACT' }
+                    ]
+                }
+            }
+        ]);
+
+        const response = await POST(
+            createRequest(),
+            { params: Promise.resolve({ pageId: 'page_1' }) }
+        );
+
+        expect(response.status).toBe(200);
+        const enrichedPayload = supabase.contactsUpsert.mock.calls[1][0] as Record<string, unknown>;
+        expect(enrichedPayload.name).toBeNull();
     });
 });
