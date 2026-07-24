@@ -61,10 +61,20 @@ function createSupabaseMock(
     const recipientsOr = vi.fn().mockReturnValue({ range: recipientsRange });
     const recipientsEqStatus = vi.fn().mockReturnValue({ range: recipientsRange, or: recipientsOr });
     const recipientsEqCampaign = vi.fn().mockReturnValue({ eq: recipientsEqStatus });
-    const recipientsCountEqStatus = vi.fn().mockResolvedValue({
-        count: options.remainingPendingCount || 0,
+    let sentCount = 0;
+    let failedCount = 0;
+    let pendingCount = (options.recipients?.length || 0) + (options.remainingPendingCount || 0);
+    const recipientsCountEqStatus = vi.fn((_column: string, status: string) => Promise.resolve({
+        count:
+            status === 'sent'
+                ? sentCount
+                : status === 'failed'
+                    ? failedCount
+                    : status === 'pending'
+                        ? pendingCount
+                        : 0,
         error: null
-    });
+    }));
     const recipientsCountEqCampaign = vi.fn().mockReturnValue({ eq: recipientsCountEqStatus });
     const recipientsSelect = vi.fn((_columns: string, queryOptions?: { head?: boolean }) => {
         if (queryOptions?.head) {
@@ -74,7 +84,19 @@ function createSupabaseMock(
         return { eq: recipientsEqCampaign };
     });
     const recipientsUpdateEq = vi.fn().mockResolvedValue({ error: null });
-    const recipientsUpdate = vi.fn().mockReturnValue({ eq: recipientsUpdateEq });
+    const recipientsUpdate = vi.fn((updates: { status?: string }) => {
+        if (updates.status === 'sent') {
+            sentCount += 1;
+            pendingCount = Math.max(0, pendingCount - 1);
+        }
+
+        if (updates.status === 'failed') {
+            failedCount += 1;
+            pendingCount = Math.max(0, pendingCount - 1);
+        }
+
+        return { eq: recipientsUpdateEq };
+    });
 
     const from = vi.fn((table: string) => {
         if (table === 'campaigns') {

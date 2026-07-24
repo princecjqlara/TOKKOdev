@@ -8,7 +8,7 @@ export const maxDuration = 300;
 
 // POST /api/campaigns/[campaignId]/send - Send a campaign
 export async function POST(
-    _request: NextRequest,
+    request: NextRequest,
     { params }: { params: Promise<{ campaignId: string }> }
 ) {
     const session = await getServerSession(authOptions);
@@ -21,9 +21,14 @@ export async function POST(
     }
 
     const { campaignId } = await params;
+    const body = await request.json().catch(() => ({}));
     const result = await sendCampaignById({
         campaignId,
-        userId: session.user.id
+        userId: session.user.id,
+        maxRecipientsPerRun: typeof body.maxRecipientsPerRun === 'number' ? body.maxRecipientsPerRun : undefined,
+        sendBatchSize: typeof body.sendBatchSize === 'number' ? body.sendBatchSize : undefined,
+        delayBetweenBatchesMs: typeof body.delayBetweenBatchesMs === 'number' ? body.delayBetweenBatchesMs : undefined,
+        maxProcessingTimeMs: typeof body.maxProcessingTimeMs === 'number' ? body.maxProcessingTimeMs : undefined
     });
 
     return NextResponse.json(result.body, { status: result.status });

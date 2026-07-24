@@ -255,6 +255,10 @@ export default function ContactsPage() {
     const [usePart2AsButtonValue, setUsePart2AsButtonValue] = useState(false);
     const [envelopeWrapper, setEnvelopeWrapper] = useState<string>('msg');
     const [actionLoading, setActionLoading] = useState(false);
+    const [bulkSendProgress, setBulkSendProgress] = useState<string | null>(null);
+    const [manualBatchEnabled, setManualBatchEnabled] = useState(false);
+    const [manualBatchSize, setManualBatchSize] = useState(5000);
+    const [manualBatchNumber, setManualBatchNumber] = useState(1);
 
     const messageText = `${messagePart1}|||${messagePart2}`;
     const [failedContactIds, setFailedContactIds] = useState<string[]>([]);
@@ -776,6 +780,151 @@ export default function ContactsPage() {
         const selected = Array.from(selectedIds);
         console.log(`📤 Individual Selection: ${selected.length} contact IDs selected`);
         return selected;
+    };
+
+    const handleTrackedBulkMessage = async () => {
+        if (getSelectionCount() === 0 || !messagePart1.trim() || !selectedPageId) return;
+
+        const {
+            buttons: normalizedMessageButtons,
+            errors: messageButtonErrors
+        } = normalizeButtonsForSend(messageButtons, {
+            usePart2AsButtonValue,
+            messagePart2
+        });
+
+        if (messageButtonErrors.length > 0) {
+            alert(`Please fix button errors before sending:\n- ${messageButtonErrors.join('\n- ')}`);
+            return;
+        }
+
+        if (!customButtonsDisabled && normalizedMessageButtons.length > 0) {
+            alert('Safe 100k bulk sending does not support custom inline buttons yet. Use an approved template that already has buttons, or remove the custom buttons before sending.');
+            return;
+        }
+
+        if (envelopeWrapper === 'template' && !selectedTemplateName) {
+            alert('Pick an approved template before sending.');
+            return;
+        }
+
+        setActionLoading(true);
+        setBulkSendProgress('Preparing tracked bulk send...');
+        setFailedContactIds([]);
+        setFailedContactErrors([]);
+        setLastSendResults(null);
+
+        try {
+            const normalizedManualBatchSize = Math.max(1, Math.floor(Number(manualBatchSize) || 5000));
+            const normalizedManualBatchNumber = Math.max(1, Math.floor(Number(manualBatchNumber) || 1));
+            const selection = selectAllMode
+                ? {
+                    mode: 'all',
+                    excludedContactIds: Array.from(excludedIds),
+                    filters: {
+                        search,
+                        tagIds: Array.from(selectedTagFilters),
+                        excludeTagIds: Array.from(excludedTagFilters),
+                        dateFrom,
+                        dateTo
+                    },
+                    ...(manualBatchEnabled
+                        ? {
+                            slice: {
+                                limit: normalizedManualBatchSize,
+                                batchNumber: normalizedManualBatchNumber
+                            }
+                        }
+                        : {})
+                }
+                : {
+                    mode: 'specific',
+                    contactIds: Array.from(selectedIds),
+                    ...(manualBatchEnabled
+                        ? {
+                            slice: {
+                                limit: normalizedManualBatchSize,
+                                batchNumber: normalizedManualBatchNumber
+                            }
+                        }
+                        : {})
+                };
+
+            const createResponse = await fetch(`/api/pages/${selectedPageId}/contacts/tracked-bulk-message`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    name: `Bulk message ${new Date().toLocaleString()}`,
+                    messagePart1,
+                    messagePart2,
+                    envelopeWrapper,
+                    templateName: envelopeWrapper === 'template' ? selectedTemplateName : undefined,
+                    templateLanguage: envelopeWrapper === 'template' ? selectedTemplateLanguage : undefined,
+                    selection
+                })
+            });
+
+            const createData = await readApiResponse(createResponse);
+            if (!createResponse.ok) {
+                throw new Error(createData.message || 'Failed to create tracked bulk send');
+            }
+
+            const campaignId = createData.campaign?.id;
+            if (!campaignId) {
+                throw new Error('Tracked campaign was created without an ID.');
+            }
+
+            let sendData = createData.send || {};
+            let sent = Number(sendData.sent || 0);
+            let failed = Number(sendData.failed || 0);
+            let remaining = Number(sendData.remaining || Math.max((createData.recipients || 0) - sent - failed, 0));
+            const selectedRange = createData.selectedRange;
+            const batchLabel = selectedRange
+                ? `Batch ${selectedRange.batchNumber}: contacts ${selectedRange.start}-${selectedRange.end} of ${selectedRange.totalMatched}. `
+                : '';
+            setBulkSendProgress(`${batchLabel}Campaign ${campaignId.slice(0, 8)}: ${sent} sent, ${failed} failed, ${remaining} pending`);
+
+            while (sendData.partial && remaining > 0) {
+                await new Promise(resolve => setTimeout(resolve, 1500));
+
+                const response = await fetch(`/api/campaigns/${campaignId}/send`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        maxRecipientsPerRun: 250,
+                        sendBatchSize: 5,
+                        delayBetweenBatchesMs: 300,
+                        maxProcessingTimeMs: 180000
+                    })
+                });
+
+                sendData = await readApiResponse(response);
+                if (!response.ok) {
+                    throw new Error(sendData.message || `Failed to continue tracked send (HTTP ${response.status})`);
+                }
+
+                sent = Number(sendData.sent || sent);
+                failed = Number(sendData.failed || failed);
+                remaining = Number(sendData.remaining || Math.max((createData.recipients || 0) - sent - failed, 0));
+                setBulkSendProgress(`${batchLabel}Campaign ${campaignId.slice(0, 8)}: ${sent} sent, ${failed} failed, ${remaining} pending`);
+            }
+
+            setLastSendResults({ sent, failed });
+            setShowMessageModal(false);
+            setMessagePart1('');
+            setMessagePart2('');
+            setMessageButtons([]);
+            setBulkSendProgress(null);
+            clearSelection();
+
+            alert(`Tracked bulk send finished.\n\n${batchLabel}Recipients in this campaign: ${createData.recipients}\nSent: ${sent}\nFailed: ${failed}\nCampaign ID: ${campaignId}`);
+            await fetchContacts();
+        } catch (error) {
+            console.error('Error sending tracked bulk messages:', error);
+            alert(`Tracked bulk send stopped: ${(error as Error).message}\n\nOpen Campaigns and press Send on the created campaign to resume pending recipients without resending completed ones.`);
+        } finally {
+            setActionLoading(false);
+        }
     };
 
     const handleBulkAddTags = async () => {
@@ -2059,11 +2208,17 @@ export default function ContactsPage() {
                         setLastSendResults(null);
                         setMessageButtons([]);
                         setUsePart2AsButtonValue(false);
+                        setBulkSendProgress(null);
                     }
                 }}
                 title="Send Message"
             >
                 <div className="space-y-4">
+                    {bulkSendProgress && (
+                        <div className="bg-blue-50 border-2 border-blue-300 p-3 rounded">
+                            <p className="font-mono text-sm text-blue-800">{bulkSendProgress}</p>
+                        </div>
+                    )}
                     {failedContactIds.length > 0 ? (
                         <div className="bg-yellow-50 border-2 border-yellow-400 p-3 rounded">
                             <p className="font-mono text-sm text-yellow-800 mb-2">
@@ -2077,6 +2232,69 @@ export default function ContactsPage() {
                         <p className="font-mono text-sm text-gray-500">
                             Sending to <span className="font-bold text-black">{getSelectionCount()}</span> recipients.
                         </p>
+                    )}
+
+                    {failedContactIds.length === 0 && (
+                        <div className="border border-gray-200 bg-gray-50 p-3 rounded space-y-3">
+                            <label className="flex items-center gap-2 text-xs font-mono text-gray-700">
+                                <input
+                                    type="checkbox"
+                                    checked={manualBatchEnabled}
+                                    onChange={(event) => setManualBatchEnabled(event.target.checked)}
+                                    disabled={actionLoading}
+                                    className="h-4 w-4 border border-black"
+                                />
+                                Send only one manual batch from this selection
+                            </label>
+
+                            {manualBatchEnabled && (
+                                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                                    <div>
+                                        <label className="block text-[10px] font-bold uppercase text-gray-500 mb-1">
+                                            Contacts Per Batch
+                                        </label>
+                                        <input
+                                            type="number"
+                                            min={1}
+                                            step={100}
+                                            value={manualBatchSize}
+                                            onChange={(event) => setManualBatchSize(Math.max(1, Math.floor(Number(event.target.value) || 1)))}
+                                            disabled={actionLoading}
+                                            className="input-wireframe"
+                                        />
+                                    </div>
+                                    <div>
+                                        <label className="block text-[10px] font-bold uppercase text-gray-500 mb-1">
+                                            Batch Number
+                                        </label>
+                                        <input
+                                            type="number"
+                                            min={1}
+                                            step={1}
+                                            value={manualBatchNumber}
+                                            onChange={(event) => setManualBatchNumber(Math.max(1, Math.floor(Number(event.target.value) || 1)))}
+                                            disabled={actionLoading}
+                                            className="input-wireframe"
+                                        />
+                                    </div>
+                                    <p className="sm:col-span-2 text-[11px] font-mono text-gray-600">
+                                        {(() => {
+                                            const selectionCount = getSelectionCount();
+                                            const size = Math.max(1, Math.floor(Number(manualBatchSize) || 1));
+                                            const batch = Math.max(1, Math.floor(Number(manualBatchNumber) || 1));
+                                            const start = (batch - 1) * size + 1;
+                                            const end = Math.min(batch * size, selectionCount);
+
+                                            if (start > selectionCount) {
+                                                return `Batch ${batch} is outside this selection. ${selectionCount} contacts are selected.`;
+                                            }
+
+                                            return `Batch ${batch} will create a campaign for contacts ${start}-${end} of ${selectionCount}.`;
+                                        })()}
+                                    </p>
+                                </div>
+                            )}
+                        </div>
                     )}
 
                     <div className="p-4 border border-gray-200 bg-gray-50 rounded-md">
@@ -2576,11 +2794,11 @@ export default function ContactsPage() {
                             </button>
                         )}
                         <button
-                            onClick={handleBulkMessage}
+                            onClick={handleTrackedBulkMessage}
                             disabled={!messagePart1.trim() || actionLoading || hasMessageButtonErrors || dynamicModeMissingButton}
                             className="btn-wireframe bg-black text-white hover:bg-gray-800"
                         >
-                            {actionLoading ? 'Sending...' : failedContactIds.length > 0 ? 'Send to New Selection' : 'Send Now'}
+                            {actionLoading ? 'Sending tracked...' : failedContactIds.length > 0 ? 'Send to New Selection' : 'Send Safely'}
                         </button>
                     </div>
                 </div>

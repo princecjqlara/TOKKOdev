@@ -15,6 +15,10 @@ type SendCampaignByIdOptions = {
     allowScheduled?: boolean;
     dueAt?: string;
     includeUnscheduledRecipients?: boolean;
+    maxRecipientsPerRun?: number;
+    sendBatchSize?: number;
+    delayBetweenBatchesMs?: number;
+    maxProcessingTimeMs?: number;
 };
 
 type SendCampaignByIdResult = {
@@ -31,7 +35,11 @@ export async function sendCampaignById({
     userId,
     allowScheduled = false,
     dueAt,
-    includeUnscheduledRecipients = false
+    includeUnscheduledRecipients = false,
+    maxRecipientsPerRun = 500,
+    sendBatchSize = 10,
+    delayBetweenBatchesMs = 200,
+    maxProcessingTimeMs = 240000
 }: SendCampaignByIdOptions): Promise<SendCampaignByIdResult> {
     try {
         const { data: campaign } = await supabase
@@ -79,8 +87,40 @@ export async function sendCampaignById({
             .update({ status: 'sending', updated_at: new Date().toISOString() })
             .eq('id', campaignId);
 
+        async function getRecipientStatusCounts() {
+            const [sentResult, failedResult, pendingResult] = await Promise.all([
+                supabase
+                    .from('campaign_recipients')
+                    .select('id', { count: 'exact', head: true })
+                    .eq('campaign_id', campaignId)
+                    .eq('status', 'sent'),
+                supabase
+                    .from('campaign_recipients')
+                    .select('id', { count: 'exact', head: true })
+                    .eq('campaign_id', campaignId)
+                    .eq('status', 'failed'),
+                supabase
+                    .from('campaign_recipients')
+                    .select('id', { count: 'exact', head: true })
+                    .eq('campaign_id', campaignId)
+                    .eq('status', 'pending')
+            ]);
+
+            const firstError = sentResult.error || failedResult.error || pendingResult.error;
+            if (firstError) {
+                throw firstError;
+            }
+
+            return {
+                sent: sentResult.count || 0,
+                failed: failedResult.count || 0,
+                pending: pendingResult.count || 0
+            };
+        }
+
+        const startingCounts = await getRecipientStatusCounts();
         let allRecipients: { id: string; contact_id: string; contacts: { psid: string; name?: string } | { psid: string; name?: string }[] | null }[] = [];
-        const BATCH_SIZE = 1000;
+        const BATCH_SIZE = Math.max(1, Math.min(maxRecipientsPerRun || 500, 2000));
         let offset = 0;
         let hasMore = true;
 
@@ -118,9 +158,7 @@ export async function sendCampaignById({
                 console.log(`📤 Fetched ${recipientBatch.length} recipients (total so far: ${allRecipients.length})`);
                 offset += BATCH_SIZE;
 
-                if (recipientBatch.length < BATCH_SIZE) {
-                    hasMore = false;
-                }
+                hasMore = false;
             } else {
                 hasMore = false;
             }
@@ -128,27 +166,14 @@ export async function sendCampaignById({
 
         const recipients = allRecipients;
 
-        async function getRemainingPendingRecipientCount() {
-            const { count, error } = await supabase
-                .from('campaign_recipients')
-                .select('id', { count: 'exact', head: true })
-                .eq('campaign_id', campaignId)
-                .eq('status', 'pending');
-
-            if (error) {
-                throw error;
-            }
-
-            return count || 0;
-        }
-
         if (!recipients?.length) {
-            const remainingPending = dueAt ? await getRemainingPendingRecipientCount() : 0;
+            const currentCounts = await getRecipientStatusCounts();
             await supabase
                 .from('campaigns')
                 .update({
-                    status: remainingPending > 0 ? 'scheduled' : 'completed',
-                    failed_count: 0,
+                    status: currentCounts.pending > 0 ? 'scheduled' : 'completed',
+                    sent_count: currentCounts.sent,
+                    failed_count: currentCounts.failed,
                     updated_at: new Date().toISOString()
                 })
                 .eq('id', campaignId);
@@ -159,7 +184,8 @@ export async function sendCampaignById({
                     success: true,
                     sent: 0,
                     failed: 0,
-                    message: remainingPending > 0
+                    pending: currentCounts.pending,
+                    message: currentCounts.pending > 0
                         ? 'No recipients are due yet'
                         : 'No recipients to send to'
                 },
@@ -184,9 +210,9 @@ export async function sendCampaignById({
         let sent = 0;
         let failed = 0;
 
-        const SEND_BATCH_SIZE = 15;
-        const DELAY_BETWEEN_BATCHES = 80;
-        const MAX_PROCESSING_TIME = 270000;
+        const SEND_BATCH_SIZE = Math.max(1, Math.min(sendBatchSize || 10, 25));
+        const DELAY_BETWEEN_BATCHES = Math.max(0, delayBetweenBatchesMs || 0);
+        const MAX_PROCESSING_TIME = Math.max(30000, Math.min(maxProcessingTimeMs || 240000, 270000));
         const startTime = Date.now();
 
         console.log(`📤 Starting campaign send: ${recipients.length} recipients in batches of ${SEND_BATCH_SIZE}`);
@@ -201,8 +227,8 @@ export async function sendCampaignById({
                     .from('campaigns')
                     .update({
                         status: 'sending',
-                        sent_count: sent,
-                        failed_count: failed,
+                        sent_count: startingCounts.sent + sent,
+                        failed_count: startingCounts.failed + failed,
                         updated_at: new Date().toISOString()
                     })
                     .eq('id', campaignId);
@@ -212,16 +238,16 @@ export async function sendCampaignById({
                     body: {
                         success: true,
                         partial: true,
-                        sent,
-                        failed,
+                        sent: startingCounts.sent + sent,
+                        failed: startingCounts.failed + failed,
                         processed: i,
                         total: recipients.length,
                         remaining: remainingCount,
                         message: `Processed ${i} of ${recipients.length} recipients before timeout. ${remainingCount} remaining.`
                     },
                     success: true,
-                    sent,
-                    failed
+                    sent: startingCounts.sent + sent,
+                    failed: startingCounts.failed + failed
                 };
             }
 
@@ -387,8 +413,8 @@ export async function sendCampaignById({
             await supabase
                 .from('campaigns')
                 .update({
-                    sent_count: sent,
-                    failed_count: failed,
+                    sent_count: startingCounts.sent + sent,
+                    failed_count: startingCounts.failed + failed,
                     updated_at: new Date().toISOString()
                 })
                 .eq('id', campaignId);
@@ -411,30 +437,52 @@ export async function sendCampaignById({
             .single();
 
         if (finalStatus?.status !== 'cancelled') {
-            const remainingPending = dueAt ? await getRemainingPendingRecipientCount() : 0;
+            const finalCounts = await getRecipientStatusCounts();
             await supabase
                 .from('campaigns')
                 .update({
-                    status: remainingPending > 0 ? 'scheduled' : 'completed',
-                    sent_count: sent,
-                    failed_count: failed,
+                    status: finalCounts.pending > 0 ? (dueAt ? 'scheduled' : 'sending') : 'completed',
+                    sent_count: finalCounts.sent,
+                    failed_count: finalCounts.failed,
                     updated_at: new Date().toISOString()
                 })
                 .eq('id', campaignId);
+
+            if (finalCounts.pending > 0) {
+                return {
+                    status: 200,
+                    body: {
+                        success: true,
+                        partial: true,
+                        sent: finalCounts.sent,
+                        failed: finalCounts.failed,
+                        processed: sent + failed,
+                        total: campaign.total_recipients || finalCounts.sent + finalCounts.failed + finalCounts.pending,
+                        remaining: finalCounts.pending,
+                        message: `Processed ${sent + failed} recipients in this slice. ${finalCounts.pending} pending recipients remain.`
+                    },
+                    success: true,
+                    sent: finalCounts.sent,
+                    failed: finalCounts.failed
+                };
+            }
         }
 
         console.log(`✅ Campaign complete: ${sent} sent, ${failed} failed out of ${recipients.length} recipients`);
+
+        const completedSent = startingCounts.sent + sent;
+        const completedFailed = startingCounts.failed + failed;
 
         return {
             status: 200,
             body: {
                 success: true,
-                sent,
-                failed
+                sent: completedSent,
+                failed: completedFailed
             },
             success: true,
-            sent,
-            failed
+            sent: completedSent,
+            failed: completedFailed
         };
     } catch (error) {
         console.error('Error sending campaign:', error);
