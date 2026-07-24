@@ -478,6 +478,44 @@ describe('POST /api/facebook/webhook', () => {
         expect(payload.profile_pic).toBe('https://example.com/recovered.jpg');
     });
 
+    it('uses webhook sender names when profile lookup only returns Messenger Contact', async () => {
+        const supabase = createSupabaseMock({
+            existingContact: {
+                id: 'contact_row_1',
+                name: null,
+                profile_pic: null
+            }
+        });
+        mocks.getSupabaseAdmin.mockReturnValue(supabase);
+        mocks.getUserProfile.mockResolvedValue({
+            id: 'contact_psid_1',
+            name: 'Messenger Contact',
+            profile_pic: 'https://example.com/recovered.jpg'
+        });
+
+        const response = await POST(createWebhookRequest({
+            object: 'page',
+            entry: [
+                {
+                    id: 'fb_page_1',
+                    messaging: [
+                        {
+                            sender: { id: 'contact_psid_1', name: 'Real Sender Name' },
+                            recipient: { id: 'fb_page_1' },
+                            timestamp: 1700000000000,
+                            message: { mid: 'mid.1', text: 'hello there' }
+                        }
+                    ]
+                }
+            ]
+        }));
+
+        expect(response.status).toBe(200);
+        const payload = supabase.contactsUpsert.mock.calls[0][0] as Record<string, unknown>;
+        expect(payload.name).toBe('Real Sender Name');
+        expect(payload.profile_pic).toBe('https://example.com/recovered.jpg');
+    });
+
     it('does not persist placeholder UNKNOWN name values from profile fetch', async () => {
         const supabase = createSupabaseMock({
             existingContact: {

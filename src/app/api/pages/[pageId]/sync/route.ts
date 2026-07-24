@@ -518,6 +518,7 @@ export async function POST(
                     let bestContactHours: { hour: number; count: number }[] = [];
                     let interactionCount = 0;
                     let firstInteractionAt: string | null = null;
+                    let messageSenderName: string | null = null;
 
                     try {
                         // Fetch ALL messages from this conversation for analysis
@@ -531,6 +532,11 @@ export async function POST(
                         const contactMessages = messages.filter(msg =>
                             msg.from?.id === participant.id && msg.created_time
                         );
+
+                        messageSenderName = pickPreferredContactName(
+                            ...contactMessages.map(msg => msg.from?.name)
+                        );
+                        name = pickPreferredContactName(name, messageSenderName);
 
                         if (contactMessages.length > 0) {
                             // Build hour distribution from all contact messages

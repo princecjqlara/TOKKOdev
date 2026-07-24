@@ -222,6 +222,56 @@ describe('POST /api/pages/[pageId]/sync', () => {
         expect(enrichedPayload.name).toBeNull();
     });
 
+    it('uses conversation message sender names when participant and profile names are placeholders', async () => {
+        const { POST } = await loadRoute();
+        const supabase = createSupabaseMock({
+            existingContacts: [
+                {
+                    psid: 'contact_psid_1',
+                    name: 'MESSENGER CONTACT',
+                    profile_pic: null
+                }
+            ]
+        });
+        mocks.getSupabaseAdmin.mockReturnValue(supabase);
+        mocks.getUserProfile.mockResolvedValue({
+            id: 'contact_psid_1',
+            name: 'MESSENGER CONTACT'
+        });
+        mocks.getConversationMessages.mockResolvedValue([
+            {
+                id: 'message_1',
+                message: 'hello',
+                from: { id: 'contact_psid_1', name: 'Real Sender Name' },
+                created_time: '2026-04-07T02:00:00.000Z'
+            }
+        ]);
+        mocks.getPageConversationsBatch.mockResolvedValue({
+            conversations: [
+                {
+                    id: 'conversation_1',
+                    updated_time: '2026-04-07T02:00:00.000Z',
+                    participants: {
+                        data: [
+                            { id: 'fb_page_1', name: 'Test Page' },
+                            { id: 'contact_psid_1', name: 'MESSENGER CONTACT' }
+                        ]
+                    }
+                }
+            ],
+            nextCursor: null
+        });
+
+        const response = await POST(
+            createRequest(),
+            { params: Promise.resolve({ pageId: 'page_1' }) }
+        );
+
+        expect(response.status).toBe(200);
+        const enrichedPayload = supabase.contactsUpsert.mock.calls[1][0] as Record<string, unknown>;
+        expect(enrichedPayload.name).toBe('Real Sender Name');
+    });
+
     it('returns a paged continuation cursor without updating the sync checkpoint', async () => {
         const { POST } = await loadRoute();
         const supabase = createSupabaseMock();

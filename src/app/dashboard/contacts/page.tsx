@@ -1810,7 +1810,7 @@ export default function ContactsPage() {
                                             )}
                                             <div>
                                                 <p className="font-bold uppercase text-sm">
-                                                    {contact.name || 'Messenger Contact'}
+                                                    {contact.name || 'Unnamed Contact'}
                                                 </p>
                                                 <p className="font-mono text-xs text-gray-500">
                                                     ID: {contact.psid.slice(0, 8)}...

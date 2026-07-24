@@ -1,4 +1,4 @@
-const PLACEHOLDER_NAME_VALUES = new Set([
+export const PLACEHOLDER_CONTACT_NAME_VALUES = [
     'unknown',
     'unknown name',
     'unknown user',
@@ -6,7 +6,9 @@ const PLACEHOLDER_NAME_VALUES = new Set([
     'messenger contact',
     'undefined',
     'null'
-]);
+];
+
+const PLACEHOLDER_NAME_VALUES = new Set(PLACEHOLDER_CONTACT_NAME_VALUES);
 
 export function normalizeContactName(value: unknown): string | null {
     if (typeof value !== 'string') {

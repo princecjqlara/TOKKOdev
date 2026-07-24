@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getSupabaseAdmin } from '@/lib/supabase';
 import { getPageConversations, getUserProfile } from '@/lib/facebook';
 import { composeContactName, normalizeContactName, pickPreferredContactName } from '../../../../lib/contact-names';
+import { repairMissingContactNamesForPage } from '../../../../lib/contact-name-repair';
 
 export const dynamic = 'force-dynamic';
 
@@ -50,7 +51,8 @@ export async function GET(request: NextRequest) {
                 const conversations = await getPageConversations(
                     page.fb_page_id,
                     page.access_token,
-                    50 // Limit for cron job
+                    50,
+                    false // Keep cron lightweight; full imports use the manual paged sync route.
                 );
 
                 let synced = 0;
@@ -99,12 +101,17 @@ export async function GET(request: NextRequest) {
                     }
                 }
 
+                const nameRepair = await repairMissingContactNamesForPage(supabase, page, {
+                    limit: 200
+                });
+
                 results.push({
                     pageId: page.id,
                     pageName: page.name,
                     synced,
                     failed,
-                    total: conversations.length
+                    total: conversations.length,
+                    nameRepair
                 });
             } catch (error) {
                 results.push({

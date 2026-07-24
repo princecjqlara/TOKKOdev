@@ -281,6 +281,7 @@ export async function POST(request: NextRequest) {
 
                         let profileName: string | null = null;
                         let profilePic: string | null = null;
+                        const eventSenderName = normalizeContactName(event.sender?.name);
 
                         if (shouldRefreshProfile) {
                             try {
@@ -304,7 +305,7 @@ export async function POST(request: NextRequest) {
                             }
                         }
 
-                        const resolvedName = pickPreferredContactName(profileName, existingContact?.name);
+                        const resolvedName = pickPreferredContactName(profileName, eventSenderName, existingContact?.name);
                         const existingNameShouldBeCleared =
                             typeof existingContact?.name === 'string' &&
                             !hasUsableContactName(existingContact.name);

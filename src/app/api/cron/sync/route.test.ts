@@ -4,7 +4,8 @@ import type { NextRequest } from 'next/server';
 const mocks = vi.hoisted(() => ({
     getSupabaseAdmin: vi.fn(),
     getPageConversations: vi.fn(),
-    getUserProfile: vi.fn()
+    getUserProfile: vi.fn(),
+    repairMissingContactNamesForPage: vi.fn()
 }));
 
 vi.mock('@/lib/supabase', () => ({
@@ -14,6 +15,10 @@ vi.mock('@/lib/supabase', () => ({
 vi.mock('@/lib/facebook', () => ({
     getPageConversations: mocks.getPageConversations,
     getUserProfile: mocks.getUserProfile
+}));
+
+vi.mock('../../../../lib/contact-name-repair', () => ({
+    repairMissingContactNamesForPage: mocks.repairMissingContactNamesForPage
 }));
 
 function createRequest(secret: string): NextRequest {
@@ -68,6 +73,12 @@ describe('GET /api/cron/sync', () => {
     beforeEach(() => {
         vi.clearAllMocks();
         vi.unstubAllEnvs();
+        mocks.repairMissingContactNamesForPage.mockResolvedValue({
+            checked: 0,
+            repaired: 0,
+            cleared: 0,
+            failed: 0
+        });
     });
 
     it('keeps the participant name when profile lookup returns placeholder UNKNOWN', async () => {
@@ -96,6 +107,17 @@ describe('GET /api/cron/sync', () => {
         const response = await GET(createRequest('secret_1'));
 
         expect(response.status).toBe(200);
+        expect(mocks.getPageConversations).toHaveBeenCalledWith(
+            'fb_page_1',
+            'page_access_token_1',
+            50,
+            false
+        );
+        expect(mocks.repairMissingContactNamesForPage).toHaveBeenCalledWith(
+            supabase,
+            expect.objectContaining({ id: 'page_1' }),
+            { limit: 200 }
+        );
         const payload = supabase.contactsUpsert.mock.calls[0][0] as Record<string, unknown>;
         expect(payload.name).toBe('Jane Contact');
         expect(payload.profile_pic).toBe('https://example.com/jane.jpg');
