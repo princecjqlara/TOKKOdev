@@ -1051,7 +1051,7 @@ export default function CampaignsPage() {
                                     >
                                         <p className="font-bold uppercase text-sm">Schedule</p>
                                         <p className="text-xs text-gray-500 font-mono mt-1">
-                                            Use cronjob.org to run the campaign at the chosen date and time.
+                                            Use cron-jobs.org to run the campaign at the chosen date and time.
                                         </p>
                                     </button>
                                 </div>
@@ -1475,7 +1475,7 @@ export default function CampaignsPage() {
                             {audienceMode === 'dynamic' && (
                                 <div className="border border-dashed border-black bg-white p-4 space-y-4">
                                     <p className="text-xs font-mono text-gray-500">
-                                        cronjob.org will trigger the send and the audience will be resolved right before delivery.
+                                        cron-jobs.org will trigger the send and the audience will be resolved right before delivery.
                                     </p>
 
                                     <div>

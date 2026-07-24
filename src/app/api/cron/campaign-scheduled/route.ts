@@ -124,7 +124,7 @@ async function getDueRecipientLevelCampaigns(
     return Array.from(campaignsById.values());
 }
 
-// GET /api/cron/campaign-scheduled - Called by cronjob.org for due one-time campaigns
+// GET /api/cron/campaign-scheduled - Called by cron-jobs.org for due one-time campaigns
 export async function GET(_request: NextRequest) {
     try {
         const supabase = getSupabaseAdmin();

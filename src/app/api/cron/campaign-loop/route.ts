@@ -5,11 +5,11 @@ import { generatePersonalizedMessage } from '@/lib/ai';
 
 export const dynamic = 'force-dynamic';
 
-// Vercel Hobby has 10s limit - process small batches
+// Keep external cron runs short by processing small batches.
 const MAX_MESSAGES_PER_RUN = 5;
 const MAX_CAMPAIGNS_PER_RUN = 3;
 
-// GET /api/cron/campaign-loop - Called by cron-job.org every minute
+// GET /api/cron/campaign-loop - Called by cron-jobs.org every minute
 export async function GET(_request: NextRequest) {
     const startTime = Date.now();
 

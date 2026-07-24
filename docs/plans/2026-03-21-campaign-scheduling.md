@@ -6,7 +6,7 @@
 
 **Architecture:** Keep manual one-off sends working as-is for fixed recipient lists, but store audience rules on scheduled campaigns so a cron-triggered route can resolve matching contacts right before send time. Extract shared campaign-send logic so manual sends and cron-triggered scheduled sends use the same delivery path and status updates.
 
-**Tech Stack:** Next.js App Router, TypeScript, Supabase, Vitest, cronjob.org-triggered GET endpoints
+**Tech Stack:** Next.js App Router, TypeScript, Supabase, Vitest, cron-jobs.org-triggered GET endpoints
 
 ---
 
