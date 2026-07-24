@@ -3,6 +3,7 @@
 import { useSession, signIn, signOut } from 'next-auth/react';
 import { useEffect, useState, useRef } from 'react';
 import { FacebookPage } from '@/types';
+import { runContactSyncToCompletion } from '@/lib/contact-sync-client';
 
 // Types for local state
 interface Contact {
@@ -167,14 +168,19 @@ export default function VintagePage() {
 
             setStatusMessage('Syncing contacts from Facebook... This may take a while.');
             setIsLoading(true);
-            const syncRes = await fetch(`/api/pages/${dbPage.id}/sync`, { method: 'POST' });
-            const syncData = await syncRes.json();
+            const syncData = await runContactSyncToCompletion(dbPage.id, {
+                onProgress: ({ totalSynced, totalFailed, remainingPsids, cursor }) => {
+                    if (remainingPsids.length > 0 || cursor) {
+                        setStatusMessage(`Syncing contacts... Synced: ${totalSynced}, Failed: ${totalFailed}`);
+                    }
+                }
+            });
 
-            if (syncData.success) {
-                setStatusMessage(`Sync complete. Synced: ${syncData.synced}, Failed: ${syncData.failed}`);
+            if (syncData.data.success) {
+                setStatusMessage(`Sync complete. Synced: ${syncData.totalSynced}, Failed: ${syncData.totalFailed}`);
                 fetchContacts(dbPage.id);
             } else {
-                setStatusMessage(`Sync failed: ${syncData.message}`);
+                setStatusMessage(`Sync failed: ${syncData.data.message}`);
             }
 
         } catch (e) {

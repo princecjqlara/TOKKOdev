@@ -93,15 +93,17 @@ export default function ConnectPage() {
 
                 try {
                     const syncResult = await runContactSyncToCompletion(data.pageId, {
-                        onProgress: ({ attempt, remainingPsids }) => {
+                        onProgress: ({ attempt, remainingPsids, cursor }) => {
                             if (remainingPsids.length > 0) {
                                 setSuccess(`Successfully connected "${page.name}". Syncing contacts... continuing ${remainingPsids.length} remaining contacts (slice ${attempt + 1}).`);
+                            } else if (cursor) {
+                                setSuccess(`Successfully connected "${page.name}". Syncing contacts... continuing with the next Facebook page (slice ${attempt + 1}).`);
                             }
                         }
                     });
 
                     if (!syncResult.completed) {
-                        throw new Error('Initial contact sync stopped after too many continuation slices');
+                        throw new Error('Initial contact sync stopped before Facebook returned the final contacts page');
                     }
 
                     setSuccess(

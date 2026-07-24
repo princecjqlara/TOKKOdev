@@ -60,10 +60,6 @@ export async function getPageConversations(
     sinceTimestamp?: string // ISO timestamp - only fetch conversations updated after this
 ): Promise<FacebookConversation[]> {
     const allConversations: FacebookConversation[] = [];
-    const configuredLimit = Number.parseInt(process.env.FACEBOOK_CONVERSATION_SYNC_LIMIT || '250000', 10);
-    const conversationSafetyLimit = Number.isFinite(configuredLimit) && configuredLimit > 0
-        ? configuredLimit
-        : 250000;
 
     // Build initial URL with optional since parameter
     let baseUrl = `${FACEBOOK_GRAPH_URL}/${pageId}/conversations?fields=id,participants,updated_time&limit=${limit}&access_token=${pageAccessToken}`;
@@ -129,21 +125,83 @@ export async function getPageConversations(
             console.log(`📄 Pagination complete: no more pages available`);
         }
 
-        // Safety limits to prevent infinite pagination loops on very large pages.
-        if (pageCount >= 1000) {
-            console.warn(`Hit conversation pagination safety limit after ${pageCount} Facebook API pages`);
-            break;
-        }
-
-        if (allConversations.length >= conversationSafetyLimit) {
-            console.warn(`Hit conversation limit of ${conversationSafetyLimit} (stopping pagination)`);
-            break;
-        }
+        // Repeated page URLs are checked above; otherwise continue until Facebook
+        // returns no next page.
     }
 
     console.log(`✅ Total conversations fetched: ${allConversations.length} across ${pageCount} pages`);
 
     return allConversations;
+}
+
+export type PageConversationBatch = {
+    conversations: FacebookConversation[];
+    nextCursor: string | null;
+};
+
+export async function getPageConversationsBatch(
+    pageId: string,
+    pageAccessToken: string,
+    options: {
+        limit?: number;
+        after?: string | null;
+        sinceTimestamp?: string;
+    } = {}
+): Promise<PageConversationBatch> {
+    const limit = options.limit || 100;
+    let url = `${FACEBOOK_GRAPH_URL}/${pageId}/conversations?fields=id,participants,updated_time&limit=${limit}&access_token=${pageAccessToken}`;
+
+    if (options.after) {
+        url += `&after=${encodeURIComponent(options.after)}`;
+    }
+
+    if (options.sinceTimestamp) {
+        const sinceDate = new Date(options.sinceTimestamp);
+        const unixTimestamp = Math.floor(sinceDate.getTime() / 1000);
+        url += `&since=${unixTimestamp}`;
+    }
+
+    const response: Response = await fetch(url);
+
+    if (!response.ok) {
+        const error = await response.json();
+        throw new Error(error.error?.message || 'Failed to fetch conversations');
+    }
+
+    const responseData: {
+        data?: FacebookConversation[];
+        paging?: {
+            next?: string;
+            cursors?: {
+                after?: string;
+            };
+        };
+    } = await response.json();
+
+    const rawConversations = responseData.data || [];
+    let conversations = rawConversations;
+    let nextCursor =
+        typeof responseData.paging?.cursors?.after === 'string' && responseData.paging.next
+            ? responseData.paging.cursors.after
+            : null;
+
+    if (options.sinceTimestamp && rawConversations.length > 0) {
+        const sinceDate = new Date(options.sinceTimestamp);
+        conversations = rawConversations.filter(conv => {
+            if (!conv.updated_time) return false;
+            const convDate = new Date(conv.updated_time);
+            return convDate >= sinceDate;
+        });
+
+        if (conversations.length < rawConversations.length) {
+            nextCursor = null;
+        }
+    }
+
+    return {
+        conversations,
+        nextCursor
+    };
 }
 
 // Get user profile from PSID

@@ -5,6 +5,7 @@ const mocks = vi.hoisted(() => ({
     getSessionFromRequest: vi.fn(),
     getSupabaseAdmin: vi.fn(),
     getPageConversations: vi.fn(),
+    getPageConversationsBatch: vi.fn(),
     getUserProfile: vi.fn(),
     getConversationMessages: vi.fn(),
     subscribePageToAppWebhook: vi.fn()
@@ -20,6 +21,7 @@ vi.mock('@/lib/supabase', () => ({
 
 vi.mock('@/lib/facebook', () => ({
     getPageConversations: mocks.getPageConversations,
+    getPageConversationsBatch: mocks.getPageConversationsBatch,
     getUserProfile: mocks.getUserProfile,
     getConversationMessages: mocks.getConversationMessages,
     subscribePageToAppWebhook: mocks.subscribePageToAppWebhook
@@ -99,7 +101,8 @@ function createSupabaseMock(options?: {
 
     return {
         from,
-        contactsUpsert
+        contactsUpsert,
+        pageUpdateEq
     };
 }
 
@@ -118,6 +121,10 @@ describe('POST /api/pages/[pageId]/sync', () => {
         });
         mocks.subscribePageToAppWebhook.mockResolvedValue(undefined);
         mocks.getConversationMessages.mockResolvedValue([]);
+        mocks.getPageConversationsBatch.mockResolvedValue({
+            conversations: [],
+            nextCursor: null
+        });
         mocks.getUserProfile.mockResolvedValue({
             id: 'contact_psid_1',
             name: 'UNKNOWN'
@@ -128,28 +135,31 @@ describe('POST /api/pages/[pageId]/sync', () => {
         const { POST } = await loadRoute();
         const supabase = createSupabaseMock();
         mocks.getSupabaseAdmin.mockReturnValue(supabase);
-        mocks.getPageConversations.mockResolvedValue([
-            {
-                id: 'conversation_1',
-                updated_time: '2026-04-07T02:00:00.000Z',
-                participants: {
-                    data: [
-                        { id: 'fb_page_1', name: 'Test Page' },
-                        { id: 'contact_psid_1', name: 'Jane Contact' }
-                    ]
+        mocks.getPageConversationsBatch.mockResolvedValue({
+            conversations: [
+                {
+                    id: 'conversation_1',
+                    updated_time: '2026-04-07T02:00:00.000Z',
+                    participants: {
+                        data: [
+                            { id: 'fb_page_1', name: 'Test Page' },
+                            { id: 'contact_psid_1', name: 'Jane Contact' }
+                        ]
+                    }
+                },
+                {
+                    id: 'conversation_2',
+                    updated_time: '2026-04-07T03:00:00.000Z',
+                    participants: {
+                        data: [
+                            { id: 'fb_page_1', name: 'Test Page' },
+                            { id: 'contact_psid_2', name: 'UNKNOWN' }
+                        ]
+                    }
                 }
-            },
-            {
-                id: 'conversation_2',
-                updated_time: '2026-04-07T03:00:00.000Z',
-                participants: {
-                    data: [
-                        { id: 'fb_page_1', name: 'Test Page' },
-                        { id: 'contact_psid_2', name: 'UNKNOWN' }
-                    ]
-                }
-            }
-        ]);
+            ],
+            nextCursor: null
+        });
 
         const response = await POST(
             createRequest(),
@@ -186,18 +196,21 @@ describe('POST /api/pages/[pageId]/sync', () => {
             ]
         });
         mocks.getSupabaseAdmin.mockReturnValue(supabase);
-        mocks.getPageConversations.mockResolvedValue([
-            {
-                id: 'conversation_1',
-                updated_time: '2026-04-07T02:00:00.000Z',
-                participants: {
-                    data: [
-                        { id: 'fb_page_1', name: 'Test Page' },
-                        { id: 'contact_psid_1', name: 'MESSENGER CONTACT' }
-                    ]
+        mocks.getPageConversationsBatch.mockResolvedValue({
+            conversations: [
+                {
+                    id: 'conversation_1',
+                    updated_time: '2026-04-07T02:00:00.000Z',
+                    participants: {
+                        data: [
+                            { id: 'fb_page_1', name: 'Test Page' },
+                            { id: 'contact_psid_1', name: 'MESSENGER CONTACT' }
+                        ]
+                    }
                 }
-            }
-        ]);
+            ],
+            nextCursor: null
+        });
 
         const response = await POST(
             createRequest(),
@@ -207,5 +220,42 @@ describe('POST /api/pages/[pageId]/sync', () => {
         expect(response.status).toBe(200);
         const enrichedPayload = supabase.contactsUpsert.mock.calls[1][0] as Record<string, unknown>;
         expect(enrichedPayload.name).toBeNull();
+    });
+
+    it('returns a paged continuation cursor without updating the sync checkpoint', async () => {
+        const { POST } = await loadRoute();
+        const supabase = createSupabaseMock();
+        mocks.getSupabaseAdmin.mockReturnValue(supabase);
+        mocks.getPageConversationsBatch.mockResolvedValue({
+            conversations: [
+                {
+                    id: 'conversation_1',
+                    updated_time: '2026-04-07T02:00:00.000Z',
+                    participants: {
+                        data: [
+                            { id: 'fb_page_1', name: 'Test Page' },
+                            { id: 'contact_psid_1', name: 'Jane Contact' }
+                        ]
+                    }
+                }
+            ],
+            nextCursor: 'after_cursor_2'
+        });
+
+        const response = await POST(
+            createRequest({ syncStartedAt: '2026-04-07T01:00:00.000Z' }),
+            { params: Promise.resolve({ pageId: 'page_1' }) }
+        );
+
+        expect(response.status).toBe(200);
+        const data = await response.json();
+        expect(data).toEqual(expect.objectContaining({
+            success: true,
+            partial: true,
+            cursor: 'after_cursor_2',
+            nextCursor: 'after_cursor_2',
+            syncStartedAt: '2026-04-07T01:00:00.000Z'
+        }));
+        expect(supabase.pageUpdateEq).not.toHaveBeenCalled();
     });
 });

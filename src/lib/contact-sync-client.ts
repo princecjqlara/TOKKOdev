@@ -7,6 +7,9 @@ export type ContactSyncResponse = {
     processed?: number;
     remaining?: number;
     remainingPsids?: string[];
+    cursor?: string | null;
+    nextCursor?: string | null;
+    syncStartedAt?: string;
     restored?: number;
     incremental?: boolean;
     message?: string;
@@ -17,6 +20,7 @@ export type ContactSyncProgress = {
     totalSynced: number;
     totalFailed: number;
     remainingPsids: string[];
+    cursor: string | null;
     response: ContactSyncResponse;
 };
 
@@ -27,7 +31,6 @@ export type ContactSyncResult = {
     completed: boolean;
 };
 
-const MAX_CONTINUATIONS = 100;
 const MAX_TIMEOUT_RETRIES_PER_STEP = 3;
 const RETRY_DELAY_MS = 1500;
 
@@ -54,14 +57,24 @@ async function parseSyncResponse(response: Response): Promise<ContactSyncRespons
     return data;
 }
 
-async function postSync(pageId: string, resumePsids: string[]): Promise<ContactSyncResponse> {
+async function postSync(
+    pageId: string,
+    options: {
+        resumePsids: string[];
+        cursor: string | null;
+        syncStartedAt: string | null;
+    }
+): Promise<ContactSyncResponse> {
     const response = await fetch(`/api/pages/${pageId}/sync`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         credentials: 'include',
         body: JSON.stringify({
             forceFullSync: true,
-            ...(resumePsids.length > 0 ? { resumePsids } : {})
+            paged: true,
+            ...(options.resumePsids.length > 0 ? { resumePsids: options.resumePsids } : {}),
+            ...(options.cursor ? { cursor: options.cursor } : {}),
+            ...(options.syncStartedAt ? { syncStartedAt: options.syncStartedAt } : {})
         })
     });
 
@@ -78,13 +91,16 @@ export async function runContactSyncToCompletion(
     let totalSynced = 0;
     let totalFailed = 0;
     let lastData: ContactSyncResponse = {};
+    let cursor: string | null = null;
+    let syncStartedAt: string | null = null;
+    const seenContinuationKeys = new Set<string>();
 
-    for (let attempt = 1; attempt <= MAX_CONTINUATIONS; attempt++) {
+    for (let attempt = 1; ; attempt++) {
         let data: ContactSyncResponse | null = null;
 
         for (let retry = 1; retry <= MAX_TIMEOUT_RETRIES_PER_STEP; retry++) {
             try {
-                data = await postSync(pageId, resumePsids);
+                data = await postSync(pageId, { resumePsids, cursor, syncStartedAt });
                 break;
             } catch (error) {
                 if (retry >= MAX_TIMEOUT_RETRIES_PER_STEP) {
@@ -109,16 +125,27 @@ export async function runContactSyncToCompletion(
         totalSynced += data.synced || 0;
         totalFailed += data.failed || 0;
         resumePsids = Array.isArray(data.remainingPsids) ? data.remainingPsids : [];
+        syncStartedAt = data.syncStartedAt || syncStartedAt;
+        cursor = resumePsids.length > 0
+            ? typeof data.cursor === 'string'
+                ? data.cursor
+                : null
+            : typeof data.nextCursor === 'string'
+                ? data.nextCursor
+                : typeof data.cursor === 'string'
+                    ? data.cursor
+                    : null;
 
         options.onProgress?.({
             attempt,
             totalSynced,
             totalFailed,
             remainingPsids: resumePsids,
+            cursor,
             response: data
         });
 
-        if (!data.partial || resumePsids.length === 0) {
+        if (!data.partial || (resumePsids.length === 0 && !cursor)) {
             return {
                 data,
                 totalSynced,
@@ -126,12 +153,13 @@ export async function runContactSyncToCompletion(
                 completed: true
             };
         }
-    }
 
-    return {
-        data: lastData,
-        totalSynced,
-        totalFailed,
-        completed: false
-    };
+        const continuationKey = resumePsids.length > 0
+            ? `psids:${resumePsids.join(',')}`
+            : `cursor:${cursor || ''}`;
+        if (seenContinuationKeys.has(continuationKey)) {
+            throw new Error('Sync stopped because Facebook returned a repeated continuation cursor.');
+        }
+        seenContinuationKeys.add(continuationKey);
+    }
 }

@@ -1,7 +1,13 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getSessionFromRequest } from '@/lib/get-session';
 import { getSupabaseAdmin } from '@/lib/supabase';
-import { getPageConversations, getUserProfile, getConversationMessages, subscribePageToAppWebhook } from '@/lib/facebook';
+import {
+    getPageConversations,
+    getPageConversationsBatch,
+    getUserProfile,
+    getConversationMessages,
+    subscribePageToAppWebhook
+} from '@/lib/facebook';
 import { chunkArray } from '../../../../../lib/chunking';
 import { composeContactName, hasUsableContactName, normalizeContactName, pickPreferredContactName } from '../../../../../lib/contact-names';
 
@@ -68,9 +74,19 @@ export async function POST(
         // Check if user wants to force a full sync (optional body parameter)
         let forceFullSync = false;
         let resumePsids: string[] = [];
+        let usePagedSync = true;
+        let cursor: string | null = null;
+        let requestedSyncStartedAt: string | null = null;
         try {
             const body = await request.json();
             forceFullSync = (body as { forceFullSync?: boolean })?.forceFullSync === true;
+            usePagedSync = (body as { paged?: boolean })?.paged !== false;
+            cursor = typeof (body as { cursor?: unknown }).cursor === 'string'
+                ? ((body as { cursor?: string }).cursor || '').trim() || null
+                : null;
+            requestedSyncStartedAt = typeof (body as { syncStartedAt?: unknown }).syncStartedAt === 'string'
+                ? ((body as { syncStartedAt?: string }).syncStartedAt || '').trim() || null
+                : null;
             resumePsids = Array.isArray((body as { resumePsids?: unknown }).resumePsids)
                 ? [
                     ...new Set(
@@ -88,6 +104,9 @@ export async function POST(
             userId,
             pageId,
             forceFullSync,
+            usePagedSync,
+            hasCursor: Boolean(cursor),
+            requestedSyncStartedAt,
             resumePsidCount: resumePsids.length
         });
 
@@ -144,14 +163,20 @@ export async function POST(
 
         // Determine if this is a full sync or incremental sync
         const isIncremental = !forceFullSync && !!page.last_synced_at;
-        const syncStartTime = new Date().toISOString();
+        const parsedRequestedSyncStart = requestedSyncStartedAt ? new Date(requestedSyncStartedAt) : null;
+        const syncStartTime =
+            parsedRequestedSyncStart && !Number.isNaN(parsedRequestedSyncStart.getTime())
+                ? parsedRequestedSyncStart.toISOString()
+                : new Date().toISOString();
 
         logInfo('Starting sync run', {
             syncMode: isIncremental ? 'incremental' : 'full',
             fbPageId: page.fb_page_id,
             pageId,
             lastSyncedAt: page.last_synced_at ?? null,
-            forceFullSync
+            forceFullSync,
+            usePagedSync,
+            hasCursor: Boolean(cursor)
         });
         if (isIncremental) {
             logInfo('Incremental sync using last_synced_at checkpoint', {
@@ -163,17 +188,34 @@ export async function POST(
 
         // Fetch conversations from Facebook (only new ones if incremental)
         let conversations;
+        let nextCursor: string | null = null;
         try {
-            conversations = await getPageConversations(
-                page.fb_page_id,
-                page.access_token,
-                100,
-                true,
-                isIncremental ? page.last_synced_at : undefined
-            );
+            if (usePagedSync) {
+                const batch = await getPageConversationsBatch(
+                    page.fb_page_id,
+                    page.access_token,
+                    {
+                        limit: 100,
+                        after: cursor,
+                        sinceTimestamp: isIncremental ? page.last_synced_at : undefined
+                    }
+                );
+                conversations = batch.conversations;
+                nextCursor = batch.nextCursor;
+            } else {
+                conversations = await getPageConversations(
+                    page.fb_page_id,
+                    page.access_token,
+                    100,
+                    true,
+                    isIncremental ? page.last_synced_at : undefined
+                );
+            }
             logInfo('Fetched conversations from Facebook', {
                 conversationCount: conversations.length,
-                incremental: isIncremental
+                incremental: isIncremental,
+                usePagedSync,
+                hasNextCursor: Boolean(nextCursor)
             });
         } catch (error) {
             logError('Error fetching conversations from Facebook', {
@@ -383,6 +425,9 @@ export async function POST(
                     processed: i,
                     remaining: remainingConversations.length,
                     remainingPsids: remainingPsids, // Return remaining PSIDs for automatic retry
+                    cursor,
+                    nextCursor,
+                    syncStartedAt: syncStartTime,
                     errors: errors.slice(0, 10)
                 });
             }
@@ -658,10 +703,38 @@ export async function POST(
             failed,
             restoredCount,
             totalValidConversations: validConversations.length,
+            hasNextCursor: Boolean(nextCursor),
             elapsedMs: Date.now() - startTime,
             errorCount: errors.length,
             errorSamples: errors.slice(0, 5)
         });
+
+        if (usePagedSync && nextCursor) {
+            const responsePayload = {
+                success: true,
+                partial: true,
+                message: `Processed ${validConversations.length} conversations. Continuing with next Facebook page.`,
+                synced,
+                failed,
+                total: conversations.length,
+                processed: validConversations.length,
+                remaining: 0,
+                remainingPsids: [],
+                restored: restoredCount,
+                incremental: isIncremental,
+                cursor: nextCursor,
+                nextCursor,
+                syncStartedAt: syncStartTime,
+                errors: errors.slice(0, 10)
+            };
+
+            logInfo('Returning paged sync continuation response', {
+                ...responsePayload,
+                fullErrorCount: errors.length
+            });
+
+            return NextResponse.json(responsePayload);
+        }
 
         // Always update last_synced_at to the start time of this sync
         // This ensures that if we retry, we won't re-fetch conversations we've already processed
@@ -703,6 +776,9 @@ export async function POST(
             incremental: isIncremental,
             restored: restoredCount, // Number of deleted contacts that were re-added
             last_synced_at: syncStartTime,
+            cursor: null,
+            nextCursor: null,
+            syncStartedAt: syncStartTime,
             errors: errors.slice(0, 10) // Return first 10 errors
         };
 

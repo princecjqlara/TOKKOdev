@@ -86,9 +86,14 @@ export default function DashboardPage() {
 
         try {
             const result = await runContactSyncToCompletion(selectedPageId, {
-                onProgress: ({ attempt, totalSynced, totalFailed, remainingPsids }) => {
+                onProgress: ({ attempt, totalSynced, totalFailed, remainingPsids, cursor }) => {
                     if (remainingPsids.length > 0) {
                         console.warn(`Sync slice ${attempt} finished. Continuing ${remainingPsids.length} remaining contacts automatically.`);
+                        return;
+                    }
+
+                    if (cursor) {
+                        console.log(`Sync slice ${attempt} finished. Continuing with the next Facebook page: ${totalSynced} synced, ${totalFailed} failed.`);
                         return;
                     }
 
@@ -97,7 +102,7 @@ export default function DashboardPage() {
             });
 
             if (!result.completed) {
-                throw new Error('Sync stopped after too many continuation slices. Start sync again to continue remaining contacts.');
+                throw new Error('Sync stopped before Facebook returned the final contacts page.');
             }
 
             const data = result.data;
