@@ -337,10 +337,9 @@ export async function POST(
             campaignId: campaign.id,
             supabase,
             userId: session.user.id,
-            maxRecipientsPerRun: 250,
-            sendBatchSize: 5,
-            delayBetweenBatchesMs: 300,
-            maxProcessingTimeMs: 180000
+            sendBatchSize: 10,
+            delayBetweenBatchesMs: 150,
+            maxProcessingTimeMs: 240000
         });
 
         return NextResponse.json({

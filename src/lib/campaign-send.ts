@@ -4,6 +4,7 @@ import { getConversationIdForPsid, getConversationMessages, sendMessage, getPage
 import { UTILITY_TEMPLATES as TEMPLATE_DEFS } from './facebook-templates';
 import { normalizeContactName } from './contact-names';
 import { replaceTemplateVariables } from './placeholders';
+import { isRetryableSendError } from './send-errors';
 import { getSupabaseAdmin } from './supabase';
 
 type SupabaseLike = ReturnType<typeof getSupabaseAdmin>;
@@ -15,10 +16,11 @@ type SendCampaignByIdOptions = {
     allowScheduled?: boolean;
     dueAt?: string;
     includeUnscheduledRecipients?: boolean;
-    maxRecipientsPerRun?: number;
     sendBatchSize?: number;
     delayBetweenBatchesMs?: number;
     maxProcessingTimeMs?: number;
+    sendRetryAttempts?: number;
+    sendRetryDelayMs?: number;
 };
 
 type SendCampaignByIdResult = {
@@ -36,10 +38,11 @@ export async function sendCampaignById({
     allowScheduled = false,
     dueAt,
     includeUnscheduledRecipients = false,
-    maxRecipientsPerRun = 500,
     sendBatchSize = 10,
-    delayBetweenBatchesMs = 200,
-    maxProcessingTimeMs = 240000
+    delayBetweenBatchesMs = 150,
+    maxProcessingTimeMs = 240000,
+    sendRetryAttempts = 2,
+    sendRetryDelayMs = 500
 }: SendCampaignByIdOptions): Promise<SendCampaignByIdResult> {
     try {
         const { data: campaign } = await supabase
@@ -120,7 +123,7 @@ export async function sendCampaignById({
 
         const startingCounts = await getRecipientStatusCounts();
         let allRecipients: { id: string; contact_id: string; contacts: { psid: string; name?: string } | { psid: string; name?: string }[] | null }[] = [];
-        const BATCH_SIZE = Math.max(1, Math.min(maxRecipientsPerRun || 500, 2000));
+        const RECIPIENT_FETCH_PAGE_SIZE = 2000;
         let offset = 0;
         let hasMore = true;
 
@@ -146,7 +149,7 @@ export async function sendCampaignById({
             }
 
             const { data: recipientBatch, error: recipientError } = await recipientQuery
-                .range(offset, offset + BATCH_SIZE - 1);
+                .range(offset, offset + RECIPIENT_FETCH_PAGE_SIZE - 1);
 
             if (recipientError) {
                 console.error(`❌ Error fetching recipients batch at offset ${offset}:`, recipientError);
@@ -156,9 +159,9 @@ export async function sendCampaignById({
             if (recipientBatch && recipientBatch.length > 0) {
                 allRecipients = allRecipients.concat(recipientBatch);
                 console.log(`📤 Fetched ${recipientBatch.length} recipients (total so far: ${allRecipients.length})`);
-                offset += BATCH_SIZE;
+                offset += RECIPIENT_FETCH_PAGE_SIZE;
 
-                hasMore = false;
+                hasMore = recipientBatch.length === RECIPIENT_FETCH_PAGE_SIZE;
             } else {
                 hasMore = false;
             }
@@ -213,6 +216,8 @@ export async function sendCampaignById({
         const SEND_BATCH_SIZE = Math.max(1, Math.min(sendBatchSize || 10, 25));
         const DELAY_BETWEEN_BATCHES = Math.max(0, delayBetweenBatchesMs || 0);
         const MAX_PROCESSING_TIME = Math.max(30000, Math.min(maxProcessingTimeMs || 240000, 270000));
+        const SEND_RETRY_ATTEMPTS = Math.max(0, Math.min(sendRetryAttempts || 0, 3));
+        const SEND_RETRY_DELAY = Math.max(0, Math.min(sendRetryDelayMs || 0, 5000));
         const startTime = Date.now();
 
         console.log(`📤 Starting campaign send: ${recipients.length} recipients in batches of ${SEND_BATCH_SIZE}`);
@@ -359,16 +364,34 @@ export async function sendCampaignById({
                             }
                         }
 
-                        await sendMessage(
-                            page.fb_page_id,
-                            page.access_token,
-                            contact.psid,
-                            messageToSend,
-                            messagingType,
-                            useTemplate ? campaign.template_name : undefined,
-                            useTemplate ? (campaign.template_language || 'en_US') : undefined,
-                            bodyParameters
-                        );
+                        for (let attempt = 0; attempt <= SEND_RETRY_ATTEMPTS; attempt++) {
+                            try {
+                                await sendMessage(
+                                    page.fb_page_id,
+                                    page.access_token,
+                                    contact.psid,
+                                    messageToSend,
+                                    messagingType,
+                                    useTemplate ? campaign.template_name : undefined,
+                                    useTemplate ? (campaign.template_language || 'en_US') : undefined,
+                                    bodyParameters
+                                );
+                                break;
+                            } catch (sendError) {
+                                const errorMessage = (sendError as Error).message;
+                                const shouldRetry = attempt < SEND_RETRY_ATTEMPTS && isRetryableSendError(errorMessage);
+
+                                if (!shouldRetry) {
+                                    throw sendError;
+                                }
+
+                                const retryDelay = SEND_RETRY_DELAY * (attempt + 1);
+                                console.warn(`Retrying send to ${contact.psid} after transient error (${attempt + 1}/${SEND_RETRY_ATTEMPTS}): ${errorMessage}`);
+                                if (retryDelay > 0) {
+                                    await new Promise(resolve => setTimeout(resolve, retryDelay));
+                                }
+                            }
+                        }
                     }
 
                     await supabase

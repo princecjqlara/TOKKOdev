@@ -54,10 +54,10 @@ function createSupabaseMock(
     const userPageEqUser = vi.fn().mockReturnValue({ eq: userPageEqPage });
     const userPageSelect = vi.fn().mockReturnValue({ eq: userPageEqUser });
 
-    const recipientsRange = vi.fn().mockResolvedValue({
-        data: options.recipients || [],
+    const recipientsRange = vi.fn((from: number, to: number) => Promise.resolve({
+        data: (options.recipients || []).slice(from, to + 1),
         error: null
-    });
+    }));
     const recipientsOr = vi.fn().mockReturnValue({ range: recipientsRange });
     const recipientsEqStatus = vi.fn().mockReturnValue({ range: recipientsRange, or: recipientsOr });
     const recipientsEqCampaign = vi.fn().mockReturnValue({ eq: recipientsEqStatus });
@@ -127,7 +127,8 @@ function createSupabaseMock(
         campaignUpdate,
         campaignUpdateEq,
         recipientsUpdate,
-        recipientsOr
+        recipientsOr,
+        recipientsRange
     };
 }
 
@@ -216,6 +217,67 @@ describe('sendCampaignById', () => {
             undefined,
             undefined
         );
+    });
+
+    it('retries transient send failures before marking a recipient failed', async () => {
+        const supabase = createSupabaseMock('draft', {
+            recipients: [{
+                id: 'recipient_1',
+                contact_id: 'contact_1',
+                contacts: {
+                    psid: 'psid_1',
+                    name: 'Alex'
+                }
+            }]
+        });
+        vi.mocked(sendMessage)
+            .mockRejectedValueOnce(new Error('fetch failed'))
+            .mockResolvedValueOnce({ message_id: 'mid_retry' });
+
+        const result = await sendCampaignById({
+            campaignId: 'campaign_1',
+            supabase: supabase as never,
+            sendRetryAttempts: 1,
+            sendRetryDelayMs: 0
+        });
+
+        expect(result.status).toBe(200);
+        expect(result.sent).toBe(1);
+        expect(result.failed).toBe(0);
+        expect(sendMessage).toHaveBeenCalledTimes(2);
+        expect(supabase.recipientsUpdate).toHaveBeenCalledWith(
+            expect.objectContaining({ status: 'sent' })
+        );
+        expect(supabase.recipientsUpdate).not.toHaveBeenCalledWith(
+            expect.objectContaining({ status: 'failed' })
+        );
+    });
+
+    it('fetches every pending recipient page without a per-run recipient cap', async () => {
+        const recipients = Array.from({ length: 2001 }, (_, index) => ({
+            id: `recipient_${index + 1}`,
+            contact_id: `contact_${index + 1}`,
+            contacts: {
+                psid: `psid_${index + 1}`,
+                name: `Contact ${index + 1}`
+            }
+        }));
+        const supabase = createSupabaseMock('draft', { recipients });
+        vi.mocked(sendMessage).mockResolvedValue({ message_id: 'mid_bulk' });
+
+        const result = await sendCampaignById({
+            campaignId: 'campaign_1',
+            supabase: supabase as never,
+            sendBatchSize: 25,
+            delayBetweenBatchesMs: 0
+        });
+
+        expect(result.status).toBe(200);
+        expect(result.sent).toBe(2001);
+        expect(result.failed).toBe(0);
+        expect(sendMessage).toHaveBeenCalledTimes(2001);
+        expect(supabase.recipientsRange).toHaveBeenNthCalledWith(1, 0, 1999);
+        expect(supabase.recipientsRange).toHaveBeenNthCalledWith(2, 2000, 3999);
     });
 
     it('cron sends only due recipients and keeps campaign scheduled while future recipients remain', async () => {

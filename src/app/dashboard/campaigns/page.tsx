@@ -601,17 +601,45 @@ export default function CampaignsPage() {
     const handleSend = async (campaignId: string) => {
         setSendingCampaignId(campaignId);
         try {
-            const response = await fetch(`/api/campaigns/${campaignId}/send`, {
-                method: 'POST'
+            const sendPayload = {
+                sendBatchSize: 10,
+                delayBetweenBatchesMs: 150,
+                maxProcessingTimeMs: 240000
+            };
+            let response = await fetch(`/api/campaigns/${campaignId}/send`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(sendPayload)
             });
 
-            const data = await response.json().catch(() => ({} as Record<string, unknown>));
+            let data = await response.json().catch(() => ({} as Record<string, unknown>));
 
             if (!response.ok) {
                 const errorMessage = (data as any).message || `Failed to send campaign (HTTP ${response.status})`;
                 console.error('Error sending campaign:', errorMessage, data);
                 alert(`Failed to send campaign: ${errorMessage}`);
             } else {
+                let remaining = Number((data as any).remaining || 0);
+                while ((data as any).partial && remaining > 0) {
+                    await new Promise(resolve => setTimeout(resolve, 500));
+
+                    response = await fetch(`/api/campaigns/${campaignId}/send`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify(sendPayload)
+                    });
+
+                    data = await response.json().catch(() => ({} as Record<string, unknown>));
+                    if (!response.ok) {
+                        const errorMessage = (data as any).message || `Failed to continue campaign send (HTTP ${response.status})`;
+                        console.error('Error continuing campaign send:', errorMessage, data);
+                        alert(`Failed to continue campaign send: ${errorMessage}`);
+                        return;
+                    }
+
+                    remaining = Number((data as any).remaining || 0);
+                }
+
                 const sent = (data as any).sent ?? 0;
                 const failed = (data as any).failed ?? 0;
                 if (failed > 0) {

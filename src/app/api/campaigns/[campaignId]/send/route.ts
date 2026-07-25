@@ -25,7 +25,6 @@ export async function POST(
     const result = await sendCampaignById({
         campaignId,
         userId: session.user.id,
-        maxRecipientsPerRun: typeof body.maxRecipientsPerRun === 'number' ? body.maxRecipientsPerRun : undefined,
         sendBatchSize: typeof body.sendBatchSize === 'number' ? body.sendBatchSize : undefined,
         delayBetweenBatchesMs: typeof body.delayBetweenBatchesMs === 'number' ? body.delayBetweenBatchesMs : undefined,
         maxProcessingTimeMs: typeof body.maxProcessingTimeMs === 'number' ? body.maxProcessingTimeMs : undefined
