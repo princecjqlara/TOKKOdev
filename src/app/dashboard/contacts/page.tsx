@@ -85,6 +85,42 @@ function getTemplateBodyText(envelopeKey: string): string | null {
     return bodyComponent && 'text' in bodyComponent ? (bodyComponent.text ?? null) : null;
 }
 
+type DatePreset = 'today' | 'yesterday' | 'last7' | 'last30';
+
+const DATE_PRESETS: Array<{ value: DatePreset; label: string }> = [
+    { value: 'today', label: 'Today' },
+    { value: 'yesterday', label: 'Yesterday' },
+    { value: 'last7', label: 'Last 7 days' },
+    { value: 'last30', label: 'Last 30 days' }
+];
+
+function formatDateInputValue(date: Date): string {
+    const year = date.getFullYear();
+    const month = String(date.getMonth() + 1).padStart(2, '0');
+    const day = String(date.getDate()).padStart(2, '0');
+    return `${year}-${month}-${day}`;
+}
+
+function getDatePresetRange(preset: DatePreset): { from: string; to: string } {
+    const today = new Date();
+    const from = new Date(today);
+    const to = new Date(today);
+
+    if (preset === 'yesterday') {
+        from.setDate(today.getDate() - 1);
+        to.setDate(today.getDate() - 1);
+    } else if (preset === 'last7') {
+        from.setDate(today.getDate() - 6);
+    } else if (preset === 'last30') {
+        from.setDate(today.getDate() - 29);
+    }
+
+    return {
+        from: formatDateInputValue(from),
+        to: formatDateInputValue(to)
+    };
+}
+
 async function readApiResponse(response: Response) {
     const contentType = response.headers.get('content-type') || '';
     if (contentType.includes('application/json')) {
@@ -284,6 +320,26 @@ export default function ContactsPage() {
     const realtimeSubscribeTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
     const webhookRefreshAttemptedRef = useRef<Set<string>>(new Set());
     const contactsRequestGateRef = useRef(createRequestGate());
+    const activeDatePreset =
+        DATE_PRESETS.find((preset) => {
+            const range = getDatePresetRange(preset.value);
+            return range.from === dateFrom && range.to === dateTo;
+        })?.value || null;
+
+    const applyDatePreset = (preset: DatePreset) => {
+        const range = getDatePresetRange(preset);
+        setDateFrom(range.from);
+        setDateTo(range.to);
+        setPage(1);
+        clearSelection();
+    };
+
+    const clearDateFilter = () => {
+        setDateFrom('');
+        setDateTo('');
+        setPage(1);
+        clearSelection();
+    };
 
     useEffect(() => {
         fetchPages();
@@ -1794,6 +1850,24 @@ export default function ContactsPage() {
                     <div className="flex items-center gap-2 flex-wrap">
                         <Calendar className="w-4 h-4 flex-shrink-0 text-gray-500" />
                         <span className="text-[10px] font-bold uppercase text-gray-500 flex-shrink-0">Date:</span>
+                        <div className="flex items-center gap-1 flex-wrap">
+                            {DATE_PRESETS.map((preset) => {
+                                const isActive = activeDatePreset === preset.value;
+                                return (
+                                    <button
+                                        key={preset.value}
+                                        type="button"
+                                        onClick={() => applyDatePreset(preset.value)}
+                                        className={`text-[10px] font-bold uppercase px-2 py-0.5 border transition-colors ${isActive
+                                            ? 'bg-black text-white border-black'
+                                            : 'bg-white text-gray-600 border-gray-300 hover:border-black'
+                                            }`}
+                                    >
+                                        {preset.label}
+                                    </button>
+                                );
+                            })}
+                        </div>
                         <input
                             type="date"
                             value={dateFrom}
@@ -1811,7 +1885,7 @@ export default function ContactsPage() {
                         />
                         {(dateFrom || dateTo) && (
                             <button
-                                onClick={() => { setDateFrom(''); setDateTo(''); setPage(1); clearSelection(); }}
+                                onClick={clearDateFilter}
                                 className="text-[10px] font-bold uppercase text-gray-400 hover:text-black underline px-1"
                             >
                                 Clear
