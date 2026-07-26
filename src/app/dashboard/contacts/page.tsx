@@ -885,14 +885,14 @@ export default function ContactsPage() {
             setBulkSendProgress(`${batchLabel}Campaign ${campaignId.slice(0, 8)}: ${sent} sent, ${failed} failed, ${remaining} pending`);
 
             while (sendData.partial && remaining > 0) {
-                await new Promise(resolve => setTimeout(resolve, 500));
+                await new Promise(resolve => setTimeout(resolve, 100));
 
                 const response = await fetch(`/api/campaigns/${campaignId}/send`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({
-                        sendBatchSize: 10,
-                        delayBetweenBatchesMs: 150,
+                        sendBatchSize: 20,
+                        delayBetweenBatchesMs: 50,
                         maxProcessingTimeMs: 240000
                     })
                 });

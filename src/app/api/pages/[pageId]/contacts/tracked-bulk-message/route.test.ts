@@ -168,8 +168,8 @@ describe('POST /api/pages/[pageId]/contacts/tracked-bulk-message', () => {
         expect(mocks.sendCampaignById).toHaveBeenCalledWith(
             expect.objectContaining({
                 campaignId: 'campaign_1',
-                sendBatchSize: 10,
-                delayBetweenBatchesMs: 150
+                sendBatchSize: 20,
+                delayBetweenBatchesMs: 50
             })
         );
     });

@@ -602,8 +602,8 @@ export default function CampaignsPage() {
         setSendingCampaignId(campaignId);
         try {
             const sendPayload = {
-                sendBatchSize: 10,
-                delayBetweenBatchesMs: 150,
+                sendBatchSize: 20,
+                delayBetweenBatchesMs: 50,
                 maxProcessingTimeMs: 240000
             };
             let response = await fetch(`/api/campaigns/${campaignId}/send`, {
@@ -621,7 +621,7 @@ export default function CampaignsPage() {
             } else {
                 let remaining = Number((data as any).remaining || 0);
                 while ((data as any).partial && remaining > 0) {
-                    await new Promise(resolve => setTimeout(resolve, 500));
+                    await new Promise(resolve => setTimeout(resolve, 100));
 
                     response = await fetch(`/api/campaigns/${campaignId}/send`, {
                         method: 'POST',

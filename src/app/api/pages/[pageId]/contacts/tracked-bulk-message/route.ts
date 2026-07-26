@@ -337,8 +337,8 @@ export async function POST(
             campaignId: campaign.id,
             supabase,
             userId: session.user.id,
-            sendBatchSize: 10,
-            delayBetweenBatchesMs: 150,
+            sendBatchSize: 20,
+            delayBetweenBatchesMs: 50,
             maxProcessingTimeMs: 240000
         });
 

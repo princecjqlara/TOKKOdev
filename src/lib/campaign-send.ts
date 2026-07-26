@@ -38,8 +38,8 @@ export async function sendCampaignById({
     allowScheduled = false,
     dueAt,
     includeUnscheduledRecipients = false,
-    sendBatchSize = 10,
-    delayBetweenBatchesMs = 150,
+    sendBatchSize = 20,
+    delayBetweenBatchesMs = 50,
     maxProcessingTimeMs = 240000,
     sendRetryAttempts = 2,
     sendRetryDelayMs = 500
