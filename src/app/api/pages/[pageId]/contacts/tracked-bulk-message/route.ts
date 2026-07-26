@@ -9,6 +9,8 @@ import { fetchAllSupabaseRows } from '@/lib/supabase-pagination';
 
 export const maxDuration = 300;
 
+type DateFilterMode = 'include' | 'exclude';
+
 const ENVELOPE_TEMPLATE_MAP: Record<string, string> = {
     msg: 'general_msg_v1',
     notice: 'general_notice_v1',
@@ -41,6 +43,16 @@ function normalizeStringArray(value: unknown): string[] {
 
 function normalizeDateFilter(value: unknown): string {
     return typeof value === 'string' && value.trim() ? value.trim() : '';
+}
+
+function normalizeDateFilterMode(value: unknown): DateFilterMode {
+    return value === 'exclude' ? 'exclude' : 'include';
+}
+
+function getDateToEndString(dateTo: string): string {
+    const dateToEnd = new Date(dateTo);
+    dateToEnd.setDate(dateToEnd.getDate() + 1);
+    return dateToEnd.toISOString().split('T')[0];
 }
 
 function normalizePositiveInteger(value: unknown, fallback: number | null = null): number | null {
@@ -96,6 +108,7 @@ async function resolveAllMatchingContactIds({
     const excludeTagIds = normalizeStringArray(filters.excludeTagIds);
     const dateFrom = normalizeDateFilter(filters.dateFrom);
     const dateTo = normalizeDateFilter(filters.dateTo);
+    const dateFilterMode = normalizeDateFilterMode(filters.dateFilterMode);
 
     let query = supabase
         .from('contacts')
@@ -109,15 +122,33 @@ async function resolveAllMatchingContactIds({
         query = query.ilike('name', `%${search}%`);
     }
 
-    if (dateFrom) {
-        query = query.or(`first_interaction_at.gte.${dateFrom},and(first_interaction_at.is.null,created_at.gte.${dateFrom})`);
-    }
+    if (dateFilterMode === 'exclude') {
+        const outsideRangeConditions = [
+            ...(dateFrom
+                ? [
+                    `first_interaction_at.lt.${dateFrom}`,
+                    `and(first_interaction_at.is.null,created_at.lt.${dateFrom})`
+                ]
+                : []),
+            ...(dateTo
+                ? [
+                    `first_interaction_at.gte.${getDateToEndString(dateTo)}`,
+                    `and(first_interaction_at.is.null,created_at.gte.${getDateToEndString(dateTo)})`
+                ]
+                : [])
+        ];
 
-    if (dateTo) {
-        const dateToEnd = new Date(dateTo);
-        dateToEnd.setDate(dateToEnd.getDate() + 1);
-        const dateToEndStr = dateToEnd.toISOString().split('T')[0];
-        query = query.or(`first_interaction_at.lt.${dateToEndStr},and(first_interaction_at.is.null,created_at.lt.${dateToEndStr})`);
+        if (outsideRangeConditions.length > 0) {
+            query = query.or(outsideRangeConditions.join(','));
+        }
+    } else {
+        if (dateFrom) {
+            query = query.or(`first_interaction_at.gte.${dateFrom},and(first_interaction_at.is.null,created_at.gte.${dateFrom})`);
+        }
+
+        if (dateTo) {
+            query = query.or(`first_interaction_at.lt.${getDateToEndString(dateTo)},and(first_interaction_at.is.null,created_at.lt.${getDateToEndString(dateTo)})`);
+        }
     }
 
     const [contactRows, includeTagSet, excludeTagSet] = await Promise.all([

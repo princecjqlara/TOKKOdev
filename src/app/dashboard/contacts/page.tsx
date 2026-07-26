@@ -86,6 +86,7 @@ function getTemplateBodyText(envelopeKey: string): string | null {
 }
 
 type DatePreset = 'today' | 'yesterday' | 'last7' | 'last30';
+type DateFilterMode = 'include' | 'exclude';
 
 const DATE_PRESETS: Array<{ value: DatePreset; label: string }> = [
     { value: 'today', label: 'Today' },
@@ -271,6 +272,7 @@ export default function ContactsPage() {
     const [excludedTagFilters, setExcludedTagFilters] = useState<Set<string>>(new Set());
     const [dateFrom, setDateFrom] = useState('');
     const [dateTo, setDateTo] = useState('');
+    const [dateFilterMode, setDateFilterMode] = useState<DateFilterMode>('include');
 
     // Selection
     const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
@@ -337,6 +339,7 @@ export default function ContactsPage() {
     const clearDateFilter = () => {
         setDateFrom('');
         setDateTo('');
+        setDateFilterMode('include');
         setPage(1);
         clearSelection();
     };
@@ -350,7 +353,7 @@ export default function ContactsPage() {
             fetchContacts();
             fetchTags();
         }
-    }, [selectedPageId, page, pageSize, search, selectedTagFilters, excludedTagFilters, dateFrom, dateTo]);
+    }, [selectedPageId, page, pageSize, search, selectedTagFilters, excludedTagFilters, dateFrom, dateTo, dateFilterMode]);
 
     useEffect(() => {
         if (selectedPageId) {
@@ -470,7 +473,8 @@ export default function ContactsPage() {
                 ...(selectedTagFilters.size > 0 && { tagIds: [...selectedTagFilters].join(',') }),
                 ...(excludedTagFilters.size > 0 && { excludeTagIds: [...excludedTagFilters].join(',') }),
                 ...(dateFrom && { dateFrom }),
-                ...(dateTo && { dateTo })
+                ...(dateTo && { dateTo }),
+                ...((dateFrom || dateTo) && { dateFilterMode })
             });
 
             const res = await fetch(`/api/pages/${selectedPageId}/contacts?${params}`);
@@ -492,7 +496,7 @@ export default function ContactsPage() {
                 setLoading(false);
             }
         }
-    }, [selectedPageId, page, pageSize, search, selectedTagFilters, excludedTagFilters, dateFrom, dateTo]);
+    }, [selectedPageId, page, pageSize, search, selectedTagFilters, excludedTagFilters, dateFrom, dateTo, dateFilterMode]);
 
     useEffect(() => {
         if (!selectedPageId) return;
@@ -618,7 +622,8 @@ export default function ContactsPage() {
                     ...(selectedTagFilters.size > 0 && { tagIds: [...selectedTagFilters].join(',') }),
                     ...(excludedTagFilters.size > 0 && { excludeTagIds: [...excludedTagFilters].join(',') }),
                     ...(dateFrom && { dateFrom }),
-                    ...(dateTo && { dateTo })
+                    ...(dateTo && { dateTo }),
+                    ...((dateFrom || dateTo) && { dateFilterMode })
                 });
 
                 const res = await fetch(`/api/pages/${selectedPageId}/contacts?${params}`);
@@ -882,7 +887,8 @@ export default function ContactsPage() {
                         tagIds: Array.from(selectedTagFilters),
                         excludeTagIds: Array.from(excludedTagFilters),
                         dateFrom,
-                        dateTo
+                        dateTo,
+                        dateFilterMode
                     },
                     ...(manualBatchEnabled
                         ? {
@@ -1850,6 +1856,28 @@ export default function ContactsPage() {
                     <div className="flex items-center gap-2 flex-wrap">
                         <Calendar className="w-4 h-4 flex-shrink-0 text-gray-500" />
                         <span className="text-[10px] font-bold uppercase text-gray-500 flex-shrink-0">Date:</span>
+                        <div className="flex items-center border border-gray-300">
+                            <button
+                                type="button"
+                                onClick={() => { setDateFilterMode('include'); setPage(1); clearSelection(); }}
+                                className={`text-[10px] font-bold uppercase px-2 py-0.5 transition-colors ${dateFilterMode === 'include'
+                                    ? 'bg-black text-white'
+                                    : 'bg-white text-gray-600 hover:bg-gray-50'
+                                    }`}
+                            >
+                                Include
+                            </button>
+                            <button
+                                type="button"
+                                onClick={() => { setDateFilterMode('exclude'); setPage(1); clearSelection(); }}
+                                className={`text-[10px] font-bold uppercase px-2 py-0.5 border-l border-gray-300 transition-colors ${dateFilterMode === 'exclude'
+                                    ? 'bg-red-600 text-white'
+                                    : 'bg-white text-gray-600 hover:bg-red-50'
+                                    }`}
+                            >
+                                Exclude
+                            </button>
+                        </div>
                         <div className="flex items-center gap-1 flex-wrap">
                             {DATE_PRESETS.map((preset) => {
                                 const isActive = activeDatePreset === preset.value;

@@ -7,6 +7,14 @@ import { buildNotInFilter } from '@/lib/tag-filters';
 import { normalizeContactName } from '../../../../../lib/contact-names';
 import { fetchAllSupabaseRows } from '../../../../../lib/supabase-pagination';
 
+type DateFilterMode = 'include' | 'exclude';
+
+function getDateToEndString(dateTo: string): string {
+    const dateToEnd = new Date(dateTo);
+    dateToEnd.setDate(dateToEnd.getDate() + 1);
+    return dateToEnd.toISOString().split('T')[0];
+}
+
 // GET /api/pages/[pageId]/contacts - Get contacts with pagination
 export async function GET(
     request: NextRequest,
@@ -62,6 +70,9 @@ export async function GET(
         const sendableOnly = searchParams.get('sendable') === 'true'; // Only return contacts with valid PSIDs
         const dateFrom = searchParams.get('dateFrom') || '';
         const dateTo = searchParams.get('dateTo') || '';
+        const dateFilterMode: DateFilterMode = searchParams.get('dateFilterMode') === 'exclude'
+            ? 'exclude'
+            : 'include';
 
         logInfo('Contacts request received', {
             userId: session.user.id,
@@ -74,7 +85,8 @@ export async function GET(
             excludeTagCount: excludeTagIds.length,
             sendableOnly,
             dateFrom: dateFrom || null,
-            dateTo: dateTo || null
+            dateTo: dateTo || null,
+            dateFilterMode
         });
 
         const supabase = getSupabaseAdmin();
@@ -119,15 +131,32 @@ export async function GET(
         }
 
         // Apply date range filter on first_interaction_at (falls back to created_at)
-        if (dateFrom) {
-            query = query.or(`first_interaction_at.gte.${dateFrom},and(first_interaction_at.is.null,created_at.gte.${dateFrom})`);
-        }
-        if (dateTo) {
-            // Add one day to dateTo to include the entire day
-            const dateToEnd = new Date(dateTo);
-            dateToEnd.setDate(dateToEnd.getDate() + 1);
-            const dateToEndStr = dateToEnd.toISOString().split('T')[0];
-            query = query.or(`first_interaction_at.lt.${dateToEndStr},and(first_interaction_at.is.null,created_at.lt.${dateToEndStr})`);
+        if (dateFilterMode === 'exclude') {
+            const outsideRangeConditions = [
+                ...(dateFrom
+                    ? [
+                        `first_interaction_at.lt.${dateFrom}`,
+                        `and(first_interaction_at.is.null,created_at.lt.${dateFrom})`
+                    ]
+                    : []),
+                ...(dateTo
+                    ? [
+                        `first_interaction_at.gte.${getDateToEndString(dateTo)}`,
+                        `and(first_interaction_at.is.null,created_at.gte.${getDateToEndString(dateTo)})`
+                    ]
+                    : [])
+            ];
+
+            if (outsideRangeConditions.length > 0) {
+                query = query.or(outsideRangeConditions.join(','));
+            }
+        } else {
+            if (dateFrom) {
+                query = query.or(`first_interaction_at.gte.${dateFrom},and(first_interaction_at.is.null,created_at.gte.${dateFrom})`);
+            }
+            if (dateTo) {
+                query = query.or(`first_interaction_at.lt.${getDateToEndString(dateTo)},and(first_interaction_at.is.null,created_at.lt.${getDateToEndString(dateTo)})`);
+            }
         }
 
         // Apply include tag filter (OR logic — contacts with ANY of the selected tags)

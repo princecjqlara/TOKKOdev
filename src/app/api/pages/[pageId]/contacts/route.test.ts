@@ -79,6 +79,7 @@ function createSupabaseMock(options?: {
         eq: vi.fn(() => contactsBuilder),
         in: vi.fn(() => contactsBuilder),
         not: vi.fn(() => contactsBuilder),
+        or: vi.fn(() => contactsBuilder),
         order: vi.fn(() => contactsBuilder),
         range: contactsRange
     };
@@ -167,6 +168,7 @@ function createSupabaseMock(options?: {
         from,
         contactsIn: contactsBuilder.in,
         contactsNot: contactsBuilder.not,
+        contactsOr: contactsBuilder.or,
         contactTagsIn,
         contactTagsEq
     };
@@ -225,6 +227,27 @@ describe('GET /api/pages/[pageId]/contacts', () => {
         expect(supabase.contactsIn).toHaveBeenCalledWith('id', ['contact_1', 'contact_2']);
         expect(mocks.buildNotInFilter).toHaveBeenCalledWith(['contact_2']);
         expect(supabase.contactsNot).toHaveBeenCalledWith('id', 'in', '("contact_2")');
+    });
+
+    it('applies exclude mode to date filters', async () => {
+        mocks.getServerSession.mockResolvedValue({
+            user: {
+                id: 'user_1'
+            }
+        });
+
+        const supabase = createSupabaseMock();
+        mocks.getSupabaseAdmin.mockReturnValue(supabase);
+
+        const response = await GET(
+            createRequest('http://localhost:3000/api/pages/page_1/contacts?page=1&pageSize=25&dateFrom=2026-07-20&dateTo=2026-07-26&dateFilterMode=exclude'),
+            { params: Promise.resolve({ pageId: 'page_1' }) }
+        );
+
+        expect(response.status).toBe(200);
+        expect(supabase.contactsOr).toHaveBeenCalledWith(
+            'first_interaction_at.lt.2026-07-20,and(first_interaction_at.is.null,created_at.lt.2026-07-20),first_interaction_at.gte.2026-07-27,and(first_interaction_at.is.null,created_at.gte.2026-07-27)'
+        );
     });
 
     it('normalizes placeholder contact names out of the API response', async () => {
