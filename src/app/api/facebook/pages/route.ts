@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getServerSession } from 'next-auth';
 import { authOptions } from '@/lib/auth';
-import { getFacebookPages } from '@/lib/facebook';
+import { getFacebookPages, isFacebookReauthRequired } from '@/lib/facebook';
+import { FACEBOOK_REAUTH_MESSAGE } from '@/lib/facebook-permissions';
 
 export const dynamic = 'force-dynamic';
 
@@ -29,6 +30,18 @@ export async function GET(request: NextRequest) {
         return NextResponse.json({ pages });
     } catch (error) {
         console.error('Error fetching Facebook pages:', error);
+        if (isFacebookReauthRequired(error)) {
+            return NextResponse.json(
+                {
+                    error: 'Facebook authorization required',
+                    code: 'FACEBOOK_REAUTH_REQUIRED',
+                    requiresReauth: true,
+                    message: FACEBOOK_REAUTH_MESSAGE
+                },
+                { status: 409 }
+            );
+        }
+
         return NextResponse.json(
             { error: 'Failed to fetch pages', message: (error as Error).message },
             { status: 500 }

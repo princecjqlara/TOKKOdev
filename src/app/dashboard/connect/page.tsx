@@ -5,20 +5,8 @@ import { useEffect, useState } from 'react';
 import { FacebookPage } from '@/types';
 import { Check, Facebook, RefreshCw, AlertCircle } from 'lucide-react';
 import { runContactSyncToCompletion } from '@/lib/contact-sync-client';
-
-const FACEBOOK_PERMISSION_SCOPE = [
-    'email',
-    'public_profile',
-    'pages_show_list',
-    'pages_read_engagement',
-    'pages_manage_metadata',
-    'pages_read_user_content',
-    'pages_manage_posts',
-    'pages_manage_engagement',
-    'pages_messaging',
-    'pages_utility_messaging',
-    'business_management'
-].join(',');
+import { FACEBOOK_PERMISSION_SCOPE } from '@/lib/facebook-permissions';
+import { getFacebookConnectErrorMessage, isFacebookReauthMessage } from '@/lib/facebook-errors';
 
 export default function ConnectPage() {
     const { data: session } = useSession();
@@ -27,6 +15,7 @@ export default function ConnectPage() {
     const [connecting, setConnecting] = useState<string | null>(null);
     const [connectedPages, setConnectedPages] = useState<Set<string>>(new Set());
     const [error, setError] = useState<string | null>(null);
+    const [requiresReauth, setRequiresReauth] = useState(false);
     const [success, setSuccess] = useState<string | null>(null);
 
     useEffect(() => {
@@ -45,13 +34,17 @@ export default function ConnectPage() {
             const data = await res.json();
 
             if (data.error) {
-                setError(data.message);
+                const message = getFacebookConnectErrorMessage(data.message || data.error);
+                setError(message);
+                setRequiresReauth(Boolean(data.requiresReauth) || isFacebookReauthMessage(data.message || data.error || ''));
             } else {
                 setFacebookPages(data.pages || []);
+                setRequiresReauth(false);
             }
         } catch (error) {
             console.error('Error fetching Facebook pages:', error);
             setError('Failed to load Facebook pages');
+            setRequiresReauth(false);
         } finally {
             setLoading(false);
         }
@@ -114,7 +107,8 @@ export default function ConnectPage() {
                     setSuccess(`${connectedMessage} Initial contact sync can be retried from Contacts.`);
                 }
             } else {
-                setError(data.message || 'Failed to connect page');
+                setError(getFacebookConnectErrorMessage(data.message || data.error));
+                setRequiresReauth(Boolean(data.requiresReauth) || isFacebookReauthMessage(data.message || data.error || ''));
             }
         } catch (error) {
             console.error('Error connecting page:', error);
@@ -125,6 +119,9 @@ export default function ConnectPage() {
     };
 
     const handleFacebookLogin = () => {
+        setLoading(true);
+        setError(null);
+        setRequiresReauth(false);
         signIn(
             'facebook',
             { callbackUrl: '/dashboard/connect' },
@@ -176,9 +173,18 @@ export default function ConnectPage() {
 
             {/* Messages */}
             {error && (
-                <div className="mb-6 p-4 border border-black bg-red-50 flex items-start gap-3">
+                <div className="mb-6 p-4 border border-black bg-red-50 flex flex-col md:flex-row md:items-center gap-3">
                     <AlertCircle className="w-5 h-5 text-red-600 shrink-0 mt-0.5" />
-                    <span className="text-sm font-bold text-red-800 uppercase">{error}</span>
+                    <span className="text-sm font-bold text-red-800 uppercase flex-1">{error}</span>
+                    {requiresReauth && (
+                        <button
+                            onClick={handleFacebookLogin}
+                            className="btn-wireframe text-xs bg-white h-9 shrink-0"
+                        >
+                            <RefreshCw className="w-3 h-3 mr-2" />
+                            Refresh Permissions
+                        </button>
+                    )}
                 </div>
             )}
 

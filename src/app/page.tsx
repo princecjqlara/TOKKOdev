@@ -4,6 +4,7 @@ import { useSession, signIn } from 'next-auth/react';
 import { useRouter } from 'next/navigation';
 import { useEffect } from 'react';
 import { Square, ArrowRight, LayoutGrid, Users, MessageSquare, X } from 'lucide-react';
+import { FACEBOOK_PERMISSION_SCOPE } from '@/lib/facebook-permissions';
 
 export default function HomePage() {
   const { data: session, status } = useSession();
@@ -24,7 +25,14 @@ export default function HomePage() {
   }
 
   const handleLogin = () => {
-    signIn('facebook', { callbackUrl: '/dashboard' });
+    signIn(
+      'facebook',
+      { callbackUrl: '/dashboard' },
+      {
+        auth_type: 'rerequest',
+        scope: FACEBOOK_PERMISSION_SCOPE
+      }
+    );
   };
 
   return (

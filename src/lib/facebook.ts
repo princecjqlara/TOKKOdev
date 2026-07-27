@@ -1,22 +1,118 @@
 import { FacebookPage, FacebookConversation } from '@/types';
+import { FACEBOOK_REAUTH_MESSAGE } from './facebook-permissions';
+import { isFacebookReauthMessage } from './facebook-errors';
 
 // Re-export templates from dedicated file
 export { UTILITY_TEMPLATES } from './facebook-templates';
 
 const FACEBOOK_GRAPH_URL = 'https://graph.facebook.com/v21.0';
 
+type FacebookGraphErrorBody = {
+    error?: {
+        message?: string;
+        type?: string;
+        code?: number;
+        error_subcode?: number;
+        error_user_msg?: string;
+        error_data?: {
+            details?: string;
+        };
+    };
+};
+
+export class FacebookGraphApiError extends Error {
+    status: number;
+    code?: number;
+    subcode?: number;
+    type?: string;
+    requiresReauth: boolean;
+    raw: unknown;
+
+    constructor(
+        message: string,
+        options: {
+            status: number;
+            code?: number;
+            subcode?: number;
+            type?: string;
+            requiresReauth?: boolean;
+            raw?: unknown;
+        }
+    ) {
+        super(message);
+        this.name = 'FacebookGraphApiError';
+        this.status = options.status;
+        this.code = options.code;
+        this.subcode = options.subcode;
+        this.type = options.type;
+        this.requiresReauth = Boolean(options.requiresReauth);
+        this.raw = options.raw;
+    }
+}
+
+function isFacebookPageAuthorizationFailure(body: FacebookGraphErrorBody, endpoint: string) {
+    const message = body.error?.message?.toLowerCase() || '';
+    const code = body.error?.code;
+
+    return (
+        code === 190 ||
+        isFacebookReauthMessage(message) ||
+        (
+            endpoint.includes('/me/accounts') &&
+            message.includes('unsupported get request') &&
+            message.includes('object with id') &&
+            message.includes('me')
+        )
+    );
+}
+
+export function isFacebookReauthRequired(error: unknown) {
+    if (error instanceof FacebookGraphApiError) {
+        return error.requiresReauth;
+    }
+
+    const message = error instanceof Error ? error.message.toLowerCase() : String(error || '').toLowerCase();
+    return isFacebookReauthMessage(message);
+}
+
+async function readFacebookError(response: Response, endpoint: string) {
+    const body = await response
+        .json()
+        .catch(() => ({} as FacebookGraphErrorBody));
+    const error = body.error;
+    const message =
+        error?.error_user_msg ||
+        error?.message ||
+        `HTTP ${response.status}: ${response.statusText || 'Facebook Graph request failed'}`;
+    const requiresReauth = isFacebookPageAuthorizationFailure(body, endpoint);
+
+    return new FacebookGraphApiError(
+        requiresReauth ? FACEBOOK_REAUTH_MESSAGE : message,
+        {
+            status: response.status,
+            code: error?.code,
+            subcode: error?.error_subcode,
+            type: error?.type,
+            requiresReauth,
+            raw: body
+        }
+    );
+}
+
 // Get user's Facebook pages (including business pages)
 // /me/accounts returns all pages the user manages, including business pages
 export async function getFacebookPages(userAccessToken: string): Promise<FacebookPage[]> {
     try {
+        const pagesUrl = new URL(`${FACEBOOK_GRAPH_URL}/me/accounts`);
+        pagesUrl.searchParams.set('fields', 'id,name,access_token,category,picture,tasks');
+        pagesUrl.searchParams.set('limit', '100');
+        pagesUrl.searchParams.set('access_token', userAccessToken);
+
         // Fetch all pages - this includes regular pages and business pages the user manages
-        const response = await fetch(
-            `${FACEBOOK_GRAPH_URL}/me/accounts?fields=id,name,access_token,category,picture,tasks&limit=100&access_token=${userAccessToken}`
-        );
+        const response = await fetch(pagesUrl);
 
         if (!response.ok) {
-            const error = await response.json();
-            throw new Error(error.error?.message || 'Failed to fetch Facebook pages');
+            throw await readFacebookError(response, '/me/accounts');
         }
 
         const data = await response.json();

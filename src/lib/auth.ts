@@ -1,6 +1,7 @@
 import { NextAuthOptions } from 'next-auth';
 import FacebookProvider from 'next-auth/providers/facebook';
 import { getSupabaseAdmin } from './supabase';
+import { FACEBOOK_PERMISSION_SCOPE } from './facebook-permissions';
 
 export const authOptions: NextAuthOptions = {
     providers: [
@@ -9,7 +10,7 @@ export const authOptions: NextAuthOptions = {
             clientSecret: process.env.FACEBOOK_CLIENT_SECRET!,
             authorization: {
                 params: {
-                    scope: 'email,public_profile,pages_show_list,pages_read_engagement,pages_manage_metadata,pages_read_user_content,pages_manage_posts,pages_manage_engagement,pages_messaging,pages_utility_messaging,business_management'
+                    scope: FACEBOOK_PERMISSION_SCOPE
                 }
             }
         })
