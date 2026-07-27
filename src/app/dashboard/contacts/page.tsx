@@ -15,7 +15,8 @@ import {
     CheckSquare,
     Link2,
     Plus,
-    Calendar
+    Calendar,
+    Download
 } from 'lucide-react';
 import Pagination from '@/components/Pagination';
 import Modal from '@/components/Modal';
@@ -256,6 +257,7 @@ export default function ContactsPage() {
     const [tags, setTags] = useState<TagType[]>([]);
     const [loading, setLoading] = useState(true);
     const [syncing, setSyncing] = useState(false);
+    const [exportingConversations, setExportingConversations] = useState(false);
     const [availableTemplates, setAvailableTemplates] = useState<AvailableTemplate[]>([]);
     const [selectedTemplateName, setSelectedTemplateName] = useState<string | null>(null);
     const [selectedTemplateLanguage, setSelectedTemplateLanguage] = useState('en_US');
@@ -985,6 +987,38 @@ export default function ContactsPage() {
             alert(`Tracked bulk send stopped: ${(error as Error).message}\n\nOpen Campaigns and press Send on the created campaign to resume pending recipients without resending completed ones.`);
         } finally {
             setActionLoading(false);
+        }
+    };
+
+    const handleExportConversations = async () => {
+        if (!selectedPageId || exportingConversations) return;
+
+        setExportingConversations(true);
+        try {
+            const response = await fetch(`/api/pages/${selectedPageId}/conversations/export?format=csv`);
+
+            if (!response.ok) {
+                const data = await readApiResponse(response);
+                throw new Error(data.message || 'Failed to export conversations');
+            }
+
+            const blob = await response.blob();
+            const contentDisposition = response.headers.get('content-disposition') || '';
+            const filenameMatch = contentDisposition.match(/filename="([^"]+)"/);
+            const filename = filenameMatch?.[1] || 'facebook-conversations.csv';
+            const downloadUrl = window.URL.createObjectURL(blob);
+            const link = document.createElement('a');
+            link.href = downloadUrl;
+            link.download = filename;
+            document.body.appendChild(link);
+            link.click();
+            link.remove();
+            window.URL.revokeObjectURL(downloadUrl);
+        } catch (error) {
+            console.error('Error exporting conversations:', error);
+            alert((error as Error).message || 'Failed to export conversations');
+        } finally {
+            setExportingConversations(false);
         }
     };
 
@@ -1746,6 +1780,15 @@ export default function ContactsPage() {
                     >
                         <RefreshCw className={`w-4 h-4 mr-2 ${syncing ? 'animate-spin' : ''}`} />
                         Sync
+                    </button>
+
+                    <button
+                        onClick={handleExportConversations}
+                        disabled={!selectedPageId || exportingConversations}
+                        className="btn-wireframe"
+                    >
+                        <Download className={`w-4 h-4 mr-2 ${exportingConversations ? 'animate-pulse' : ''}`} />
+                        {exportingConversations ? 'Exporting' : 'Export CSV'}
                     </button>
                 </div>
             </div>
