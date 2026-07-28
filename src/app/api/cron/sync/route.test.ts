@@ -28,16 +28,27 @@ function createRequest(): NextRequest {
 }
 
 function createSupabaseMock() {
-    const pagesSelect = vi.fn().mockResolvedValue({
+    const pagesLimit = vi.fn().mockResolvedValue({
         data: [
             {
                 id: 'page_1',
                 fb_page_id: 'fb_page_1',
                 access_token: 'page_access_token_1',
-                name: 'Test Page'
+                name: 'Test Page',
+                updated_at: '2026-04-07T02:00:00.000Z'
             }
         ],
         error: null
+    });
+    const pagesOrder = vi.fn().mockReturnValue({
+        limit: pagesLimit
+    });
+    const pagesSelect = vi.fn().mockReturnValue({
+        order: pagesOrder
+    });
+    const pagesEq = vi.fn().mockResolvedValue({ error: null });
+    const pagesUpdate = vi.fn().mockReturnValue({
+        eq: pagesEq
     });
 
     const contactsUpsert = vi.fn().mockResolvedValue({ error: null });
@@ -45,7 +56,8 @@ function createSupabaseMock() {
     const from = vi.fn((table: string) => {
         if (table === 'pages') {
             return {
-                select: pagesSelect
+                select: pagesSelect,
+                update: pagesUpdate
             };
         }
 
@@ -60,6 +72,10 @@ function createSupabaseMock() {
 
     return {
         from,
+        pagesLimit,
+        pagesOrder,
+        pagesUpdate,
+        pagesEq,
         contactsUpsert
     };
 }
@@ -109,14 +125,25 @@ describe('GET /api/cron/sync', () => {
         expect(mocks.getPageConversations).toHaveBeenCalledWith(
             'fb_page_1',
             'page_access_token_1',
-            50,
+            5,
             false
         );
         expect(mocks.repairMissingContactNamesForPage).toHaveBeenCalledWith(
             supabase,
             expect.objectContaining({ id: 'page_1' }),
-            { limit: 200 }
+            { limit: 5 }
         );
+        expect(supabase.pagesOrder).toHaveBeenCalledWith(
+            'updated_at',
+            { ascending: true, nullsFirst: true }
+        );
+        expect(supabase.pagesLimit).toHaveBeenCalledWith(1);
+        expect(supabase.pagesUpdate).toHaveBeenCalledWith(
+            expect.objectContaining({
+                updated_at: expect.any(String)
+            })
+        );
+        expect(supabase.pagesEq).toHaveBeenCalledWith('id', 'page_1');
         const payload = supabase.contactsUpsert.mock.calls[0][0] as Record<string, unknown>;
         expect(payload.name).toBe('Jane Contact');
         expect(payload.profile_pic).toBe('https://example.com/jane.jpg');

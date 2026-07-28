@@ -128,7 +128,7 @@ src/
 
 Vercel Cron is not used. Configure cron jobs in [cron-jobs.org](https://cron-jobs.org) to call the deployed API routes:
 
-- Hourly page sync: `https://your-app.vercel.app/api/cron/sync`
+- Contact/name sync, every 30 minutes: `https://your-app.vercel.app/api/cron/sync`
 - Scheduled campaigns, every minute: `https://your-app.vercel.app/api/cron/campaign-scheduled`
 - Loop campaigns, every minute: `https://your-app.vercel.app/api/cron/campaign-loop`
 
