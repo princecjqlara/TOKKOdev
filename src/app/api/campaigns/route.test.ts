@@ -31,7 +31,9 @@ function createRequest(body: Record<string, unknown>): NextRequest {
     }) as NextRequest;
 }
 
-function createSupabaseMock() {
+function createSupabaseMock(options: {
+    contactBestTimes?: Record<string, number | null>;
+} = {}) {
     const userPageSingle = vi.fn().mockResolvedValue({
         data: { page_id: 'page_1' },
         error: null
@@ -51,6 +53,14 @@ function createSupabaseMock() {
     const campaignsInsert = vi.fn().mockReturnValue({ select: campaignSelect });
 
     const campaignRecipientsInsert = vi.fn().mockResolvedValue({ error: null });
+    const contactsIn = vi.fn((_column: string, contactIds: string[]) => Promise.resolve({
+        data: contactIds.map((id) => ({
+            id,
+            best_contact_hour: options.contactBestTimes?.[id] ?? null
+        })),
+        error: null
+    }));
+    const contactsSelect = vi.fn().mockReturnValue({ in: contactsIn });
 
     const from = vi.fn((table: string) => {
         if (table === 'user_pages') {
@@ -71,13 +81,20 @@ function createSupabaseMock() {
             };
         }
 
+        if (table === 'contacts') {
+            return {
+                select: contactsSelect
+            };
+        }
+
         throw new Error(`Unexpected table: ${table}`);
     });
 
     return {
         from,
         campaignsInsert,
-        campaignRecipientsInsert
+        campaignRecipientsInsert,
+        contactsIn
     };
 }
 
@@ -140,6 +157,41 @@ describe('POST /api/campaigns', () => {
             'Send this',
             'Then this',
             'Then this too'
+        ]);
+    });
+
+    it('schedules best-time recipients on the selected Philippine calendar date', async () => {
+        const supabase = createSupabaseMock({
+            contactBestTimes: {
+                contact_1: 9,
+                contact_2: 20
+            }
+        });
+        mocks.getSupabaseAdmin.mockReturnValue(supabase);
+
+        const response = await POST(createRequest({
+            pageId: 'page_1',
+            name: 'Best time follow-up',
+            messageText: 'Hello there',
+            contactIds: ['contact_1', 'contact_2'],
+            useBestTime: true,
+            scheduledDate: '2026-07-30'
+        }));
+
+        expect(response.status).toBe(200);
+        expect(supabase.campaignRecipientsInsert).toHaveBeenCalledWith([
+            {
+                campaign_id: 'campaign_1',
+                contact_id: 'contact_1',
+                status: 'pending',
+                scheduled_at: '2026-07-30T01:00:00.000Z'
+            },
+            {
+                campaign_id: 'campaign_1',
+                contact_id: 'contact_2',
+                status: 'pending',
+                scheduled_at: '2026-07-30T12:00:00.000Z'
+            }
         ]);
     });
 });

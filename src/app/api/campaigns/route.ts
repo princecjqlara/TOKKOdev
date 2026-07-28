@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getServerSession } from 'next-auth';
 import { authOptions } from '@/lib/auth';
 import { normalizeCampaignMessageParts, serializeCampaignMessageSequence } from '../../../lib/campaign-message-sequence';
+import { getNextPhilippinesScheduledAtIso, getPhilippinesDatePartsFromDateString, getPhilippinesScheduledAtIso } from '@/lib/philippines-time';
 import { getSupabaseAdmin } from '@/lib/supabase';
 import { PaginatedResponse, Campaign } from '@/types';
 
@@ -311,20 +312,14 @@ export async function POST(request: NextRequest) {
                         const hour = bestHour !== null && bestHour !== undefined ? bestHour : 12; // Default to noon
 
                         if (isLoop) {
-                            // For loops, schedule for today if hour hasn't passed, otherwise tomorrow
-                            const now = new Date();
-                            const sendDate = new Date();
-                            if (now.getUTCHours() >= hour) {
-                                // Hour already passed today, schedule for tomorrow
-                                sendDate.setDate(sendDate.getDate() + 1);
-                            }
-                            sendDate.setUTCHours(hour, 0, 0, 0);
-                            scheduledAt = sendDate.toISOString();
+                            // For loops, schedule for the next occurrence of the PH best-time hour.
+                            scheduledAt = getNextPhilippinesScheduledAtIso(hour);
                         } else {
-                            // Regular best time scheduling uses provided date
-                            const sendDate = new Date(scheduledDate);
-                            sendDate.setUTCHours(hour, 0, 0, 0);
-                            scheduledAt = sendDate.toISOString();
+                            // Regular best time scheduling uses the selected PH calendar date.
+                            const dateParts = getPhilippinesDatePartsFromDateString(scheduledDate);
+                            scheduledAt = dateParts
+                                ? getPhilippinesScheduledAtIso(hour, dateParts)
+                                : null;
                         }
                     }
 

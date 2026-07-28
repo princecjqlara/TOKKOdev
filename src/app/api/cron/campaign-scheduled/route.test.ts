@@ -44,6 +44,8 @@ function createThenableQuery<T>(resultFactory: () => Promise<T>) {
         eq: vi.fn(() => query),
         lte: vi.fn(() => query),
         in: vi.fn(() => query),
+        order: vi.fn(() => query),
+        limit: vi.fn(() => query),
         select: vi.fn(() => query),
         then: (resolve: (value: T) => unknown, reject: (error: unknown) => unknown) =>
             resultFactory().then(resolve, reject)
@@ -202,10 +204,10 @@ describe('GET /api/cron/campaign-scheduled', () => {
             supabase,
             allowScheduled: true,
             dueAt: expect.any(String),
-            sendBatchSize: 5,
+            sendBatchSize: 10,
             delayBetweenBatchesMs: 0,
-            maxRecipientsPerRun: 10,
-            maxProcessingTimeMs: 20000,
+            maxRecipientsPerRun: 25,
+            maxProcessingTimeMs: 25000,
             includeUnscheduledRecipients: true
         });
     });
@@ -238,10 +240,10 @@ describe('GET /api/cron/campaign-scheduled', () => {
             supabase,
             allowScheduled: true,
             dueAt: expect.any(String),
-            sendBatchSize: 5,
+            sendBatchSize: 10,
             delayBetweenBatchesMs: 0,
-            maxRecipientsPerRun: 10,
-            maxProcessingTimeMs: 20000,
+            maxRecipientsPerRun: 25,
+            maxProcessingTimeMs: 25000,
             includeUnscheduledRecipients: false
         });
     });

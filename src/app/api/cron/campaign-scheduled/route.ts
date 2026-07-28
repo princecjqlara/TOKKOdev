@@ -7,9 +7,10 @@ import { chunkArray } from '../../../../lib/chunking';
 export const dynamic = 'force-dynamic';
 
 const STALE_SENDING_AFTER_MS = 10 * 60 * 1000;
-const MAX_CAMPAIGNS_PER_CRON_RUN = 2;
-const MAX_RECIPIENTS_PER_CAMPAIGN_RUN = 10;
-const MAX_CRON_SEND_MS = 20000;
+const MAX_CAMPAIGNS_PER_CRON_RUN = 3;
+const MAX_RECIPIENTS_PER_CAMPAIGN_RUN = 25;
+const MAX_DUE_RECIPIENT_ROWS_TO_SCAN = 500;
+const MAX_CRON_SEND_MS = 25000;
 
 type ScheduledCampaign = {
     id: string;
@@ -69,7 +70,8 @@ async function getDueCampaignLevelCampaigns(
         .select(SCHEDULED_CAMPAIGN_SELECT)
         .eq('status', 'scheduled')
         .eq('is_loop', false)
-        .lte('scheduled_at', now);
+        .lte('scheduled_at', now)
+        .order('scheduled_at', { ascending: true, nullsFirst: true });
 
     if (scheduledError) {
         throw scheduledError;
@@ -81,7 +83,8 @@ async function getDueCampaignLevelCampaigns(
         .eq('status', 'sending')
         .eq('is_loop', false)
         .lte('scheduled_at', now)
-        .lte('updated_at', staleSendingCutoff);
+        .lte('updated_at', staleSendingCutoff)
+        .order('scheduled_at', { ascending: true, nullsFirst: true });
 
     if (staleSendingError) {
         throw staleSendingError;
@@ -101,7 +104,9 @@ async function getDueRecipientLevelCampaigns(
         .eq('status', 'pending')
         .lte('scheduled_at', now)
         .eq('campaigns.is_loop', false)
-        .in('campaigns.status', ['scheduled', 'sending']);
+        .in('campaigns.status', ['scheduled', 'sending'])
+        .order('scheduled_at', { ascending: true, nullsFirst: true })
+        .limit(MAX_DUE_RECIPIENT_ROWS_TO_SCAN);
 
     if (error) {
         throw error;
@@ -200,7 +205,7 @@ export async function GET(_request: NextRequest) {
                 supabase,
                 allowScheduled: true,
                 dueAt: now,
-                sendBatchSize: 5,
+                sendBatchSize: 10,
                 delayBetweenBatchesMs: 0,
                 maxRecipientsPerRun: MAX_RECIPIENTS_PER_CAMPAIGN_RUN,
                 maxProcessingTimeMs: MAX_CRON_SEND_MS,

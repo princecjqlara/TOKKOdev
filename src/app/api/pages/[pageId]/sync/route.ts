@@ -8,6 +8,7 @@ import {
     getConversationMessages,
     subscribePageToAppWebhook
 } from '@/lib/facebook';
+import { getPhilippinesHour } from '@/lib/philippines-time';
 import { chunkArray } from '../../../../../lib/chunking';
 import { composeContactName, hasUsableContactName, normalizeContactName, pickPreferredContactName } from '../../../../../lib/contact-names';
 
@@ -273,7 +274,7 @@ export async function POST(
 
                 const interactionDate = conversation.updated_time ? new Date(conversation.updated_time) : null;
                 const bestContactHour = interactionDate && !Number.isNaN(interactionDate.getTime())
-                    ? interactionDate.getUTCHours()
+                    ? getPhilippinesHour(interactionDate)
                     : null;
                 const participantName = normalizeContactName(participant.name);
 
@@ -545,9 +546,7 @@ export async function POST(
 
                             for (const msg of contactMessages) {
                                 const msgDate = new Date(msg.created_time);
-                                // Convert UTC to PHT by adding 8 hours
-                                const utcHour = msgDate.getUTCHours();
-                                const phtHour = (utcHour + 8) % 24;
+                                const phtHour = getPhilippinesHour(msgDate);
                                 hourCounts[phtHour] = (hourCounts[phtHour] || 0) + 1;
                             }
 
@@ -593,7 +592,7 @@ export async function POST(
                     // Fallback: if no messages analyzed, use last interaction time
                     if (bestContactHour === null && conversation.updated_time) {
                         const interactionDate = new Date(conversation.updated_time);
-                        bestContactHour = interactionDate.getUTCHours();
+                        bestContactHour = getPhilippinesHour(interactionDate);
                         bestContactConfidence = 'inferred';
                         bestContactHours = [{ hour: bestContactHour, count: 1 }];
                         interactionCount = 1;

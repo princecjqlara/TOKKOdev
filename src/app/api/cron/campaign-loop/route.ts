@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getSupabaseAdmin } from '@/lib/supabase';
 import { sendMessage } from '@/lib/facebook';
 import { generatePersonalizedMessage } from '@/lib/ai';
+import { getNextPhilippinesScheduledAtIso } from '@/lib/philippines-time';
 
 export const dynamic = 'force-dynamic';
 
@@ -151,11 +152,9 @@ export async function GET(_request: NextRequest) {
                         'HUMAN_AGENT'
                     );
 
-                    // Calculate next scheduled time (same hour tomorrow)
+                    // Calculate next scheduled time at the next PH best-time hour.
                     const bestHour = contact.best_contact_hour ?? 12;
-                    const nextScheduled = new Date();
-                    nextScheduled.setDate(nextScheduled.getDate() + 1);
-                    nextScheduled.setUTCHours(bestHour, 0, 0, 0);
+                    const nextScheduledAt = getNextPhilippinesScheduledAtIso(bestHour);
 
                     // Update recipient: increment count, set next schedule
                     await supabase
@@ -164,7 +163,7 @@ export async function GET(_request: NextRequest) {
                             status: 'pending', // Keep pending for loop
                             message_sent_count: (recipient.message_sent_count || 0) + 1,
                             last_contacted_at: new Date().toISOString(),
-                            next_scheduled_at: nextScheduled.toISOString(),
+                            next_scheduled_at: nextScheduledAt,
                             scheduled_at: null // Clear initial schedule
                         })
                         .eq('id', recipient.id);

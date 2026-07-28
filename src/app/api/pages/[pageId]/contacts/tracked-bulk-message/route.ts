@@ -3,6 +3,7 @@ import { getServerSession } from 'next-auth';
 import { authOptions } from '@/lib/auth';
 import { serializeCampaignMessageSequence } from '@/lib/campaign-message-sequence';
 import { chunkArray } from '@/lib/chunking';
+import { getPhilippinesScheduledAtIso, getTomorrowPhilippinesDateParts } from '@/lib/philippines-time';
 import { sendCampaignById } from '@/lib/campaign-send';
 import { getSupabaseAdmin } from '@/lib/supabase';
 import { fetchAllSupabaseRows } from '@/lib/supabase-pagination';
@@ -125,21 +126,6 @@ function normalizeBestContactHours(contact: ContactBestTimeRow): number[] {
     }
 
     return hours.slice(0, 3).sort((a, b) => a - b);
-}
-
-function getTomorrowPhilippinesDateParts(now = new Date()) {
-    const phNow = new Date(now.getTime() + 8 * 60 * 60 * 1000);
-    phNow.setUTCDate(phNow.getUTCDate() + 1);
-
-    return {
-        year: phNow.getUTCFullYear(),
-        month: phNow.getUTCMonth(),
-        day: phNow.getUTCDate()
-    };
-}
-
-function getPhilippinesScheduledAtIso(hour: number, dateParts: ReturnType<typeof getTomorrowPhilippinesDateParts>) {
-    return new Date(Date.UTC(dateParts.year, dateParts.month, dateParts.day, hour - 8, 0, 0, 0)).toISOString();
 }
 
 function formatPhilippinesScheduledAt(iso: string) {

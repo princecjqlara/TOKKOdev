@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getSupabaseAdmin } from '@/lib/supabase';
 import { verifyWebhookSignature, generateVerifyToken, sendMessage, getUserProfile } from '@/lib/facebook';
+import { getPhilippinesDayOfWeek, getPhilippinesHour } from '@/lib/philippines-time';
 import { replaceTemplateVariables } from '@/lib/placeholders';
 import { composeContactName, hasUsableContactName, normalizeContactName, pickPreferredContactName } from '../../../../lib/contact-names';
 
@@ -481,8 +482,8 @@ export async function POST(request: NextRequest) {
 
                         // Record interaction for best time to contact analysis
                         if (contact) {
-                            const hourOfDay = interactionTime.getUTCHours();
-                            const dayOfWeek = interactionTime.getUTCDay();
+                            const hourOfDay = getPhilippinesHour(interactionTime);
+                            const dayOfWeek = getPhilippinesDayOfWeek(interactionTime);
 
                             const { error: insertInteractionError } = await supabase
                                 .from('contact_interactions')

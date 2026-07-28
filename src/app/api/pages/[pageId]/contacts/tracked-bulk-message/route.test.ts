@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { NextRequest } from 'next/server';
 
 const mocks = vi.hoisted(() => ({
@@ -234,6 +234,7 @@ function createBestTimeSupabaseMock() {
 describe('POST /api/pages/[pageId]/contacts/tracked-bulk-message', () => {
     beforeEach(() => {
         vi.clearAllMocks();
+        vi.useRealTimers();
         mocks.getServerSession.mockResolvedValue({
             user: {
                 id: 'user_1'
@@ -250,6 +251,10 @@ describe('POST /api/pages/[pageId]/contacts/tracked-bulk-message', () => {
             sent: 5,
             failed: 0
         });
+    });
+
+    afterEach(() => {
+        vi.useRealTimers();
     });
 
     it('creates a campaign only for the requested manual contact batch', async () => {
@@ -306,6 +311,8 @@ describe('POST /api/pages/[pageId]/contacts/tracked-bulk-message', () => {
     });
 
     it('schedules three best-time campaigns for tomorrow PH time without sending immediately', async () => {
+        vi.useFakeTimers();
+        vi.setSystemTime(new Date('2026-07-29T02:00:00.000Z'));
         const supabase = createBestTimeSupabaseMock();
         mocks.getSupabaseAdmin.mockReturnValue(supabase);
 
@@ -336,7 +343,39 @@ describe('POST /api/pages/[pageId]/contacts/tracked-bulk-message', () => {
             allBestTimesSent: false
         }));
         expect(supabase.campaignsInsert).toHaveBeenCalledTimes(3);
+        expect(supabase.campaignsInsert).toHaveBeenNthCalledWith(
+            1,
+            expect.objectContaining({
+                scheduled_at: '2026-07-30T01:00:00.000Z'
+            })
+        );
+        expect(supabase.campaignsInsert).toHaveBeenNthCalledWith(
+            2,
+            expect.objectContaining({
+                scheduled_at: '2026-07-30T06:00:00.000Z'
+            })
+        );
+        expect(supabase.campaignsInsert).toHaveBeenNthCalledWith(
+            3,
+            expect.objectContaining({
+                scheduled_at: '2026-07-30T12:00:00.000Z'
+            })
+        );
         expect(supabase.campaignRecipientsInsert).toHaveBeenCalledTimes(3);
+        expect(supabase.campaignRecipientsInsert).toHaveBeenNthCalledWith(1, [
+            {
+                campaign_id: 'campaign_1',
+                contact_id: 'contact_1',
+                status: 'pending',
+                scheduled_at: '2026-07-30T01:00:00.000Z'
+            },
+            {
+                campaign_id: 'campaign_1',
+                contact_id: 'contact_2',
+                status: 'pending',
+                scheduled_at: '2026-07-30T02:00:00.000Z'
+            }
+        ]);
         expect(mocks.sendCampaignById).not.toHaveBeenCalled();
     });
 });
