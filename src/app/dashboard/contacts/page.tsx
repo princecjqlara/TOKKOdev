@@ -88,6 +88,25 @@ function getTemplateBodyText(envelopeKey: string): string | null {
 
 type DatePreset = 'today' | 'yesterday' | 'last7' | 'last30';
 type DateFilterMode = 'include' | 'exclude';
+type BulkDeliveryMode = 'now' | 'best_time_next_day';
+
+type BestTimeScheduledCampaign = {
+    id: string;
+    messageNumber: number;
+    scheduledAt: string;
+    scheduledAtPh: string;
+    recipients: number;
+};
+
+type BestTimeScheduleStatus = {
+    campaignIds: string[];
+    total: number;
+    sent: number;
+    failed: number;
+    pending: number;
+    notYetSent: number;
+    allBestTimesSent: boolean;
+};
 
 const DATE_PRESETS: Array<{ value: DatePreset; label: string }> = [
     { value: 'today', label: 'Today' },
@@ -291,6 +310,11 @@ export default function ContactsPage() {
     const [selectedTagIds, setSelectedTagIds] = useState<Set<string>>(new Set());
     const [messagePart1, setMessagePart1] = useState('');
     const [messagePart2, setMessagePart2] = useState('');
+    const [bulkDeliveryMode, setBulkDeliveryMode] = useState<BulkDeliveryMode>('now');
+    const [scheduledMessages, setScheduledMessages] = useState(['', '', '']);
+    const [bestTimeCampaigns, setBestTimeCampaigns] = useState<BestTimeScheduledCampaign[]>([]);
+    const [bestTimeScheduleStatus, setBestTimeScheduleStatus] = useState<BestTimeScheduleStatus | null>(null);
+    const [bestTimeStatusLoading, setBestTimeStatusLoading] = useState(false);
     const [messageButtons, setMessageButtons] = useState<MessageButton[]>([]);
     const [usePart2AsButtonValue, setUsePart2AsButtonValue] = useState(false);
     const [envelopeWrapper, setEnvelopeWrapper] = useState<string>('msg');
@@ -319,6 +343,12 @@ export default function ContactsPage() {
     const hasMessageButtonErrors = !customButtonsDisabled && firstMessageButtonError !== null;
     const dynamicModeMissingButton =
         !customButtonsDisabled && usePart2AsButtonValue && messageButtons.length === 0;
+    const scheduledMessagesComplete = scheduledMessages.every((message) => message.trim().length > 0);
+    const messageSubmitDisabled =
+        actionLoading ||
+        hasMessageButtonErrors ||
+        dynamicModeMissingButton ||
+        (bulkDeliveryMode === 'best_time_next_day' ? !scheduledMessagesComplete : !messagePart1.trim());
     const realtimeRefreshTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
     const realtimeFallbackIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
     const realtimeSubscribeTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -834,6 +864,40 @@ export default function ContactsPage() {
         return availableTemplates.find((template) => template.name === templateName)?.bodyText || null;
     };
 
+    const updateScheduledMessage = (index: number, value: string) => {
+        setScheduledMessages((current) => current.map((message, messageIndex) => (
+            messageIndex === index ? value : message
+        )));
+    };
+
+    const resetBestTimeScheduleState = () => {
+        setBestTimeCampaigns([]);
+        setBestTimeScheduleStatus(null);
+        setBestTimeStatusLoading(false);
+    };
+
+    const refreshBestTimeBulkStatus = async (campaignIds = bestTimeCampaigns.map((campaign) => campaign.id)) => {
+        if (!selectedPageId || campaignIds.length === 0) return;
+
+        setBestTimeStatusLoading(true);
+        try {
+            const params = new URLSearchParams({
+                campaignIds: campaignIds.join(',')
+            });
+            const response = await fetch(`/api/pages/${selectedPageId}/contacts/tracked-bulk-message?${params.toString()}`);
+            const data = await readApiResponse(response);
+            if (!response.ok) {
+                throw new Error(data.message || 'Failed to refresh best-time schedule status');
+            }
+            setBestTimeScheduleStatus(data.status as BestTimeScheduleStatus);
+        } catch (error) {
+            console.error('Error refreshing best-time bulk status:', error);
+            alert(`Failed to refresh best-time schedule status: ${(error as Error).message}`);
+        } finally {
+            setBestTimeStatusLoading(false);
+        }
+    };
+
     const getSelectedContactIds = async (): Promise<string[]> => {
         if (selectAllMode) {
             const allIds = await fetchAllContactIds();
@@ -846,7 +910,8 @@ export default function ContactsPage() {
     };
 
     const handleTrackedBulkMessage = async () => {
-        if (getSelectionCount() === 0 || !messagePart1.trim() || !selectedPageId) return;
+        if (getSelectionCount() === 0 || !selectedPageId) return;
+        if (bulkDeliveryMode === 'now' && !messagePart1.trim()) return;
 
         const {
             buttons: normalizedMessageButtons,
@@ -866,16 +931,26 @@ export default function ContactsPage() {
             return;
         }
 
+        if (bulkDeliveryMode === 'best_time_next_day' && !scheduledMessagesComplete) {
+            alert('Fill up all 3 scheduled messages before using best-time scheduling.');
+            return;
+        }
+
         if (envelopeWrapper === 'template' && !selectedTemplateName) {
             alert('Pick an approved template before sending.');
             return;
         }
 
         setActionLoading(true);
-        setBulkSendProgress('Preparing tracked bulk send...');
+        setBulkSendProgress(
+            bulkDeliveryMode === 'best_time_next_day'
+                ? 'Preparing best-time schedule for tomorrow PH time...'
+                : 'Preparing tracked bulk send...'
+        );
         setFailedContactIds([]);
         setFailedContactErrors([]);
         setLastSendResults(null);
+        resetBestTimeScheduleState();
 
         try {
             const normalizedManualBatchSize = Math.max(1, Math.floor(Number(manualBatchSize) || 5000));
@@ -921,6 +996,8 @@ export default function ContactsPage() {
                     name: `Bulk message ${new Date().toLocaleString()}`,
                     messagePart1,
                     messagePart2,
+                    deliveryMode: bulkDeliveryMode,
+                    scheduledMessages: bulkDeliveryMode === 'best_time_next_day' ? scheduledMessages : undefined,
                     envelopeWrapper,
                     templateName: envelopeWrapper === 'template' ? selectedTemplateName : undefined,
                     templateLanguage: envelopeWrapper === 'template' ? selectedTemplateLanguage : undefined,
@@ -931,6 +1008,36 @@ export default function ContactsPage() {
             const createData = await readApiResponse(createResponse);
             if (!createResponse.ok) {
                 throw new Error(createData.message || 'Failed to create tracked bulk send');
+            }
+
+            if (createData.mode === 'best_time_next_day') {
+                const selectedRange = createData.selectedRange;
+                const batchLabel = selectedRange
+                    ? `Batch ${selectedRange.batchNumber}: contacts ${selectedRange.start}-${selectedRange.end} of ${selectedRange.totalMatched}. `
+                    : '';
+                const campaigns = (createData.campaigns || []) as BestTimeScheduledCampaign[];
+                const status = createData.status as BestTimeScheduleStatus;
+                const skippedContacts = Number(createData.skippedContacts || 0);
+
+                setBestTimeCampaigns(campaigns);
+                setBestTimeScheduleStatus(status);
+                setBulkSendProgress(
+                    `${batchLabel}Scheduled ${status.total} best-time messages for ${createData.recipients} contact(s). ` +
+                    `${status.sent} sent, ${status.pending} not yet sent, ${status.failed} failed.`
+                );
+
+                alert(
+                    `Best-time bulk schedule created.\n\n` +
+                    `${batchLabel}Eligible contacts: ${createData.recipients}\n` +
+                    `Skipped without 3 best times: ${skippedContacts}\n` +
+                    `Scheduled messages: ${status.total}\n` +
+                    `Sent: ${status.sent}\n` +
+                    `Not yet sent: ${status.pending}\n` +
+                    `Failed: ${status.failed}\n\n` +
+                    `cron-jobs.org should call /api/cron/campaign-scheduled to send them when due.`
+                );
+                await fetchContacts();
+                return;
             }
 
             const campaignId = createData.campaign?.id;
@@ -978,6 +1085,7 @@ export default function ContactsPage() {
             setMessagePart2('');
             setMessageButtons([]);
             setBulkSendProgress(null);
+            resetBestTimeScheduleState();
             clearSelection();
 
             alert(`Tracked bulk send finished.\n\n${batchLabel}Recipients in this campaign: ${createData.recipients}\nSent: ${sent}\nFailed: ${failed}\nCampaign ID: ${campaignId}`);
@@ -2145,8 +2253,7 @@ export default function ContactsPage() {
                                             <div className="flex flex-col gap-1">
                                                 <div className="flex items-center gap-2 flex-wrap">
                                                     {(() => {
-                                                        // @ts-expect-error - best_contact_hours added by migration
-                                                        const hours = contact.best_contact_hours as { hour: number; count: number }[] || [];
+                                                        const hours = contact.best_contact_hours || [];
                                                         const displayHours = hours.slice(0, 3);
 
                                                         if (displayHours.length === 0) {
@@ -2181,10 +2288,8 @@ export default function ContactsPage() {
                                                         }`}>
                                                         {contact.best_contact_confidence || 'none'}
                                                     </span>
-                                                    {/* @ts-expect-error - interaction_count added by migration */}
-                                                    {contact.interaction_count > 0 && (
+                                                    {(contact.interaction_count ?? 0) > 0 && (
                                                         <span className="text-[10px] text-gray-400 font-mono">
-                                                            {/* @ts-expect-error - interaction_count added by migration */}
                                                             {contact.interaction_count} msgs
                                                         </span>
                                                     )}
@@ -2353,6 +2458,7 @@ export default function ContactsPage() {
                         setMessageButtons([]);
                         setUsePart2AsButtonValue(false);
                         setBulkSendProgress(null);
+                        resetBestTimeScheduleState();
                     }
                 }}
                 title="Send Message"
@@ -2361,6 +2467,55 @@ export default function ContactsPage() {
                     {bulkSendProgress && (
                         <div className="bg-blue-50 border-2 border-blue-300 p-3 rounded">
                             <p className="font-mono text-sm text-blue-800">{bulkSendProgress}</p>
+                        </div>
+                    )}
+                    {bestTimeScheduleStatus && (
+                        <div className="border-2 border-black bg-white p-3 rounded space-y-3">
+                            <div className="flex items-center justify-between gap-3">
+                                <div>
+                                    <p className="text-xs font-bold uppercase text-gray-600">Best-Time Schedule Status</p>
+                                    <p className="font-mono text-sm text-black">
+                                        {bestTimeScheduleStatus.sent} sent / {bestTimeScheduleStatus.pending} not yet sent / {bestTimeScheduleStatus.failed} failed
+                                    </p>
+                                </div>
+                                <span className={`text-[10px] px-2 py-1 border font-bold uppercase ${
+                                    bestTimeScheduleStatus.allBestTimesSent
+                                        ? 'bg-green-100 text-green-700 border-green-500'
+                                        : 'bg-yellow-100 text-yellow-800 border-yellow-500'
+                                }`}>
+                                    {bestTimeScheduleStatus.allBestTimesSent ? 'All 3 Sent' : 'Pending'}
+                                </span>
+                            </div>
+                            <div className="h-2 bg-gray-100 border border-gray-300">
+                                <div
+                                    className="h-full bg-black"
+                                    style={{
+                                        width: `${bestTimeScheduleStatus.total > 0
+                                            ? Math.min(100, Math.round((bestTimeScheduleStatus.sent / bestTimeScheduleStatus.total) * 100))
+                                            : 0}%`
+                                    }}
+                                />
+                            </div>
+                            {bestTimeCampaigns.length > 0 && (
+                                <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                                    {bestTimeCampaigns.map((campaign) => (
+                                        <div key={campaign.id} className="border border-gray-200 bg-gray-50 p-2">
+                                            <p className="text-[10px] font-bold uppercase text-gray-500">Message {campaign.messageNumber}</p>
+                                            <p className="text-xs font-mono text-gray-700">{campaign.scheduledAtPh} PH</p>
+                                            <p className="text-[10px] font-mono text-gray-500">{campaign.recipients} recipients</p>
+                                        </div>
+                                    ))}
+                                </div>
+                            )}
+                            <button
+                                type="button"
+                                onClick={() => refreshBestTimeBulkStatus()}
+                                disabled={bestTimeStatusLoading || bestTimeCampaigns.length === 0}
+                                className="btn-ghost-wireframe text-xs flex items-center gap-2"
+                            >
+                                <RefreshCw className={`w-3.5 h-3.5 ${bestTimeStatusLoading ? 'animate-spin' : ''}`} />
+                                Refresh Status
+                            </button>
                         </div>
                     )}
                     {failedContactIds.length > 0 ? (
@@ -2437,6 +2592,51 @@ export default function ContactsPage() {
                                         })()}
                                     </p>
                                 </div>
+                            )}
+                        </div>
+                    )}
+
+                    {failedContactIds.length === 0 && (
+                        <div className="border border-gray-200 bg-gray-50 p-3 rounded space-y-3">
+                            <label className="text-xs font-bold uppercase text-gray-700 block">Delivery Timing</label>
+                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                                <button
+                                    type="button"
+                                    onClick={() => {
+                                        setBulkDeliveryMode('now');
+                                        resetBestTimeScheduleState();
+                                    }}
+                                    disabled={actionLoading}
+                                    className={`border px-3 py-3 text-left ${
+                                        bulkDeliveryMode === 'now'
+                                            ? 'border-black bg-white'
+                                            : 'border-gray-300 bg-transparent'
+                                    }`}
+                                >
+                                    <p className="font-bold uppercase text-sm">Send Now</p>
+                                    <p className="text-xs text-gray-500 font-mono mt-1">Create and send the tracked bulk campaign immediately.</p>
+                                </button>
+                                <button
+                                    type="button"
+                                    onClick={() => {
+                                        setBulkDeliveryMode('best_time_next_day');
+                                        resetBestTimeScheduleState();
+                                    }}
+                                    disabled={actionLoading}
+                                    className={`border px-3 py-3 text-left ${
+                                        bulkDeliveryMode === 'best_time_next_day'
+                                            ? 'border-black bg-white'
+                                            : 'border-gray-300 bg-transparent'
+                                    }`}
+                                >
+                                    <p className="font-bold uppercase text-sm">Best Time Tomorrow</p>
+                                    <p className="text-xs text-gray-500 font-mono mt-1">Schedule 3 messages for each contact&apos;s top 3 best times on the next PH day.</p>
+                                </button>
+                            </div>
+                            {bulkDeliveryMode === 'best_time_next_day' && (
+                                <p className="text-[11px] font-mono text-gray-600">
+                                    Contacts without 3 saved best-time hours are skipped. Sending is handled when cron-jobs.org calls the scheduled campaign cron.
+                                </p>
                             )}
                         </div>
                     )}
@@ -2666,7 +2866,35 @@ export default function ContactsPage() {
                         </div>
                     )}
                     <div className="space-y-3">
-                        {envelopeWrapper !== 'none' && envelopeWrapper !== 'template' && envelopeWrapper !== 'msg' && getTemplateBodyText(envelopeWrapper) ? (
+                        {bulkDeliveryMode === 'best_time_next_day' ? (
+                            <div className="space-y-3">
+                                <div>
+                                    <label className="block text-xs font-bold uppercase mb-1">Scheduled Messages</label>
+                                    <p className="text-[11px] text-gray-500 font-mono mb-2">
+                                        Fill all 3 messages. Each contact receives message 1, 2, and 3 at their top 3 best-time hours tomorrow in PH time.
+                                    </p>
+                                </div>
+                                {scheduledMessages.map((message, index) => (
+                                    <div key={index}>
+                                        <label className="block text-xs font-bold uppercase mb-1">
+                                            Message {index + 1} of 3
+                                        </label>
+                                        <textarea
+                                            value={message}
+                                            onChange={(event) => updateScheduledMessage(index, event.target.value)}
+                                            placeholder={`Hi {name}, scheduled message ${index + 1}...`}
+                                            rows={3}
+                                            className="input-wireframe w-full h-auto p-3 resize-none"
+                                        />
+                                    </div>
+                                ))}
+                                {!scheduledMessagesComplete && (
+                                    <p className="text-xs font-mono text-red-700">
+                                        All 3 scheduled messages are required for best-time scheduling.
+                                    </p>
+                                )}
+                            </div>
+                        ) : envelopeWrapper !== 'none' && envelopeWrapper !== 'template' && envelopeWrapper !== 'msg' && getTemplateBodyText(envelopeWrapper) ? (
                             /* Template-backed wrapper: show a single input for {{1}} with the template preview above */
                             <div>
                                 <label className="block text-xs font-bold uppercase mb-1">
@@ -2727,7 +2955,13 @@ export default function ContactsPage() {
                     </div>
                     {/* Button Card Section */}
                     <div className="border border-gray-300 p-3 rounded">
-                        {envelopeWrapper.startsWith('btn_') ? (
+                        {bulkDeliveryMode === 'best_time_next_day' ? (
+                            <div className="bg-blue-50 text-blue-800 p-3 border border-blue-200">
+                                <p className="text-xs font-mono">
+                                    <b>Note:</b> Best-time scheduled bulk messages use the selected envelope/template for all 3 scheduled messages. Custom inline buttons are disabled for this scheduled flow.
+                                </p>
+                            </div>
+                        ) : envelopeWrapper.startsWith('btn_') ? (
                             <div className="bg-blue-50 text-blue-800 p-3 border border-blue-200">
                                 <p className="text-xs font-mono">
                                     <b>Note:</b> You selected a pre-approved Button Wrapper. Custom inline link buttons are disabled because Facebook requires hardcoded action buttons outside the 24-hour messaging window.
@@ -2922,6 +3156,7 @@ export default function ContactsPage() {
                                 setLastSendResults(null);
                                 setMessageButtons([]);
                                 setUsePart2AsButtonValue(false);
+                                resetBestTimeScheduleState();
                             }}
                             className="btn-wireframe bg-white"
                             disabled={actionLoading}
@@ -2939,10 +3174,18 @@ export default function ContactsPage() {
                         )}
                         <button
                             onClick={handleTrackedBulkMessage}
-                            disabled={!messagePart1.trim() || actionLoading || hasMessageButtonErrors || dynamicModeMissingButton}
+                            disabled={messageSubmitDisabled}
                             className="btn-wireframe bg-black text-white hover:bg-gray-800"
                         >
-                            {actionLoading ? 'Sending tracked...' : failedContactIds.length > 0 ? 'Send to New Selection' : 'Send Safely'}
+                            {actionLoading
+                                ? bulkDeliveryMode === 'best_time_next_day'
+                                    ? 'Scheduling...'
+                                    : 'Sending tracked...'
+                                : failedContactIds.length > 0
+                                ? 'Send to New Selection'
+                                : bulkDeliveryMode === 'best_time_next_day'
+                                ? 'Schedule Best Times'
+                                : 'Send Safely'}
                         </button>
                     </div>
                 </div>

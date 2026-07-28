@@ -100,6 +100,137 @@ function createSupabaseMock() {
     };
 }
 
+function createBestTimeSupabaseMock() {
+    const userPageSingle = vi.fn().mockResolvedValue({
+        data: { page_id: 'page_1' },
+        error: null
+    });
+    const userPageEqPage = vi.fn().mockReturnValue({ single: userPageSingle });
+    const userPageEqUser = vi.fn().mockReturnValue({ eq: userPageEqPage });
+    const userPageSelect = vi.fn().mockReturnValue({ eq: userPageEqUser });
+
+    const campaignIds = ['campaign_1', 'campaign_2', 'campaign_3'];
+    const campaignsInsert = vi.fn((payload: Record<string, unknown>) => {
+        const id = campaignIds[campaignsInsert.mock.calls.length - 1];
+        return {
+            select: () => ({
+                single: () => Promise.resolve({
+                    data: {
+                        id,
+                        page_id: payload.page_id,
+                        scheduled_at: payload.scheduled_at
+                    },
+                    error: null
+                })
+            })
+        };
+    });
+
+    const campaignRecipientsInsert = vi.fn().mockResolvedValue({ error: null });
+
+    const contactsRows = [
+        {
+            id: 'contact_1',
+            best_contact_hour: 9,
+            best_contact_hours: [
+                { hour: 9, count: 4 },
+                { hour: 14, count: 3 },
+                { hour: 20, count: 2 }
+            ]
+        },
+        {
+            id: 'contact_2',
+            best_contact_hour: 10,
+            best_contact_hours: [
+                { hour: 10, count: 4 },
+                { hour: 16, count: 3 },
+                { hour: 21, count: 2 }
+            ]
+        },
+        {
+            id: 'contact_3',
+            best_contact_hour: 11,
+            best_contact_hours: [{ hour: 11, count: 1 }]
+        }
+    ];
+
+    const createCountResult = (count: number) => Promise.resolve({ count, error: null });
+
+    const from = vi.fn((table: string) => {
+        if (table === 'user_pages') {
+            return {
+                select: userPageSelect
+            };
+        }
+
+        if (table === 'contacts') {
+            return {
+                select: (columns: string) => {
+                    if (columns.includes('best_contact_hours')) {
+                        return {
+                            eq: () => ({
+                                in: (_column: string, contactIds: string[]) => Promise.resolve({
+                                    data: contactsRows.filter((contact) => contactIds.includes(contact.id)),
+                                    error: null
+                                })
+                            })
+                        };
+                    }
+
+                    return {
+                        eq: () => ({
+                            not: () => ({
+                                neq: () => ({
+                                    in: (_column: string, contactIds: string[]) => Promise.resolve({
+                                        data: contactIds.map((id) => ({ id })),
+                                        error: null
+                                    })
+                                })
+                            })
+                        })
+                    };
+                }
+            };
+        }
+
+        if (table === 'campaigns') {
+            return {
+                insert: campaignsInsert,
+                select: () => ({
+                    eq: () => ({
+                        in: () => Promise.resolve({
+                            data: campaignIds.map((id) => ({ id, page_id: 'page_1' })),
+                            error: null
+                        })
+                    })
+                })
+            };
+        }
+
+        if (table === 'campaign_recipients') {
+            return {
+                insert: campaignRecipientsInsert,
+                select: () => ({
+                    in: () => Object.assign(
+                        createCountResult(6),
+                        {
+                            eq: (_column: string, status: string) => createCountResult(status === 'pending' ? 6 : 0)
+                        }
+                    )
+                })
+            };
+        }
+
+        throw new Error(`Unexpected table: ${table}`);
+    });
+
+    return {
+        from,
+        campaignsInsert,
+        campaignRecipientsInsert
+    };
+}
+
 describe('POST /api/pages/[pageId]/contacts/tracked-bulk-message', () => {
     beforeEach(() => {
         vi.clearAllMocks();
@@ -172,5 +303,40 @@ describe('POST /api/pages/[pageId]/contacts/tracked-bulk-message', () => {
                 delayBetweenBatchesMs: 50
             })
         );
+    });
+
+    it('schedules three best-time campaigns for tomorrow PH time without sending immediately', async () => {
+        const supabase = createBestTimeSupabaseMock();
+        mocks.getSupabaseAdmin.mockReturnValue(supabase);
+
+        const response = await POST(createRequest({
+            name: 'Best time bulk',
+            deliveryMode: 'best_time_next_day',
+            scheduledMessages: ['First', 'Second', 'Third'],
+            envelopeWrapper: 'none',
+            selection: {
+                mode: 'specific',
+                contactIds: ['contact_1', 'contact_2', 'contact_3']
+            }
+        }), {
+            params: Promise.resolve({ pageId: 'page_1' })
+        });
+
+        const body = await response.json();
+
+        expect(response.status).toBe(200);
+        expect(body.mode).toBe('best_time_next_day');
+        expect(body.recipients).toBe(2);
+        expect(body.skippedContacts).toBe(1);
+        expect(body.status).toEqual(expect.objectContaining({
+            total: 6,
+            sent: 0,
+            failed: 0,
+            pending: 6,
+            allBestTimesSent: false
+        }));
+        expect(supabase.campaignsInsert).toHaveBeenCalledTimes(3);
+        expect(supabase.campaignRecipientsInsert).toHaveBeenCalledTimes(3);
+        expect(mocks.sendCampaignById).not.toHaveBeenCalled();
     });
 });

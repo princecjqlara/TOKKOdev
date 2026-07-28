@@ -53,7 +53,9 @@ export interface Contact {
   updated_at: string;
   tags?: Tag[];
   best_contact_hour: number | null;
+  best_contact_hours?: { hour: number; count: number }[];
   best_contact_confidence: 'high' | 'medium' | 'low' | 'inferred' | 'none';
+  interaction_count?: number;
 }
 
 export interface Tag {
