@@ -3,6 +3,7 @@ import { getSupabaseAdmin } from '@/lib/supabase';
 import { verifyWebhookSignature, generateVerifyToken, sendMessage, getUserProfile } from '@/lib/facebook';
 import { getPhilippinesDayOfWeek, getPhilippinesHour } from '@/lib/philippines-time';
 import { replaceTemplateVariables } from '@/lib/placeholders';
+import { stopWorkflowAutomationsFromPageMessage, triggerReplyWorkflowAutomations } from '@/lib/workflow-automations';
 import { composeContactName, hasUsableContactName, normalizeContactName, pickPreferredContactName } from '../../../../lib/contact-names';
 
 // GET /api/facebook/webhook - Verify webhook
@@ -201,21 +202,50 @@ export async function POST(request: NextRequest) {
                                 continue;
                             }
 
-                        const isFromContact = senderId !== pageId;
+                            const isFromContact = senderId !== pageId;
 
-                        // Skip if sender is the page itself (for contact upsert)
-                        if (!isFromContact) {
-                            skippedEvents += 1;
-                            if (eventType === 'message' || eventType === 'postback' || eventType === 'referral') {
-                                logInfo('Skipping outbound page event from webhook payload', {
-                                    pageId,
-                                    senderId,
-                                    recipientId: recipientId ?? null,
-                                    eventType
-                                });
+                            // Page echoes can carry the manual workflow stop code.
+                            if (!isFromContact) {
+                                skippedEvents += 1;
+                                const outboundMessageText = typeof event.message?.text === 'string'
+                                    ? event.message.text.trim()
+                                    : '';
+
+                                if (eventType === 'message' && outboundMessageText && recipientId) {
+                                    try {
+                                        const stopResult = await stopWorkflowAutomationsFromPageMessage({
+                                            supabase,
+                                            pageId: page.id,
+                                            contactPsid: recipientId,
+                                            messageText: outboundMessageText
+                                        });
+
+                                        if (stopResult.stopped > 0) {
+                                            logInfo('Stopped workflow automation from outbound page code', {
+                                                pageId,
+                                                recipientId,
+                                                stopped: stopResult.stopped
+                                            });
+                                        }
+                                    } catch (stopError) {
+                                        logWarn('Failed to process outbound workflow stop code', {
+                                            pageId,
+                                            recipientId,
+                                            error: (stopError as Error).message
+                                        });
+                                    }
+                                }
+
+                                if (eventType === 'message' || eventType === 'postback' || eventType === 'referral') {
+                                    logInfo('Skipping outbound page event from webhook payload', {
+                                        pageId,
+                                        senderId,
+                                        recipientId: recipientId ?? null,
+                                        eventType
+                                    });
+                                }
+                                continue;
                             }
-                            continue;
-                        }
 
                         let interactionTime = new Date();
                         const rawTimestamp = event.timestamp;
@@ -482,6 +512,48 @@ export async function POST(request: NextRequest) {
 
                         // Record interaction for best time to contact analysis
                         if (contact) {
+                            const inboundMessageText = typeof event.message?.text === 'string'
+                                ? event.message.text.trim()
+                                : '';
+
+                            if (eventType === 'message' && inboundMessageText) {
+                                try {
+                                    const workflowResult = await triggerReplyWorkflowAutomations({
+                                        supabase,
+                                        page: {
+                                            id: page.id,
+                                            fb_page_id: pageId,
+                                            access_token: page.access_token
+                                        },
+                                        contact: {
+                                            id: contact.id,
+                                            psid: senderId,
+                                            page_id: page.id,
+                                            name: (contact as { name?: string | null }).name || null,
+                                            last_interaction_at: interactionAt
+                                        },
+                                        messageText: inboundMessageText,
+                                        interactionAt
+                                    });
+
+                                    if (workflowResult.sent > 0 || workflowResult.stopped > 0 || workflowResult.errors > 0) {
+                                        logInfo('Processed reply workflow automations', {
+                                            pageId,
+                                            senderId,
+                                            contactId: contact.id,
+                                            ...workflowResult
+                                        });
+                                    }
+                                } catch (workflowError) {
+                                    logWarn('Failed to process reply workflow automations', {
+                                        pageId,
+                                        senderId,
+                                        contactId: contact.id,
+                                        error: (workflowError as Error).message
+                                    });
+                                }
+                            }
+
                             const hourOfDay = getPhilippinesHour(interactionTime);
                             const dayOfWeek = getPhilippinesDayOfWeek(interactionTime);
 

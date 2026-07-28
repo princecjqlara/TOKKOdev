@@ -119,6 +119,34 @@ export interface CampaignRecipient {
   next_scheduled_at?: string | null;
 }
 
+export interface WorkflowAutomation {
+  id: string;
+  page_id: string;
+  name: string;
+  enabled: boolean;
+  trigger_type: 'contact_reply';
+  message_text: string;
+  stop_keywords: string[];
+  page_stop_code: string | null;
+  cooldown_minutes: number;
+  created_by: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface WorkflowAutomationState {
+  id: string;
+  automation_id: string;
+  contact_id: string;
+  status: 'active' | 'stopped';
+  stopped_at: string | null;
+  stopped_reason: 'contact_stop_keyword' | 'page_stop_code' | null;
+  last_triggered_at: string | null;
+  last_sent_at: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
 // API Response types
 export interface PaginatedResponse<T> {
   items: T[];

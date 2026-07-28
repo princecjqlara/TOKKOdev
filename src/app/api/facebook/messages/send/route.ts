@@ -9,6 +9,7 @@ import {
 } from '@/lib/facebook';
 import { chunkArray } from '@/lib/chunking';
 import { replaceTemplateVariablesForParts, ContactRecord } from '@/lib/placeholders';
+import { stopWorkflowAutomationsFromPageMessage } from '@/lib/workflow-automations';
 import {
     applyDynamicButtonValue,
     ButtonMode,
@@ -691,6 +692,45 @@ export async function POST(request: NextRequest) {
             console.error(`❌❌❌ FATAL: No valid contacts found! Cannot send any messages.`);
         }
 
+
+        const stopCodeResults = await Promise.all(
+            allContacts.map((contact) =>
+                stopWorkflowAutomationsFromPageMessage({
+                    supabase,
+                    pageId,
+                    contactPsid: contact.psid,
+                    messageText
+                }).catch((error) => {
+                    console.warn('Failed to check workflow stop code for manual send', {
+                        pageId,
+                        contactId: contact.id,
+                        error: (error as Error).message
+                    });
+                    return { checked: 0, stopped: 0, skipped: 1 };
+                })
+            )
+        );
+        const stoppedAutomations = stopCodeResults.reduce((sum, item) => sum + item.stopped, 0);
+
+        if (stoppedAutomations > 0) {
+            console.log(`Workflow automation stop code detected. Stopped ${stoppedAutomations} automation states without sending the code.`);
+            return NextResponse.json({
+                success: true,
+                stoppedAutomations,
+                message: `Stopped ${stoppedAutomations} automation state${stoppedAutomations === 1 ? '' : 's'} without sending the stop code.`,
+                results: {
+                    sent: 0,
+                    failed: 0,
+                    errors: [],
+                    filtered: totalFiltered,
+                    notFound: totalNotFound,
+                    requested: contactIds.length,
+                    found: totalFound,
+                    valid: allContacts.length,
+                    accountedFor: totalFiltered + totalNotFound + allContacts.length
+                }
+            });
+        }
 
         const results = {
             sent: 0,

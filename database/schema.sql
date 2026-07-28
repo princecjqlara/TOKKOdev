@@ -142,6 +142,40 @@
         UNIQUE(campaign_id, contact_id)
     );
 
+    -- Workflow automations table (reply-triggered Human Agent messages)
+    CREATE TABLE IF NOT EXISTS workflow_automations (
+        id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+        page_id UUID NOT NULL REFERENCES pages(id) ON DELETE CASCADE,
+        name TEXT NOT NULL,
+        enabled BOOLEAN NOT NULL DEFAULT TRUE,
+        trigger_type TEXT NOT NULL DEFAULT 'contact_reply',
+        message_text TEXT NOT NULL,
+        stop_keywords JSONB NOT NULL DEFAULT '[]',
+        page_stop_code TEXT,
+        cooldown_minutes INTEGER NOT NULL DEFAULT 60,
+        created_by UUID REFERENCES users(id) ON DELETE SET NULL,
+        created_at TIMESTAMPTZ DEFAULT NOW(),
+        updated_at TIMESTAMPTZ DEFAULT NOW(),
+        CONSTRAINT workflow_automations_trigger_type_check CHECK (trigger_type IN ('contact_reply')),
+        CONSTRAINT workflow_automations_cooldown_minutes_check CHECK (cooldown_minutes >= 0 AND cooldown_minutes <= 10080)
+    );
+
+    -- Workflow automation states table (per-contact stops and send history)
+    CREATE TABLE IF NOT EXISTS workflow_automation_states (
+        id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+        automation_id UUID NOT NULL REFERENCES workflow_automations(id) ON DELETE CASCADE,
+        contact_id UUID NOT NULL REFERENCES contacts(id) ON DELETE CASCADE,
+        status TEXT NOT NULL DEFAULT 'active',
+        stopped_at TIMESTAMPTZ,
+        stopped_reason TEXT,
+        last_triggered_at TIMESTAMPTZ,
+        last_sent_at TIMESTAMPTZ,
+        created_at TIMESTAMPTZ DEFAULT NOW(),
+        updated_at TIMESTAMPTZ DEFAULT NOW(),
+        UNIQUE(automation_id, contact_id),
+        CONSTRAINT workflow_automation_states_status_check CHECK (status IN ('active', 'stopped'))
+    );
+
     -- Indexes for better query performance
     CREATE INDEX IF NOT EXISTS idx_users_email ON users(email);
     CREATE INDEX IF NOT EXISTS idx_users_facebook_id ON users(facebook_id);
@@ -166,6 +200,9 @@
     CREATE INDEX IF NOT EXISTS idx_campaign_recipients_campaign_id ON campaign_recipients(campaign_id);
     CREATE INDEX IF NOT EXISTS idx_campaign_recipients_contact_id ON campaign_recipients(contact_id);
     CREATE INDEX IF NOT EXISTS idx_campaign_recipients_status ON campaign_recipients(status);
+    CREATE INDEX IF NOT EXISTS idx_workflow_automations_page_enabled ON workflow_automations(page_id, enabled, trigger_type);
+    CREATE INDEX IF NOT EXISTS idx_workflow_automation_states_contact ON workflow_automation_states(contact_id, status);
+    CREATE INDEX IF NOT EXISTS idx_workflow_automation_states_automation ON workflow_automation_states(automation_id, status);
 
     -- Function to update updated_at timestamp
     CREATE OR REPLACE FUNCTION update_updated_at_column()
@@ -192,6 +229,12 @@
     CREATE TRIGGER update_campaigns_updated_at BEFORE UPDATE ON campaigns
         FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
 
+    CREATE TRIGGER update_workflow_automations_updated_at BEFORE UPDATE ON workflow_automations
+        FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+
+    CREATE TRIGGER update_workflow_automation_states_updated_at BEFORE UPDATE ON workflow_automation_states
+        FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+
     -- Row Level Security (RLS) Policies
     -- Enable RLS on all tables
     ALTER TABLE users ENABLE ROW LEVEL SECURITY;
@@ -205,6 +248,8 @@
     ALTER TABLE contact_tags ENABLE ROW LEVEL SECURITY;
     ALTER TABLE campaigns ENABLE ROW LEVEL SECURITY;
     ALTER TABLE campaign_recipients ENABLE ROW LEVEL SECURITY;
+    ALTER TABLE workflow_automations ENABLE ROW LEVEL SECURITY;
+    ALTER TABLE workflow_automation_states ENABLE ROW LEVEL SECURITY;
 
     -- Note: Since we're using service role key in the API routes,
     -- RLS policies are bypassed. But we can add policies for future use:

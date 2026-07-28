@@ -6,7 +6,9 @@ const mocks = vi.hoisted(() => ({
     verifyWebhookSignature: vi.fn(),
     generateVerifyToken: vi.fn(),
     sendMessage: vi.fn(),
-    getUserProfile: vi.fn()
+    getUserProfile: vi.fn(),
+    triggerReplyWorkflowAutomations: vi.fn(),
+    stopWorkflowAutomationsFromPageMessage: vi.fn()
 }));
 
 vi.mock('@/lib/supabase', () => ({
@@ -22,6 +24,11 @@ vi.mock('@/lib/facebook', () => ({
 
 vi.mock('@/lib/placeholders', () => ({
     replaceTemplateVariables: vi.fn((template: string) => template)
+}));
+
+vi.mock('@/lib/workflow-automations', () => ({
+    triggerReplyWorkflowAutomations: mocks.triggerReplyWorkflowAutomations,
+    stopWorkflowAutomationsFromPageMessage: mocks.stopWorkflowAutomationsFromPageMessage
 }));
 
 import { POST } from './route';
@@ -355,6 +362,18 @@ describe('POST /api/facebook/webhook', () => {
     beforeEach(() => {
         vi.clearAllMocks();
         vi.stubEnv('NODE_ENV', 'test');
+        mocks.triggerReplyWorkflowAutomations.mockResolvedValue({
+            checked: 0,
+            sent: 0,
+            stopped: 0,
+            skipped: 0,
+            errors: 0
+        });
+        mocks.stopWorkflowAutomationsFromPageMessage.mockResolvedValue({
+            checked: 0,
+            stopped: 0,
+            skipped: 0
+        });
     });
 
     afterEach(() => {
