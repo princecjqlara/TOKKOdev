@@ -61,8 +61,6 @@ NEXT_PUBLIC_SUPABASE_URL=your-supabase-url
 NEXT_PUBLIC_SUPABASE_ANON_KEY=your-supabase-anon-key
 SUPABASE_SERVICE_ROLE_KEY=your-supabase-service-role-key
 
-# Cron (optional)
-CRON_SECRET=your-cron-secret
 ```
 
 4. Set up the database:
@@ -117,7 +115,6 @@ src/
    - `NEXT_PUBLIC_SUPABASE_URL` - Your Supabase project URL
    - `NEXT_PUBLIC_SUPABASE_ANON_KEY` - Your Supabase anon key
    - `SUPABASE_SERVICE_ROLE_KEY` - Your Supabase service role key
-   - `CRON_SECRET` - Required for the external page-sync cron URL
 
 5. Update Facebook App settings:
    - Add your Vercel URL to Facebook App redirect URIs:
@@ -131,11 +128,11 @@ src/
 
 Vercel Cron is not used. Configure cron jobs in [cron-jobs.org](https://cron-jobs.org) to call the deployed API routes:
 
-- Hourly page sync: `https://your-app.vercel.app/api/cron/sync?secret=your-cron-secret`
+- Hourly page sync: `https://your-app.vercel.app/api/cron/sync`
 - Scheduled campaigns, every minute: `https://your-app.vercel.app/api/cron/campaign-scheduled`
 - Loop campaigns, every minute: `https://your-app.vercel.app/api/cron/campaign-loop`
 
-Use `GET` requests. The `secret` query value for page sync must match `CRON_SECRET`.
+Use `GET` requests. The page sync and campaign cron routes do not require a cron secret.
 
 **Note:** The `vercel.json` file is configured with extended function timeouts (5 minutes) for sync operations, but does not define Vercel Cron schedules.
 

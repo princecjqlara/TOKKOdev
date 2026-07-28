@@ -21,8 +21,8 @@ vi.mock('../../../../lib/contact-name-repair', () => ({
     repairMissingContactNamesForPage: mocks.repairMissingContactNamesForPage
 }));
 
-function createRequest(secret: string): NextRequest {
-    return new Request(`http://localhost:3000/api/cron/sync?secret=${secret}`, {
+function createRequest(): NextRequest {
+    return new Request('http://localhost:3000/api/cron/sync', {
         method: 'GET'
     }) as NextRequest;
 }
@@ -82,7 +82,6 @@ describe('GET /api/cron/sync', () => {
     });
 
     it('keeps the participant name when profile lookup returns placeholder UNKNOWN', async () => {
-        vi.stubEnv('CRON_SECRET', 'secret_1');
         const { GET } = await loadRoute();
         const supabase = createSupabaseMock();
         mocks.getSupabaseAdmin.mockReturnValue(supabase);
@@ -104,7 +103,7 @@ describe('GET /api/cron/sync', () => {
             profile_pic: 'https://example.com/jane.jpg'
         });
 
-        const response = await GET(createRequest('secret_1'));
+        const response = await GET(createRequest());
 
         expect(response.status).toBe(200);
         expect(mocks.getPageConversations).toHaveBeenCalledWith(
@@ -124,7 +123,6 @@ describe('GET /api/cron/sync', () => {
     });
 
     it('omits placeholder names when no usable contact name is available', async () => {
-        vi.stubEnv('CRON_SECRET', 'secret_1');
         const { GET } = await loadRoute();
         const supabase = createSupabaseMock();
         mocks.getSupabaseAdmin.mockReturnValue(supabase);
@@ -146,7 +144,7 @@ describe('GET /api/cron/sync', () => {
             profile_pic: 'https://example.com/unknown.jpg'
         });
 
-        const response = await GET(createRequest('secret_1'));
+        const response = await GET(createRequest());
 
         expect(response.status).toBe(200);
         const payload = supabase.contactsUpsert.mock.calls[0][0] as Record<string, unknown>;

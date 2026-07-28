@@ -6,26 +6,9 @@ import { repairMissingContactNamesForPage } from '../../../../lib/contact-name-r
 
 export const dynamic = 'force-dynamic';
 
-// Secret key for cron job authentication
-const CRON_SECRET = process.env.CRON_SECRET;
-
 // GET /api/cron/sync - Sync all pages (called by external cron service)
-export async function GET(request: NextRequest) {
+export async function GET(_request: NextRequest) {
     try {
-        // Verify cron secret
-        const authHeader = request.headers.get('authorization');
-        const url = new URL(request.url);
-        const secretParam = url.searchParams.get('secret');
-
-        const providedSecret = authHeader?.replace('Bearer ', '') || secretParam;
-
-        if (providedSecret !== CRON_SECRET) {
-            return NextResponse.json(
-                { error: 'Unauthorized', message: 'Invalid cron secret' },
-                { status: 401 }
-            );
-        }
-
         const supabase = getSupabaseAdmin();
 
         // Get all pages
