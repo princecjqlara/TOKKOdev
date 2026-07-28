@@ -202,6 +202,10 @@ describe('GET /api/cron/campaign-scheduled', () => {
             supabase,
             allowScheduled: true,
             dueAt: expect.any(String),
+            sendBatchSize: 5,
+            delayBetweenBatchesMs: 0,
+            maxRecipientsPerRun: 10,
+            maxProcessingTimeMs: 20000,
             includeUnscheduledRecipients: true
         });
     });
@@ -234,6 +238,10 @@ describe('GET /api/cron/campaign-scheduled', () => {
             supabase,
             allowScheduled: true,
             dueAt: expect.any(String),
+            sendBatchSize: 5,
+            delayBetweenBatchesMs: 0,
+            maxRecipientsPerRun: 10,
+            maxProcessingTimeMs: 20000,
             includeUnscheduledRecipients: false
         });
     });

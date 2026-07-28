@@ -17,6 +17,7 @@ type SendCampaignByIdOptions = {
     dueAt?: string;
     includeUnscheduledRecipients?: boolean;
     sendBatchSize?: number;
+    maxRecipientsPerRun?: number;
     delayBetweenBatchesMs?: number;
     maxProcessingTimeMs?: number;
     sendRetryAttempts?: number;
@@ -39,6 +40,7 @@ export async function sendCampaignById({
     dueAt,
     includeUnscheduledRecipients = false,
     sendBatchSize = 20,
+    maxRecipientsPerRun,
     delayBetweenBatchesMs = 50,
     maxProcessingTimeMs = 240000,
     sendRetryAttempts = 2,
@@ -124,6 +126,10 @@ export async function sendCampaignById({
         const startingCounts = await getRecipientStatusCounts();
         let allRecipients: { id: string; contact_id: string; contacts: { psid: string; name?: string } | { psid: string; name?: string }[] | null }[] = [];
         const RECIPIENT_FETCH_PAGE_SIZE = 2000;
+        const RECIPIENT_FETCH_LIMIT =
+            typeof maxRecipientsPerRun === 'number' && Number.isFinite(maxRecipientsPerRun)
+                ? Math.max(1, Math.floor(maxRecipientsPerRun))
+                : null;
         let offset = 0;
         let hasMore = true;
 
@@ -148,8 +154,17 @@ export async function sendCampaignById({
                 );
             }
 
+            const remainingFetchLimit = RECIPIENT_FETCH_LIMIT === null
+                ? RECIPIENT_FETCH_PAGE_SIZE
+                : RECIPIENT_FETCH_LIMIT - allRecipients.length;
+
+            if (remainingFetchLimit <= 0) {
+                break;
+            }
+
+            const pageSize = Math.min(RECIPIENT_FETCH_PAGE_SIZE, remainingFetchLimit);
             const { data: recipientBatch, error: recipientError } = await recipientQuery
-                .range(offset, offset + RECIPIENT_FETCH_PAGE_SIZE - 1);
+                .range(offset, offset + pageSize - 1);
 
             if (recipientError) {
                 console.error(`❌ Error fetching recipients batch at offset ${offset}:`, recipientError);
@@ -161,7 +176,9 @@ export async function sendCampaignById({
                 console.log(`📤 Fetched ${recipientBatch.length} recipients (total so far: ${allRecipients.length})`);
                 offset += RECIPIENT_FETCH_PAGE_SIZE;
 
-                hasMore = recipientBatch.length === RECIPIENT_FETCH_PAGE_SIZE;
+                hasMore =
+                    recipientBatch.length === pageSize &&
+                    (RECIPIENT_FETCH_LIMIT === null || allRecipients.length < RECIPIENT_FETCH_LIMIT);
             } else {
                 hasMore = false;
             }

@@ -7,6 +7,9 @@ import { chunkArray } from '../../../../lib/chunking';
 export const dynamic = 'force-dynamic';
 
 const STALE_SENDING_AFTER_MS = 10 * 60 * 1000;
+const MAX_CAMPAIGNS_PER_CRON_RUN = 2;
+const MAX_RECIPIENTS_PER_CAMPAIGN_RUN = 10;
+const MAX_CRON_SEND_MS = 20000;
 
 type ScheduledCampaign = {
     id: string;
@@ -138,7 +141,7 @@ export async function GET(_request: NextRequest) {
                 [...campaignLevelCampaigns, ...recipientLevelCampaigns]
                     .map((campaign) => [campaign.id, campaign])
             ).values()
-        );
+        ).slice(0, MAX_CAMPAIGNS_PER_CRON_RUN);
 
         const results = [];
 
@@ -197,6 +200,10 @@ export async function GET(_request: NextRequest) {
                 supabase,
                 allowScheduled: true,
                 dueAt: now,
+                sendBatchSize: 5,
+                delayBetweenBatchesMs: 0,
+                maxRecipientsPerRun: MAX_RECIPIENTS_PER_CAMPAIGN_RUN,
+                maxProcessingTimeMs: MAX_CRON_SEND_MS,
                 includeUnscheduledRecipients:
                     Boolean(campaign.scheduled_at) &&
                     new Date(campaign.scheduled_at as string).getTime() <= new Date(now).getTime()

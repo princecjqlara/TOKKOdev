@@ -280,6 +280,36 @@ describe('sendCampaignById', () => {
         expect(supabase.recipientsRange).toHaveBeenNthCalledWith(2, 2000, 3999);
     });
 
+    it('caps fetched recipients for short cron runs', async () => {
+        const recipients = Array.from({ length: 50 }, (_, index) => ({
+            id: `recipient_${index + 1}`,
+            contact_id: `contact_${index + 1}`,
+            contacts: {
+                psid: `psid_${index + 1}`,
+                name: `Contact ${index + 1}`
+            }
+        }));
+        const supabase = createSupabaseMock('scheduled', { recipients });
+        vi.mocked(sendMessage).mockResolvedValue({ message_id: 'mid_limited' });
+
+        const result = await sendCampaignById({
+            campaignId: 'campaign_1',
+            supabase: supabase as never,
+            allowScheduled: true,
+            dueAt: '2026-07-20T10:00:00.000Z',
+            sendBatchSize: 5,
+            delayBetweenBatchesMs: 0,
+            maxRecipientsPerRun: 10
+        });
+
+        expect(result.status).toBe(200);
+        expect(result.body.partial).toBe(true);
+        expect(result.sent).toBe(10);
+        expect(sendMessage).toHaveBeenCalledTimes(10);
+        expect(supabase.recipientsRange).toHaveBeenCalledTimes(1);
+        expect(supabase.recipientsRange).toHaveBeenCalledWith(0, 9);
+    });
+
     it('cron sends only due recipients and keeps campaign scheduled while future recipients remain', async () => {
         const supabase = createSupabaseMock('scheduled', {
             remainingPendingCount: 1,
