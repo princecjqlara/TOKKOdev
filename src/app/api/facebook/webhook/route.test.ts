@@ -7,6 +7,7 @@ const mocks = vi.hoisted(() => ({
     generateVerifyToken: vi.fn(),
     sendMessage: vi.fn(),
     getUserProfile: vi.fn(),
+    handleFollowUpWorkflowContactReply: vi.fn(),
     triggerReplyWorkflowAutomations: vi.fn(),
     stopWorkflowAutomationsFromPageMessage: vi.fn()
 }));
@@ -27,6 +28,7 @@ vi.mock('@/lib/placeholders', () => ({
 }));
 
 vi.mock('@/lib/workflow-automations', () => ({
+    handleFollowUpWorkflowContactReply: mocks.handleFollowUpWorkflowContactReply,
     triggerReplyWorkflowAutomations: mocks.triggerReplyWorkflowAutomations,
     stopWorkflowAutomationsFromPageMessage: mocks.stopWorkflowAutomationsFromPageMessage
 }));
@@ -362,6 +364,17 @@ describe('POST /api/facebook/webhook', () => {
     beforeEach(() => {
         vi.clearAllMocks();
         vi.stubEnv('NODE_ENV', 'test');
+        mocks.handleFollowUpWorkflowContactReply.mockResolvedValue({
+            checked: 0,
+            scheduled: 0,
+            continued: 0,
+            reset: 0,
+            sent: 0,
+            stopped: 0,
+            completed: 0,
+            skipped: 0,
+            errors: 0
+        });
         mocks.triggerReplyWorkflowAutomations.mockResolvedValue({
             checked: 0,
             sent: 0,

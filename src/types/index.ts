@@ -124,9 +124,14 @@ export interface WorkflowAutomation {
   page_id: string;
   name: string;
   enabled: boolean;
-  trigger_type: 'contact_reply';
+  trigger_type: 'contact_reply' | 'follow_up';
   message_text: string;
-  stop_keywords: string[];
+  stop_keywords?: string[];
+  steps: Array<{
+    message_text: string;
+    delay_minutes: number;
+  }>;
+  reply_action: 'stop' | 'reset' | 'continue';
   page_stop_code: string | null;
   cooldown_minutes: number;
   created_by: string | null;
@@ -138,11 +143,15 @@ export interface WorkflowAutomationState {
   id: string;
   automation_id: string;
   contact_id: string;
-  status: 'active' | 'stopped';
+  status: 'active' | 'stopped' | 'completed';
+  current_step_index: number;
+  next_step_at: string | null;
   stopped_at: string | null;
-  stopped_reason: 'contact_stop_keyword' | 'page_stop_code' | null;
+  stopped_reason: 'contact_reply' | 'page_stop_code' | 'outside_human_agent_window' | null;
   last_triggered_at: string | null;
   last_sent_at: string | null;
+  last_contact_reply_at: string | null;
+  completed_at: string | null;
   created_at: string;
   updated_at: string;
 }

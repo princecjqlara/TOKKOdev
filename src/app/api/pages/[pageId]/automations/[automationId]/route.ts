@@ -2,12 +2,9 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getServerSession } from 'next-auth';
 import { authOptions } from '@/lib/auth';
 import { getSupabaseAdmin } from '@/lib/supabase';
-import { normalizeWorkflowKeyword } from '@/lib/workflow-automations';
+import { normalizeWorkflowReplyAction, normalizeWorkflowSteps } from '@/lib/workflow-automations';
 
 export const dynamic = 'force-dynamic';
-
-const MAX_STOP_KEYWORDS = 20;
-const MAX_COOLDOWN_MINUTES = 10080;
 
 async function verifyPageAccess(supabase: ReturnType<typeof getSupabaseAdmin>, userId: string, pageId: string) {
     const { data: userPage, error } = await supabase
@@ -18,32 +15,6 @@ async function verifyPageAccess(supabase: ReturnType<typeof getSupabaseAdmin>, u
         .single();
 
     return !error && Boolean(userPage);
-}
-
-function normalizeStopKeywords(value: unknown): string[] {
-    const rawKeywords = Array.isArray(value)
-        ? value
-        : typeof value === 'string'
-            ? value.split(',')
-            : [];
-
-    return Array.from(
-        new Set(
-            rawKeywords
-                .filter((item): item is string => typeof item === 'string')
-                .map(normalizeWorkflowKeyword)
-                .filter(Boolean)
-        )
-    ).slice(0, MAX_STOP_KEYWORDS);
-}
-
-function normalizeCooldownMinutes(value: unknown): number {
-    const numericValue = Number(value);
-    if (!Number.isFinite(numericValue)) {
-        return 60;
-    }
-
-    return Math.min(MAX_COOLDOWN_MINUTES, Math.max(0, Math.round(numericValue)));
 }
 
 function buildPatchPayload(body: Record<string, unknown>) {
@@ -61,16 +32,25 @@ function buildPatchPayload(body: Record<string, unknown>) {
         payload.enabled = body.enabled;
     }
 
-    if (typeof body.message_text === 'string' || typeof body.messageText === 'string') {
-        const messageText = typeof body.message_text === 'string' ? body.message_text.trim() : String(body.messageText || '').trim();
+    const hasMessageText = typeof body.message_text === 'string' || typeof body.messageText === 'string';
+    const messageText = typeof body.message_text === 'string' ? body.message_text.trim() : String(body.messageText || '').trim();
+
+    if (hasMessageText) {
         if (!messageText) {
             throw new Error('Automation message is required');
         }
         payload.message_text = messageText;
     }
 
-    if (Object.prototype.hasOwnProperty.call(body, 'stop_keywords') || Object.prototype.hasOwnProperty.call(body, 'stopKeywords')) {
-        payload.stop_keywords = normalizeStopKeywords(body.stop_keywords ?? body.stopKeywords);
+    if (Object.prototype.hasOwnProperty.call(body, 'steps')) {
+        const steps = normalizeWorkflowSteps(body.steps, messageText, body.cooldown_minutes ?? body.cooldownMinutes);
+        if (steps.length === 0) {
+            throw new Error('At least one follow-up step is required');
+        }
+        payload.steps = steps;
+        payload.message_text = steps[0].message_text;
+        payload.cooldown_minutes = steps[0].delay_minutes;
+        payload.trigger_type = 'follow_up';
     }
 
     if (Object.prototype.hasOwnProperty.call(body, 'page_stop_code') || Object.prototype.hasOwnProperty.call(body, 'pageStopCode')) {
@@ -82,8 +62,8 @@ function buildPatchPayload(body: Record<string, unknown>) {
         payload.page_stop_code = pageStopCode || null;
     }
 
-    if (Object.prototype.hasOwnProperty.call(body, 'cooldown_minutes') || Object.prototype.hasOwnProperty.call(body, 'cooldownMinutes')) {
-        payload.cooldown_minutes = normalizeCooldownMinutes(body.cooldown_minutes ?? body.cooldownMinutes);
+    if (Object.prototype.hasOwnProperty.call(body, 'reply_action') || Object.prototype.hasOwnProperty.call(body, 'replyAction')) {
+        payload.reply_action = normalizeWorkflowReplyAction(body.reply_action ?? body.replyAction);
     }
 
     if (Object.keys(payload).length === 0) {
@@ -126,7 +106,7 @@ export async function PATCH(
             .update(payload)
             .eq('id', automationId)
             .eq('page_id', pageId)
-            .select('id, page_id, name, enabled, trigger_type, message_text, stop_keywords, page_stop_code, cooldown_minutes, created_at, updated_at')
+            .select('id, page_id, name, enabled, trigger_type, message_text, steps, reply_action, page_stop_code, cooldown_minutes, created_at, updated_at')
             .single();
 
         if (error) {

@@ -3,7 +3,7 @@ import { getSupabaseAdmin } from '@/lib/supabase';
 import { verifyWebhookSignature, generateVerifyToken, sendMessage, getUserProfile } from '@/lib/facebook';
 import { getPhilippinesDayOfWeek, getPhilippinesHour } from '@/lib/philippines-time';
 import { replaceTemplateVariables } from '@/lib/placeholders';
-import { stopWorkflowAutomationsFromPageMessage, triggerReplyWorkflowAutomations } from '@/lib/workflow-automations';
+import { handleFollowUpWorkflowContactReply, stopWorkflowAutomationsFromPageMessage } from '@/lib/workflow-automations';
 import { composeContactName, hasUsableContactName, normalizeContactName, pickPreferredContactName } from '../../../../lib/contact-names';
 
 // GET /api/facebook/webhook - Verify webhook
@@ -518,7 +518,7 @@ export async function POST(request: NextRequest) {
 
                             if (eventType === 'message' && inboundMessageText) {
                                 try {
-                                    const workflowResult = await triggerReplyWorkflowAutomations({
+                                    const workflowResult = await handleFollowUpWorkflowContactReply({
                                         supabase,
                                         page: {
                                             id: page.id,
@@ -536,8 +536,14 @@ export async function POST(request: NextRequest) {
                                         interactionAt
                                     });
 
-                                    if (workflowResult.sent > 0 || workflowResult.stopped > 0 || workflowResult.errors > 0) {
-                                        logInfo('Processed reply workflow automations', {
+                                    if (
+                                        workflowResult.scheduled > 0 ||
+                                        workflowResult.continued > 0 ||
+                                        workflowResult.reset > 0 ||
+                                        workflowResult.stopped > 0 ||
+                                        workflowResult.errors > 0
+                                    ) {
+                                        logInfo('Processed follow-up workflow automations', {
                                             pageId,
                                             senderId,
                                             contactId: contact.id,
@@ -545,7 +551,7 @@ export async function POST(request: NextRequest) {
                                         });
                                     }
                                 } catch (workflowError) {
-                                    logWarn('Failed to process reply workflow automations', {
+                                    logWarn('Failed to process follow-up workflow automations', {
                                         pageId,
                                         senderId,
                                         contactId: contact.id,

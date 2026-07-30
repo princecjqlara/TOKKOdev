@@ -131,6 +131,7 @@ Vercel Cron is not used. Configure cron jobs in [cron-jobs.org](https://cron-job
 - Contact/name sync, every 30 minutes: `https://your-app.vercel.app/api/cron/sync`
 - Scheduled campaigns, every minute: `https://your-app.vercel.app/api/cron/campaign-scheduled`
 - Loop campaigns, every minute: `https://your-app.vercel.app/api/cron/campaign-loop`
+- Follow-up automations, every minute: `https://your-app.vercel.app/api/cron/follow-up-automations`
 
 Use `GET` requests. The page sync and campaign cron routes do not require a cron secret.
 

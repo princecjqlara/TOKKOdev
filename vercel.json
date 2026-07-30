@@ -16,6 +16,9 @@
     "src/app/api/cron/campaign-loop/route.ts": {
       "maxDuration": 300
     },
+    "src/app/api/cron/follow-up-automations/route.ts": {
+      "maxDuration": 300
+    },
     "src/app/api/campaigns/[campaignId]/send/route.ts": {
       "maxDuration": 300
     },

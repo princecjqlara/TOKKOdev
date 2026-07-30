@@ -2,12 +2,9 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getServerSession } from 'next-auth';
 import { authOptions } from '@/lib/auth';
 import { getSupabaseAdmin } from '@/lib/supabase';
-import { normalizeWorkflowKeyword } from '@/lib/workflow-automations';
+import { normalizeWorkflowReplyAction, normalizeWorkflowSteps } from '@/lib/workflow-automations';
 
 export const dynamic = 'force-dynamic';
-
-const MAX_STOP_KEYWORDS = 20;
-const MAX_COOLDOWN_MINUTES = 10080;
 
 async function verifyPageAccess(supabase: ReturnType<typeof getSupabaseAdmin>, userId: string, pageId: string) {
     const { data: userPage, error } = await supabase
@@ -24,32 +21,6 @@ async function verifyPageAccess(supabase: ReturnType<typeof getSupabaseAdmin>, u
     return true;
 }
 
-function normalizeStopKeywords(value: unknown): string[] {
-    const rawKeywords = Array.isArray(value)
-        ? value
-        : typeof value === 'string'
-            ? value.split(',')
-            : [];
-
-    return Array.from(
-        new Set(
-            rawKeywords
-                .filter((item): item is string => typeof item === 'string')
-                .map(normalizeWorkflowKeyword)
-                .filter(Boolean)
-        )
-    ).slice(0, MAX_STOP_KEYWORDS);
-}
-
-function normalizeCooldownMinutes(value: unknown): number {
-    const numericValue = Number(value);
-    if (!Number.isFinite(numericValue)) {
-        return 60;
-    }
-
-    return Math.min(MAX_COOLDOWN_MINUTES, Math.max(0, Math.round(numericValue)));
-}
-
 function normalizeAutomationBody(body: Record<string, unknown>) {
     const name = typeof body.name === 'string' ? body.name.trim() : '';
     const messageText = typeof body.message_text === 'string'
@@ -62,14 +33,16 @@ function normalizeAutomationBody(body: Record<string, unknown>) {
         : typeof body.pageStopCode === 'string'
             ? body.pageStopCode.trim()
             : '';
+    const steps = normalizeWorkflowSteps(body.steps, messageText, body.cooldown_minutes ?? body.cooldownMinutes);
 
     return {
         name,
         enabled: body.enabled !== false,
-        message_text: messageText,
-        stop_keywords: normalizeStopKeywords(body.stop_keywords ?? body.stopKeywords),
+        message_text: steps[0]?.message_text || messageText,
+        steps,
+        reply_action: normalizeWorkflowReplyAction(body.reply_action ?? body.replyAction),
         page_stop_code: pageStopCode || null,
-        cooldown_minutes: normalizeCooldownMinutes(body.cooldown_minutes ?? body.cooldownMinutes)
+        cooldown_minutes: steps[0]?.delay_minutes || 0
     };
 }
 
@@ -92,7 +65,7 @@ export async function GET(
 
         const { data, error } = await supabase
             .from('workflow_automations')
-            .select('id, page_id, name, enabled, trigger_type, message_text, stop_keywords, page_stop_code, cooldown_minutes, created_at, updated_at')
+            .select('id, page_id, name, enabled, trigger_type, message_text, steps, reply_action, page_stop_code, cooldown_minutes, created_at, updated_at')
             .eq('page_id', pageId)
             .order('created_at', { ascending: false });
 
@@ -128,9 +101,9 @@ export async function POST(
         const body = (await request.json()) as Record<string, unknown>;
         const automation = normalizeAutomationBody(body);
 
-        if (!automation.name || !automation.message_text) {
+        if (!automation.name || automation.steps.length === 0) {
             return NextResponse.json(
-                { error: 'Bad Request', message: 'Automation name and message are required' },
+                { error: 'Bad Request', message: 'Automation name and at least one follow-up step are required' },
                 { status: 400 }
             );
         }
@@ -141,14 +114,16 @@ export async function POST(
                 page_id: pageId,
                 name: automation.name,
                 enabled: automation.enabled,
-                trigger_type: 'contact_reply',
+                trigger_type: 'follow_up',
                 message_text: automation.message_text,
-                stop_keywords: automation.stop_keywords,
+                steps: automation.steps,
+                reply_action: automation.reply_action,
+                stop_keywords: [],
                 page_stop_code: automation.page_stop_code,
                 cooldown_minutes: automation.cooldown_minutes,
                 created_by: session.user.id
             })
-            .select('id, page_id, name, enabled, trigger_type, message_text, stop_keywords, page_stop_code, cooldown_minutes, created_at, updated_at')
+            .select('id, page_id, name, enabled, trigger_type, message_text, steps, reply_action, page_stop_code, cooldown_minutes, created_at, updated_at')
             .single();
 
         if (error) {
