@@ -2,12 +2,14 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getSessionFromRequest } from '@/lib/get-session';
 import { getSupabaseAdmin } from '@/lib/supabase';
 import {
+    getConversationIdForPsid,
     getConversationMessages,
     getPageConversations,
     isFacebookReauthRequired
 } from '@/lib/facebook';
 import type { ConversationMessage } from '@/lib/facebook';
 import type { FacebookConversation } from '@/types';
+import { chunkArray } from '@/lib/chunking';
 
 export const dynamic = 'force-dynamic';
 export const maxDuration = 300;
@@ -18,6 +20,12 @@ type PageRecord = {
     fb_page_id: string;
     access_token: string;
     name: string;
+};
+
+type ContactExportRecord = {
+    id: string;
+    psid: string | null;
+    name: string | null;
 };
 
 type ExportedMessage = {
@@ -38,6 +46,19 @@ type ExportedMessage = {
 
 function parseFormat(value: string | null): ExportFormat {
     return value === 'json' ? 'json' : 'csv';
+}
+
+function normalizeContactIds(value: unknown): string[] {
+    const values = Array.isArray(value)
+        ? value
+        : typeof value === 'string'
+            ? value.split(',')
+            : [];
+
+    return [...new Set(values
+        .map((item) => (typeof item === 'string' ? item.trim() : ''))
+        .filter(Boolean))]
+        .slice(0, 10000);
 }
 
 function csvCell(value: unknown) {
@@ -139,9 +160,126 @@ async function getAuthorizedPage(
     return page as PageRecord | null;
 }
 
-export async function GET(
+async function getContactsForExport(
+    supabase: ReturnType<typeof getSupabaseAdmin>,
+    pageId: string,
+    contactIds: string[]
+): Promise<ContactExportRecord[]> {
+    if (contactIds.length === 0) return [];
+
+    const contacts: ContactExportRecord[] = [];
+    for (const batch of chunkArray(contactIds, 500)) {
+        const { data, error } = await supabase
+            .from('contacts')
+            .select('id, psid, name')
+            .eq('page_id', pageId)
+            .in('id', batch);
+
+        if (error) {
+            throw error;
+        }
+
+        contacts.push(...((data || []) as ContactExportRecord[]));
+    }
+
+    return contacts;
+}
+
+async function buildRowsForAllPageConversations(pageId: string, page: PageRecord) {
+    const conversations = await getPageConversations(
+        page.fb_page_id,
+        page.access_token,
+        100,
+        true
+    );
+
+    const rows: ExportedMessage[] = [];
+    for (const conversation of conversations) {
+        const contact = getContactParticipant(conversation, page.fb_page_id);
+        const contactPsid = contact?.id || '';
+        const contactName = contact?.name || '';
+        const messages = await getConversationMessages(
+            conversation.id,
+            page.access_token,
+            Number.MAX_SAFE_INTEGER
+        );
+
+        for (const message of messages) {
+            rows.push(mapMessageToExportRow({
+                pageId,
+                page,
+                conversation,
+                contactPsid,
+                contactName,
+                message
+            }));
+        }
+    }
+
+    return {
+        rows,
+        conversationCount: conversations.length,
+        selectedContactCount: null as number | null
+    };
+}
+
+async function buildRowsForSelectedContacts(
+    pageId: string,
+    page: PageRecord,
+    contacts: ContactExportRecord[]
+) {
+    const rows: ExportedMessage[] = [];
+    let conversationCount = 0;
+
+    for (const contact of contacts) {
+        if (!contact.psid) continue;
+
+        const conversationId = await getConversationIdForPsid(
+            page.fb_page_id,
+            contact.psid,
+            page.access_token
+        );
+        if (!conversationId) continue;
+
+        conversationCount++;
+        const conversation: FacebookConversation = {
+            id: conversationId,
+            updated_time: '',
+            participants: {
+                data: [
+                    { id: page.fb_page_id, name: page.name },
+                    { id: contact.psid, name: contact.name || '' }
+                ]
+            }
+        };
+        const messages = await getConversationMessages(
+            conversationId,
+            page.access_token,
+            Number.MAX_SAFE_INTEGER
+        );
+
+        for (const message of messages) {
+            rows.push(mapMessageToExportRow({
+                pageId,
+                page,
+                conversation,
+                contactPsid: contact.psid,
+                contactName: contact.name || '',
+                message
+            }));
+        }
+    }
+
+    return {
+        rows,
+        conversationCount,
+        selectedContactCount: contacts.length
+    };
+}
+
+async function handleExport(
     request: NextRequest,
-    { params }: { params: Promise<{ pageId: string }> }
+    paramsPromise: Promise<{ pageId: string }>
 ) {
     try {
         const session = await getSessionFromRequest(request);
@@ -154,8 +292,19 @@ export async function GET(
             );
         }
 
-        const { pageId } = await params;
-        const format = parseFormat(new URL(request.url).searchParams.get('format'));
+        const { pageId } = await paramsPromise;
+        const url = new URL(request.url);
+        const body = request.method === 'POST'
+            ? await request.json().catch(() => ({} as Record<string, unknown>))
+            : {};
+        const format = parseFormat(
+            typeof body.format === 'string' ? body.format : url.searchParams.get('format')
+        );
+        const contactIds = normalizeContactIds(
+            Array.isArray(body.contactIds) || typeof body.contactIds === 'string'
+                ? body.contactIds
+                : url.searchParams.get('contactIds')
+        );
         const supabase = getSupabaseAdmin();
         const page = await getAuthorizedPage(supabase, userId, pageId);
 
@@ -173,38 +322,18 @@ export async function GET(
             );
         }
 
-        const conversations = await getPageConversations(
-            page.fb_page_id,
-            page.access_token,
-            100,
-            true
-        );
-
-        const rows: ExportedMessage[] = [];
-        for (const conversation of conversations) {
-            const contact = getContactParticipant(conversation, page.fb_page_id);
-            const contactPsid = contact?.id || '';
-            const contactName = contact?.name || '';
-            const messages = await getConversationMessages(
-                conversation.id,
-                page.access_token,
-                Number.MAX_SAFE_INTEGER
-            );
-
-            for (const message of messages) {
-                rows.push(mapMessageToExportRow({
-                    pageId,
-                    page,
-                    conversation,
-                    contactPsid,
-                    contactName,
-                    message
-                }));
-            }
-        }
+        const exportResult = contactIds.length > 0
+            ? await buildRowsForSelectedContacts(
+                pageId,
+                page,
+                await getContactsForExport(supabase, pageId, contactIds)
+            )
+            : await buildRowsForAllPageConversations(pageId, page);
+        const { rows, conversationCount, selectedContactCount } = exportResult;
 
         const exportedAt = new Date().toISOString();
-        const filenameBase = `${sanitizeFilenamePart(page.name)}-conversations-${exportedAt.slice(0, 10)}`;
+        const scope = contactIds.length > 0 ? 'selected-contact-conversations' : 'conversations';
+        const filenameBase = `${sanitizeFilenamePart(page.name)}-${scope}-${exportedAt.slice(0, 10)}`;
 
         if (format === 'json') {
             return new NextResponse(
@@ -215,7 +344,8 @@ export async function GET(
                         name: page.name,
                         fbPageId: page.fb_page_id
                     },
-                    conversationCount: conversations.length,
+                    conversationCount,
+                    selectedContactCount,
                     messageCount: rows.length,
                     messages: rows
                 }, null, 2),
@@ -252,4 +382,18 @@ export async function GET(
             { status: 500 }
         );
     }
+}
+
+export async function GET(
+    request: NextRequest,
+    { params }: { params: Promise<{ pageId: string }> }
+) {
+    return handleExport(request, params);
+}
+
+export async function POST(
+    request: NextRequest,
+    { params }: { params: Promise<{ pageId: string }> }
+) {
+    return handleExport(request, params);
 }

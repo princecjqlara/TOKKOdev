@@ -4,6 +4,7 @@ import type { NextRequest } from 'next/server';
 const mocks = vi.hoisted(() => ({
     getSessionFromRequest: vi.fn(),
     getSupabaseAdmin: vi.fn(),
+    getConversationIdForPsid: vi.fn(),
     getPageConversations: vi.fn(),
     getConversationMessages: vi.fn(),
     isFacebookReauthRequired: vi.fn()
@@ -18,15 +19,26 @@ vi.mock('@/lib/supabase', () => ({
 }));
 
 vi.mock('@/lib/facebook', () => ({
+    getConversationIdForPsid: mocks.getConversationIdForPsid,
     getPageConversations: mocks.getPageConversations,
     getConversationMessages: mocks.getConversationMessages,
     isFacebookReauthRequired: mocks.isFacebookReauthRequired
 }));
 
-import { GET } from './route';
+import { GET, POST } from './route';
 
 function createRequest(format: 'csv' | 'json' = 'csv'): NextRequest {
     return new Request(`http://localhost:3000/api/pages/page_1/conversations/export?format=${format}`) as unknown as NextRequest;
+}
+
+function createPostRequest(body: Record<string, unknown>): NextRequest {
+    return new Request('http://localhost:3000/api/pages/page_1/conversations/export', {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json'
+        },
+        body: JSON.stringify(body)
+    }) as unknown as NextRequest;
 }
 
 function createSupabaseMock(options: { hasAccess?: boolean; hasPage?: boolean } = {}) {
@@ -54,6 +66,19 @@ function createSupabaseMock(options: { hasAccess?: boolean; hasPage?: boolean } 
     const pageEq = vi.fn().mockReturnValue({ single: pageSingle });
     const pageSelect = vi.fn().mockReturnValue({ eq: pageEq });
 
+    const contactsIn = vi.fn().mockResolvedValue({
+        data: [
+            {
+                id: 'contact_1',
+                psid: 'contact_psid_1',
+                name: 'Jane Contact'
+            }
+        ],
+        error: null
+    });
+    const contactsEq = vi.fn().mockReturnValue({ in: contactsIn });
+    const contactsSelect = vi.fn().mockReturnValue({ eq: contactsEq });
+
     const from = vi.fn((table: string) => {
         if (table === 'user_pages') {
             return { select: userPageSelect };
@@ -63,10 +88,14 @@ function createSupabaseMock(options: { hasAccess?: boolean; hasPage?: boolean } 
             return { select: pageSelect };
         }
 
+        if (table === 'contacts') {
+            return { select: contactsSelect };
+        }
+
         throw new Error(`Unexpected table: ${table}`);
     });
 
-    return { from };
+    return { from, contactsIn };
 }
 
 describe('GET /api/pages/[pageId]/conversations/export', () => {
@@ -79,6 +108,7 @@ describe('GET /api/pages/[pageId]/conversations/export', () => {
         });
         mocks.getSupabaseAdmin.mockReturnValue(createSupabaseMock());
         mocks.isFacebookReauthRequired.mockReturnValue(false);
+        mocks.getConversationIdForPsid.mockResolvedValue('conversation_1');
         mocks.getPageConversations.mockResolvedValue([
             {
                 id: 'conversation_1',
@@ -155,6 +185,32 @@ describe('GET /api/pages/[pageId]/conversations/export', () => {
             senderType: 'contact',
             message: 'Hello, "Jane"'
         }));
+    });
+
+    it('downloads full conversations for selected contact IDs only', async () => {
+        const response = await POST(createPostRequest({
+            format: 'csv',
+            contactIds: ['contact_1']
+        }), {
+            params: Promise.resolve({ pageId: 'page_1' })
+        });
+        const body = await response.text();
+
+        expect(response.status).toBe(200);
+        expect(response.headers.get('content-disposition')).toContain('Study-Page-selected-contact-conversations-');
+        expect(mocks.getPageConversations).not.toHaveBeenCalled();
+        expect(mocks.getConversationIdForPsid).toHaveBeenCalledWith(
+            'fb_page_1',
+            'contact_psid_1',
+            'page_access_token_1'
+        );
+        expect(mocks.getConversationMessages).toHaveBeenCalledWith(
+            'conversation_1',
+            'page_access_token_1',
+            Number.MAX_SAFE_INTEGER
+        );
+        expect(body).toContain('"contact_psid_1","Jane Contact","message_1"');
+        expect(body).toContain('"message_2","fb_page_1","Study Page","page","Thanks for messaging us"');
     });
 
     it('returns 403 when the user does not have page access', async () => {

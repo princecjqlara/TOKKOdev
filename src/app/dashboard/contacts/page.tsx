@@ -1261,7 +1261,20 @@ export default function ContactsPage() {
 
         setExportingConversations(true);
         try {
-            const response = await fetch(`/api/pages/${selectedPageId}/conversations/export?format=csv`);
+            const selectionCount = getSelectionCount();
+            const selectedContactIdsForExport = selectionCount > 0
+                ? await getSelectedContactIds()
+                : [];
+            const response = selectedContactIdsForExport.length > 0
+                ? await fetch(`/api/pages/${selectedPageId}/conversations/export`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        format: 'csv',
+                        contactIds: selectedContactIdsForExport
+                    })
+                })
+                : await fetch(`/api/pages/${selectedPageId}/conversations/export?format=csv`);
 
             if (!response.ok) {
                 const data = await readApiResponse(response);
@@ -2080,7 +2093,11 @@ export default function ContactsPage() {
                         className="btn-wireframe"
                     >
                         <Download className={`w-4 h-4 mr-2 ${exportingConversations ? 'animate-pulse' : ''}`} />
-                        {exportingConversations ? 'Exporting' : 'Export CSV'}
+                        {exportingConversations
+                            ? 'Exporting'
+                            : getSelectionCount() > 0
+                                ? `Export Selected (${getSelectionCount()})`
+                                : 'Export CSV'}
                     </button>
                 </div>
             </div>
