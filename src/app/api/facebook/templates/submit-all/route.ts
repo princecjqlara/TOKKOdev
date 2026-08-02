@@ -2,10 +2,27 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getSessionFromRequest } from '@/lib/get-session';
 import { getSupabaseAdmin } from '@/lib/supabase';
 import { getPageTemplates, UTILITY_TEMPLATES, UtilityTemplate } from '@/lib/facebook';
+import {
+    DEFAULT_MEDIA_TEMPLATE_SAMPLE_URL,
+    DEFAULT_VIDEO_TEMPLATE_SAMPLE_URL,
+    buildMediaTemplateVariant,
+    getMediaTemplateName
+} from '@/lib/facebook-templates';
+import type { TemplateMediaType } from '@/lib/facebook-templates';
 
 const SENDABLE_STATUSES = new Set(['APPROVED', 'ACTIVE']);
 const FACEBOOK_GRAPH_URL = 'https://graph.facebook.com/v21.0';
 const DEFAULT_BATCH_LIMIT = 10;
+
+function getFileNameFromUrl(url: string) {
+    try {
+        const parsedUrl = new URL(url);
+        const lastSegment = parsedUrl.pathname.split('/').filter(Boolean).pop();
+        return lastSegment && lastSegment.includes('.') ? lastSegment : 'template-media.png';
+    } catch {
+        return 'template-media.png';
+    }
+}
 
 function isFacebookTokenError(message: string) {
     return (
@@ -106,6 +123,83 @@ async function createUtilityTemplatesBatch(
     });
 }
 
+function normalizeMediaType(value: unknown): TemplateMediaType {
+    return value === 'video' ? 'video' : 'image';
+}
+
+async function createResumableUploadHandle(pageAccessToken: string, sampleMediaUrl: string) {
+    const appId = process.env.FACEBOOK_CLIENT_ID;
+    if (!appId) {
+        throw new Error('FACEBOOK_CLIENT_ID is required to upload media template samples.');
+    }
+
+    const mediaResponse = await fetch(sampleMediaUrl);
+    if (!mediaResponse.ok) {
+        throw new Error(`Failed to fetch media template sample (HTTP ${mediaResponse.status}).`);
+    }
+
+    const mediaBuffer = Buffer.from(await mediaResponse.arrayBuffer());
+    const fileType = mediaResponse.headers.get('content-type') || 'application/octet-stream';
+    const fileName = getFileNameFromUrl(sampleMediaUrl);
+
+    const sessionResponse = await fetch(
+        `${FACEBOOK_GRAPH_URL}/${appId}/uploads?` +
+        new URLSearchParams({
+            file_name: fileName,
+            file_length: String(mediaBuffer.length),
+            file_type: fileType
+        }).toString(),
+        {
+            method: 'POST',
+            headers: {
+                Authorization: `Bearer ${pageAccessToken}`
+            }
+        }
+    );
+    const sessionData = await sessionResponse.json().catch(() => ({}));
+    if (!sessionResponse.ok || typeof sessionData.id !== 'string') {
+        throw new Error(sessionData.error?.message || `Failed to create media upload session (HTTP ${sessionResponse.status}).`);
+    }
+
+    const uploadResponse = await fetch(`${FACEBOOK_GRAPH_URL}/${sessionData.id}`, {
+        method: 'POST',
+        headers: {
+            Authorization: `OAuth ${pageAccessToken}`,
+            file_offset: '0',
+            'Content-Type': 'application/octet-stream'
+        },
+        body: mediaBuffer
+    });
+    const uploadData = await uploadResponse.json().catch(() => ({}));
+    if (!uploadResponse.ok || typeof uploadData.h !== 'string') {
+        throw new Error(uploadData.error?.message || `Failed to upload media template sample (HTTP ${uploadResponse.status}).`);
+    }
+
+    return uploadData.h as string;
+}
+
+function hasTemplateButtons(template: UtilityTemplate | Omit<UtilityTemplate, 'language'>) {
+    return template.components.some(
+        (c) => c.type === 'BUTTONS' && Array.isArray((c as any).buttons) && (c as any).buttons.length > 0
+    );
+}
+
+function hasMediaHeader(template: UtilityTemplate | Omit<UtilityTemplate, 'language'>) {
+    return template.components.some(
+        (c) => c.type === 'HEADER' && ['IMAGE', 'VIDEO'].includes(String((c as any).format || '').toUpperCase())
+    );
+}
+
+function getMediaHeaderType(template: UtilityTemplate | Omit<UtilityTemplate, 'language'>): TemplateMediaType | null {
+    const header = template.components.find(
+        (c) => c.type === 'HEADER' && ['IMAGE', 'VIDEO'].includes(String((c as any).format || '').toUpperCase())
+    );
+    const format = String((header as any)?.format || '').toUpperCase();
+    if (format === 'VIDEO') return 'video';
+    if (format === 'IMAGE') return 'image';
+    return null;
+}
+
 // POST /api/facebook/templates/submit-all
 // Submits all predefined UTILITY_TEMPLATES to a Facebook page for approval.
 // Body: { pageId: string, limit?: number, templateNames?: string[] }
@@ -121,15 +215,30 @@ export async function POST(request: NextRequest) {
         }
 
         const body = await request.json();
-        const { pageId, limit, templateNames } = body as {
+        const { pageId, limit, templateNames, mediaVariant, sampleImageUrl, sampleMediaUrl } = body as {
             pageId?: string;
             limit?: number;
             templateNames?: string[];
+            mediaVariant?: boolean;
+            mediaType?: TemplateMediaType;
+            sampleImageUrl?: string;
+            sampleMediaUrl?: string;
         };
+        const mediaType = normalizeMediaType((body as { mediaType?: unknown }).mediaType);
 
         if (!pageId) {
             return NextResponse.json(
                 { error: 'Bad Request', message: 'pageId is required' },
+                { status: 400 }
+            );
+        }
+
+        if (mediaVariant && mediaType === 'video') {
+            return NextResponse.json(
+                {
+                    error: 'Bad Request',
+                    message: 'Facebook Messenger utility templates do not support video media components. Use a utility message followed by a direct Messenger video attachment.'
+                },
                 { status: 400 }
             );
         }
@@ -195,9 +304,28 @@ export async function POST(request: NextRequest) {
             Array.isArray(templateNames) && templateNames.length > 0
                 ? new Set(templateNames.filter((name) => typeof name === 'string'))
                 : null;
-        const candidateTemplates = candidateNameSet
-            ? UTILITY_TEMPLATES.filter((template) => candidateNameSet.has(template.name))
+        const sourceTemplates = candidateNameSet
+            ? UTILITY_TEMPLATES.filter(
+                (template) =>
+                    candidateNameSet.has(template.name) ||
+                    candidateNameSet.has(getMediaTemplateName(template.name, mediaType))
+            )
             : UTILITY_TEMPLATES;
+        const defaultSampleUrl = mediaType === 'video'
+            ? DEFAULT_VIDEO_TEMPLATE_SAMPLE_URL
+            : DEFAULT_MEDIA_TEMPLATE_SAMPLE_URL;
+        const mediaSample =
+            typeof sampleMediaUrl === 'string' && sampleMediaUrl.trim()
+                ? sampleMediaUrl.trim()
+                : typeof sampleImageUrl === 'string' && sampleImageUrl.trim()
+                    ? sampleImageUrl.trim()
+                    : defaultSampleUrl;
+        const mediaSampleHandle = mediaVariant
+            ? await createResumableUploadHandle(page.access_token, mediaSample)
+            : null;
+        const candidateTemplates = mediaVariant
+            ? sourceTemplates.map((template) => buildMediaTemplateVariant(template, mediaSampleHandle || mediaSample, mediaType))
+            : sourceTemplates;
 
         const results: {
             name: string;
@@ -205,6 +333,8 @@ export async function POST(request: NextRequest) {
             action: 'created' | 'already_exists' | 'error';
             error?: string;
             hasButtons: boolean;
+            hasMediaHeader: boolean;
+            mediaHeaderType: TemplateMediaType | null;
         }[] = [];
 
         const missingTemplates = candidateTemplates.filter((template) => !existingNames.has(template.name));
@@ -216,9 +346,6 @@ export async function POST(request: NextRequest) {
 
         // Report existing templates immediately so callers still get useful status counts.
         for (const template of candidateTemplates.filter((template) => existingNames.has(template.name))) {
-            const hasButtons = template.components.some(
-                (c) => c.type === 'BUTTONS' && Array.isArray((c as any).buttons) && (c as any).buttons.length > 0
-            );
             const existing = existingTemplates.find(
                 (t) => (t as { name: string }).name === template.name
             ) as Record<string, unknown> | undefined;
@@ -231,7 +358,9 @@ export async function POST(request: NextRequest) {
                 name: template.name,
                 status: existingStatus,
                 action: 'already_exists',
-                hasButtons
+                hasButtons: hasTemplateButtons(template),
+                hasMediaHeader: hasMediaHeader(template),
+                mediaHeaderType: getMediaHeaderType(template)
             });
         }
 
@@ -251,12 +380,11 @@ export async function POST(request: NextRequest) {
 
             for (const created of createdResults) {
                 const template = templatesToCreate.find((t) => t.name === created.name);
-                const hasButtons = !!template?.components.some(
-                    (c) => c.type === 'BUTTONS' && Array.isArray((c as any).buttons) && (c as any).buttons.length > 0
-                );
                 results.push({
                     ...created,
-                    hasButtons
+                    hasButtons: template ? hasTemplateButtons(template) : false,
+                    hasMediaHeader: template ? hasMediaHeader(template) : false,
+                    mediaHeaderType: template ? getMediaHeaderType(template) : null
                 });
             }
         } catch (err) {
@@ -274,15 +402,14 @@ export async function POST(request: NextRequest) {
 
             console.error('[SUBMIT_ALL] Failed to submit template batch:', errorMessage);
             for (const template of templatesToCreate) {
-                const hasButtons = template.components.some(
-                    (c) => c.type === 'BUTTONS' && Array.isArray((c as any).buttons) && (c as any).buttons.length > 0
-                );
                 results.push({
                     name: template.name,
                     status: 'ERROR',
                     action: 'error',
                     error: errorMessage,
-                    hasButtons
+                    hasButtons: hasTemplateButtons(template),
+                    hasMediaHeader: hasMediaHeader(template),
+                    mediaHeaderType: getMediaHeaderType(template)
                 });
             }
         }

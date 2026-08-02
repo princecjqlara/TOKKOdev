@@ -1,4 +1,4 @@
-import { UtilityTemplate, TemplateComponent } from './facebook';
+import type { UtilityTemplate, TemplateComponent } from './facebook';
 
 // Pre-defined utility templates for sending messages outside the 7-day window.
 // Mix of 1-param and 2-param templates with varied message structures.
@@ -11,6 +11,76 @@ import { UtilityTemplate, TemplateComponent } from './facebook';
 export type TemplateDefinition = Omit<UtilityTemplate, 'language'> & {
     paramCount: 1 | 2;
 };
+
+export type TemplateMediaType = 'image' | 'video';
+
+export const MEDIA_TEMPLATE_SUFFIX = '_media_v1';
+export const VIDEO_MEDIA_TEMPLATE_SUFFIX = '_video_v1';
+export const DEFAULT_MEDIA_TEMPLATE_SAMPLE_URL =
+    'https://placehold.co/1200x800/png?text=Message+Update';
+export const DEFAULT_VIDEO_TEMPLATE_SAMPLE_URL =
+    'https://www.w3schools.com/html/mov_bbb.mp4';
+
+const MEDIA_TEMPLATE_SUFFIXES: Record<TemplateMediaType, string> = {
+    image: MEDIA_TEMPLATE_SUFFIX,
+    video: VIDEO_MEDIA_TEMPLATE_SUFFIX
+};
+
+export function isMediaTemplateName(templateName: string | null | undefined): boolean {
+    return typeof templateName === 'string' && (
+        templateName.endsWith(MEDIA_TEMPLATE_SUFFIX) ||
+        templateName.endsWith(VIDEO_MEDIA_TEMPLATE_SUFFIX)
+    );
+}
+
+export function getBaseTemplateName(templateName: string): string {
+    if (templateName.endsWith(MEDIA_TEMPLATE_SUFFIX)) {
+        return templateName.slice(0, -MEDIA_TEMPLATE_SUFFIX.length);
+    }
+
+    if (templateName.endsWith(VIDEO_MEDIA_TEMPLATE_SUFFIX)) {
+        return templateName.slice(0, -VIDEO_MEDIA_TEMPLATE_SUFFIX.length);
+    }
+
+    return templateName;
+}
+
+export function getTemplateMediaTypeFromName(templateName: string | null | undefined): TemplateMediaType | null {
+    if (typeof templateName !== 'string') return null;
+    if (templateName.endsWith(VIDEO_MEDIA_TEMPLATE_SUFFIX)) return 'video';
+    if (templateName.endsWith(MEDIA_TEMPLATE_SUFFIX)) return 'image';
+    return null;
+}
+
+export function getMediaTemplateName(templateName: string, mediaType: TemplateMediaType = 'image'): string {
+    const baseName = getBaseTemplateName(templateName);
+    return `${baseName}${MEDIA_TEMPLATE_SUFFIXES[mediaType]}`;
+}
+
+export function buildMediaTemplateVariant(
+    template: TemplateDefinition,
+    sampleMediaHandle: string = DEFAULT_MEDIA_TEMPLATE_SAMPLE_URL,
+    mediaType: TemplateMediaType = 'image'
+): TemplateDefinition {
+    const withoutExistingHeader = template.components.filter((component) => component.type !== 'HEADER');
+    const headerFormat = mediaType.toUpperCase() as 'IMAGE' | 'VIDEO';
+
+    return {
+        ...template,
+        name: getMediaTemplateName(template.name, mediaType),
+        components: [
+            {
+                type: 'HEADER',
+                format: headerFormat,
+                text: 'Message Update',
+                example: {
+                    header_handle: [sampleMediaHandle]
+                }
+            },
+            ...withoutExistingHeader
+        ]
+    };
+}
 
 export const UTILITY_TEMPLATES: TemplateDefinition[] = [
     // ===========================================================

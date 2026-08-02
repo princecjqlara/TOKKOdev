@@ -3,12 +3,18 @@
 import { useSession } from 'next-auth/react';
 
 import { useEffect, useState } from 'react';
-import { Plus, Send, Trash2, Users, Clock, CheckCircle, XCircle, MessageSquare, StopCircle, FileText, Calendar } from 'lucide-react';
+import { Plus, Send, Trash2, Users, Clock, CheckCircle, XCircle, MessageSquare, StopCircle, FileText, Calendar, Image as ImageIcon } from 'lucide-react';
 import Pagination from '@/components/Pagination';
 import Modal from '@/components/Modal';
 import { Campaign, Page, Contact, PaginatedResponse } from '@/types';
 import { getCampaignMessagePreview } from '@/lib/campaign-message-sequence';
-import { UTILITY_TEMPLATES } from '@/lib/facebook-templates';
+import {
+    UTILITY_TEMPLATES,
+    getBaseTemplateName,
+    getMediaTemplateName,
+    isMediaTemplateName
+} from '@/lib/facebook-templates';
+import type { TemplateMediaType } from '@/lib/facebook-templates';
 
 // Map freeform wrapper values to template names
 const CAMPAIGN_ENVELOPE_MAP: Record<string, string> = {
@@ -31,6 +37,52 @@ const CAMPAIGN_ENVELOPE_MAP: Record<string, string> = {
     casual_3: 'casual_update_v4',
     simple_1: 'simple_msg_v4',
 };
+
+const CAMPAIGN_MEDIA_STORAGE_PREFIX = 'tokko:campaign-media:';
+const PAGE_MEDIA_DRAFT_STORAGE_PREFIX = 'tokko:page-media-draft:';
+const MAX_LOCAL_MEDIA_BYTES = 3 * 1024 * 1024;
+
+type StoredCampaignMedia = {
+    url: string;
+    type?: TemplateMediaType;
+    templateName: string;
+    savedAt: string;
+};
+
+function getCampaignMediaStorageKey(campaignId: string) {
+    return `${CAMPAIGN_MEDIA_STORAGE_PREFIX}${campaignId}`;
+}
+
+function getPageMediaDraftStorageKey(pageId: string) {
+    return `${PAGE_MEDIA_DRAFT_STORAGE_PREFIX}${pageId}`;
+}
+
+function readStoredCampaignMedia(campaignId: string): StoredCampaignMedia | null {
+    if (typeof window === 'undefined') return null;
+
+    const raw = window.localStorage.getItem(getCampaignMediaStorageKey(campaignId));
+    if (!raw) return null;
+
+    try {
+        const parsed = JSON.parse(raw) as StoredCampaignMedia;
+        if (typeof parsed.url === 'string' && parsed.url.trim()) {
+            return {
+                ...parsed,
+                type: 'image'
+            };
+        }
+        return null;
+    } catch {
+        return raw.trim()
+            ? {
+                url: raw,
+                type: 'image',
+                templateName: '',
+                savedAt: ''
+            }
+            : null;
+    }
+}
 
 async function readApiResponse(response: Response) {
     const contentType = response.headers.get('content-type') || '';
@@ -80,7 +132,7 @@ function getCampaignTemplateBodyText(key: string): string | null {
 }
 
 function getTemplateBodyByName(name: string): string | null {
-    const tmpl = UTILITY_TEMPLATES.find(t => t.name === name);
+    const tmpl = UTILITY_TEMPLATES.find(t => t.name === getBaseTemplateName(name));
     if (!tmpl) return null;
     const bodyComponent = tmpl.components.find(c => c.type === 'BODY');
     return bodyComponent && 'text' in bodyComponent ? (bodyComponent.text ?? null) : null;
@@ -100,6 +152,8 @@ type TemplateStatus = {
     status: string;
     category: string;
     language: string;
+    hasMediaHeader?: boolean;
+    mediaHeaderType?: TemplateMediaType | null;
 };
 
 export default function CampaignsPage() {
@@ -165,6 +219,8 @@ export default function CampaignsPage() {
     const [templatesLoading, setTemplatesLoading] = useState(false);
     const [messageMode, setMessageMode] = useState<'freeform' | 'template'>('freeform');
     const [freeformWrapper, setFreeformWrapper] = useState<string>('msg');
+    const [campaignMediaEnabled, setCampaignMediaEnabled] = useState(false);
+    const [campaignMediaUrl, setCampaignMediaUrl] = useState('');
     const [messageParts, setMessageParts] = useState<string[]>(['']);
     const [submittingTemplates, setSubmittingTemplates] = useState(false);
     const [templateSubmitResults, setTemplateSubmitResults] = useState<{
@@ -191,6 +247,22 @@ export default function CampaignsPage() {
         if (!showErrorsModal || !errorsCampaignId) return;
         fetchCampaignErrors(errorsCampaignId, errorsPage, errorsPageSize);
     }, [showErrorsModal, errorsCampaignId, errorsPage, errorsPageSize]);
+
+    useEffect(() => {
+        if (!selectedPageId) return;
+        const stored = window.localStorage.getItem(getPageMediaDraftStorageKey(selectedPageId));
+        if (!stored) {
+            setCampaignMediaUrl('');
+            return;
+        }
+
+        try {
+            const parsed = JSON.parse(stored) as { url?: string; type?: TemplateMediaType };
+            setCampaignMediaUrl(typeof parsed.url === 'string' ? parsed.url : '');
+        } catch {
+            setCampaignMediaUrl(stored);
+        }
+    }, [selectedPageId]);
 
     const fetchPages = async () => {
         try {
@@ -375,6 +447,60 @@ export default function CampaignsPage() {
         }
     };
 
+    const isTemplateApproved = (template: TemplateStatus) =>
+        template.status === 'APPROVED' || template.status === 'ACTIVE';
+
+    const findApprovedTemplate = (templateName: string, requireMedia: boolean = false) => {
+        const expectedName = requireMedia ? getMediaTemplateName(templateName, 'image') : getBaseTemplateName(templateName);
+        return availableTemplates.find((template) => {
+            if (!isTemplateApproved(template)) return false;
+            if (template.name !== expectedName) return false;
+            return requireMedia ? template.mediaHeaderType === 'image' : !template.hasMediaHeader;
+        });
+    };
+
+    const findApprovedUtilityTemplate = (requireMedia: boolean = false) => {
+        return availableTemplates.find((template) => {
+            if (!isTemplateApproved(template) || template.category !== 'UTILITY') return false;
+            return requireMedia ? template.mediaHeaderType === 'image' : !template.hasMediaHeader;
+        });
+    };
+
+    const updateCampaignMediaUrl = (value: string) => {
+        setCampaignMediaUrl(value);
+        if (selectedPageId) {
+            if (value.trim()) {
+                window.localStorage.setItem(
+                    getPageMediaDraftStorageKey(selectedPageId),
+                    JSON.stringify({ url: value, type: 'image' })
+                );
+            } else {
+                window.localStorage.removeItem(getPageMediaDraftStorageKey(selectedPageId));
+            }
+        }
+    };
+
+    const handleCampaignMediaFile = (file: File | null) => {
+        if (!file) return;
+        if (!file.type.startsWith('image/')) {
+            alert('Please choose an image file.');
+            return;
+        }
+        if (file.size > MAX_LOCAL_MEDIA_BYTES) {
+            alert('Please choose a media file under 3 MB so it can fit in browser local storage.');
+            return;
+        }
+
+        const reader = new FileReader();
+        reader.onload = () => {
+            if (typeof reader.result === 'string') {
+                updateCampaignMediaUrl(reader.result);
+            }
+        };
+        reader.onerror = () => alert('Could not read that media file.');
+        reader.readAsDataURL(file);
+    };
+
     const updateMessagePart = (index: number, value: string) => {
         setMessageParts((parts) => parts.map((part, partIndex) => partIndex === index ? value : part));
         if (index === 0) {
@@ -416,6 +542,10 @@ export default function CampaignsPage() {
         setSelectedTemplateName(null);
         setSelectedTemplateLanguage('en_US');
         setMessageMode('freeform');
+        setCampaignMediaEnabled(false);
+        if (selectedPageId) {
+            setCampaignMediaUrl(window.localStorage.getItem(getPageMediaDraftStorageKey(selectedPageId)) || '');
+        }
         await Promise.all([fetchContacts('', 1), fetchTags()]);
         fetchTemplates();
         setShowCreateModal(true);
@@ -473,6 +603,9 @@ export default function CampaignsPage() {
             ? true
             : (isSelectAllMode ? contactsTotal > 0 : selectedContactIds.size > 0);
         const cleanedMessageParts = messageParts.map((part) => part.trim()).filter(Boolean);
+        const useCampaignMedia = !isLoop && !useAiMessage && deliveryMode === 'now' && campaignMediaEnabled;
+        const useTemplateMedia = useCampaignMedia;
+        const normalizedCampaignMediaUrl = campaignMediaUrl.trim();
         if (!campaignName.trim() || !hasRecipients) return;
 
         // For loop campaigns, need aiPrompt
@@ -482,6 +615,8 @@ export default function CampaignsPage() {
         if (!isLoop && useAiMessage && !aiPrompt.trim()) return;
         if (!isLoop && !useAiMessage && messageMode === 'template' && !selectedTemplateName) return;
         if (!isLoop && !useAiMessage && cleanedMessageParts.length === 0) return;
+        if (useCampaignMedia && !normalizedCampaignMediaUrl) return;
+        if (useCampaignMedia && messageMode === 'freeform' && freeformWrapper === 'none') return;
 
         const resolvedScheduledAt =
             !isLoop && deliveryMode === 'schedule' && recurrence === 'daily'
@@ -531,24 +666,27 @@ export default function CampaignsPage() {
 
             if (!isLoop && !useAiMessage) {
                 if (useTemplateInPayload && selectedTemplateName) {
-                    payloadTemplateName = selectedTemplateName;
-                    payloadTemplateLanguage = selectedTemplateLanguage;
+                    const selectedTemplate = findApprovedTemplate(selectedTemplateName, useTemplateMedia);
+                    if (!selectedTemplate) {
+                        throw new Error(useTemplateMedia
+                            ? 'Selected template does not have an approved media copy yet.'
+                            : 'Selected template is not approved for message-only sending.');
+                    }
+                    payloadTemplateName = selectedTemplate.name;
+                    payloadTemplateLanguage = typeof selectedTemplate.language === 'string' ? selectedTemplate.language : selectedTemplateLanguage;
                 } else if (messageMode === 'freeform') {
                     if (freeformWrapper !== 'none') {
                         // Map the wrapper choice to the exact template name
                         let targetTemplate = CAMPAIGN_ENVELOPE_MAP[freeformWrapper] || 'general_msg_v1';
 
-                        const fallbackTemplate = availableTemplates.find(
-                            t => (t.status === 'APPROVED' || t.status === 'ACTIVE') &&
-                                 t.name === targetTemplate
-                        ) || availableTemplates.find(
-                            t => (t.status === 'APPROVED' || t.status === 'ACTIVE') &&
-                                 t.category === 'UTILITY'
-                        );
+                        const fallbackTemplate = findApprovedTemplate(targetTemplate, useTemplateMedia) ||
+                            findApprovedUtilityTemplate(useTemplateMedia);
 
                         if (fallbackTemplate) {
                             payloadTemplateName = fallbackTemplate.name;
                             payloadTemplateLanguage = typeof fallbackTemplate.language === 'string' ? fallbackTemplate.language : 'en_US';
+                        } else if (useTemplateMedia) {
+                            throw new Error('No approved media template copy is available for this page.');
                         }
                     }
                 }
@@ -588,6 +726,20 @@ export default function CampaignsPage() {
                 throw new Error(errorData.message || 'Failed to create campaign');
             }
 
+            const data = await response.json();
+            const createdCampaignId = data?.campaign?.id;
+            if (useCampaignMedia && createdCampaignId && payloadTemplateName) {
+                window.localStorage.setItem(
+                    getCampaignMediaStorageKey(createdCampaignId),
+                    JSON.stringify({
+                        url: normalizedCampaignMediaUrl,
+                        type: 'image',
+                        templateName: payloadTemplateName,
+                        savedAt: new Date().toISOString()
+                    } satisfies StoredCampaignMedia)
+                );
+            }
+
             setShowCreateModal(false);
             await fetchCampaigns();
         } catch (error) {
@@ -598,13 +750,23 @@ export default function CampaignsPage() {
         }
     };
 
-    const handleSend = async (campaignId: string) => {
+    const handleSend = async (campaign: Campaign) => {
+        const campaignId = campaign.id;
         setSendingCampaignId(campaignId);
         try {
+            const storedMedia = readStoredCampaignMedia(campaignId);
+            if (isMediaTemplateName(campaign.template_name) && !storedMedia?.url) {
+                alert('This campaign uses a media template, but the media is not available in this browser local storage.');
+                return;
+            }
+
             const sendPayload = {
                 sendBatchSize: 20,
                 delayBetweenBatchesMs: 50,
-                maxProcessingTimeMs: 240000
+                maxProcessingTimeMs: 240000,
+                templateMediaHeader: storedMedia?.url
+                    ? { type: 'image' as const, url: storedMedia.url }
+                    : undefined
             };
             let response = await fetch(`/api/campaigns/${campaignId}/send`, {
                 method: 'POST',
@@ -774,6 +936,14 @@ export default function CampaignsPage() {
         }
     };
 
+    const mediaAvailableForCampaign = !isLoop && !useAiMessage && deliveryMode === 'now';
+    const mediaTemplateRequiredForCampaign = mediaAvailableForCampaign && campaignMediaEnabled;
+    const approvedImageTemplateCount = availableTemplates.filter(
+        (template) => isTemplateApproved(template) && template.mediaHeaderType === 'image'
+    ).length;
+    const selectedTemplateCanSendWithMedia =
+        selectedTemplateName ? !!findApprovedTemplate(selectedTemplateName, mediaTemplateRequiredForCampaign) : true;
+
     return (
         <div className="p-6 md:p-8 max-w-[1400px] mx-auto fade-in">
             {/* Header */}
@@ -933,6 +1103,12 @@ export default function CampaignsPage() {
                                         {campaign.audience_mode === 'dynamic' && (
                                             <span className="text-blue-700">Dynamic audience</span>
                                         )}
+                                        {isMediaTemplateName(campaign.template_name) && (
+                                            <span className="flex items-center gap-1 text-blue-700">
+                                                <ImageIcon className="w-4 h-4" />
+                                                Media
+                                            </span>
+                                        )}
                                     </div>
                                     {campaign.audience_mode === 'dynamic' && (
                                         <p className="text-xs font-mono text-gray-500">
@@ -948,7 +1124,7 @@ export default function CampaignsPage() {
                                 <div className="flex items-center gap-2 w-full md:w-auto mt-2 md:mt-0">
                                     {campaign.status === 'draft' && (
                                         <button
-                                            onClick={() => handleSend(campaign.id)}
+                                            onClick={() => handleSend(campaign)}
                                             disabled={sendingCampaignId === campaign.id}
                                             className="btn-wireframe bg-black text-white hover:bg-gray-800 flex-1 md:flex-none"
                                         >
@@ -1073,7 +1249,10 @@ export default function CampaignsPage() {
                                     </button>
                                     <button
                                         type="button"
-                                        onClick={() => setDeliveryMode('schedule')}
+                                        onClick={() => {
+                                            setDeliveryMode('schedule');
+                                            setCampaignMediaEnabled(false);
+                                        }}
                                         className={`border px-3 py-3 text-left transition-colors ${deliveryMode === 'schedule' ? 'border-black bg-white' : 'border-gray-300 bg-transparent'
                                             }`}
                                     >
@@ -1240,6 +1419,118 @@ export default function CampaignsPage() {
                                         </div>
                                     </div>
 
+                                    <div className="border border-gray-200 bg-gray-50 p-4 space-y-3">
+                                        <div className="flex flex-col md:flex-row md:items-center justify-between gap-3">
+                                            <div>
+                                                <span className="font-bold uppercase text-sm flex items-center gap-1.5">
+                                                    <ImageIcon className="w-4 h-4" />
+                                                    Send Type
+                                                </span>
+                                                <p className="text-xs text-gray-500 font-mono mt-1">
+                                                    Media is stored in this browser only. Photos use approved image header templates.
+                                                </p>
+                                            </div>
+                                            <span className="text-xs font-mono text-gray-500">
+                                                {approvedImageTemplateCount} approved photo templates
+                                            </span>
+                                        </div>
+
+                                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                                            <button
+                                                type="button"
+                                                onClick={() => {
+                                                    setCampaignMediaEnabled(false);
+                                                    setSelectedTemplateName((current) => current ? getBaseTemplateName(current) : current);
+                                                }}
+                                                className={`border px-3 py-3 text-left transition-colors ${
+                                                    !campaignMediaEnabled
+                                                        ? 'border-black bg-white'
+                                                        : 'border-gray-300 bg-transparent'
+                                                }`}
+                                            >
+                                                <p className="font-bold uppercase text-sm">Message only</p>
+                                                <p className="text-xs text-gray-500 font-mono mt-1">Create a text campaign using normal approved templates.</p>
+                                            </button>
+                                            <button
+                                                type="button"
+                                                onClick={() => {
+                                                    setCampaignMediaEnabled(true);
+                                                    updateCampaignMediaUrl('');
+                                                    setSelectedTemplateName((current) => current ? getMediaTemplateName(current, 'image') : current);
+                                                    if (freeformWrapper === 'none') {
+                                                        setFreeformWrapper('msg');
+                                                    }
+                                                }}
+                                                disabled={!mediaAvailableForCampaign}
+                                                className={`border px-3 py-3 text-left transition-colors ${
+                                                    campaignMediaEnabled && mediaAvailableForCampaign
+                                                        ? 'border-black bg-white'
+                                                        : 'border-gray-300 bg-transparent'
+                                                }`}
+                                            >
+                                                <p className="font-bold uppercase text-sm">Photo as header</p>
+                                                <p className="text-xs text-gray-500 font-mono mt-1">Attach an image and use approved image template copies.</p>
+                                            </button>
+                                        </div>
+
+                                        {campaignMediaEnabled && mediaAvailableForCampaign && (
+                                            <div className="grid grid-cols-1 md:grid-cols-[1fr_auto] gap-3">
+                                                <input
+                                                    type="text"
+                                                    value={campaignMediaUrl}
+                                                    onChange={(e) => updateCampaignMediaUrl(e.target.value)}
+                                                    placeholder="Paste an image URL, or choose a small image file below"
+                                                    className="input-wireframe"
+                                                />
+                                                <label className="btn-wireframe bg-white cursor-pointer justify-center">
+                                                    <ImageIcon className="w-4 h-4 mr-2" />
+                                                    Choose Photo
+                                                    <input
+                                                        type="file"
+                                                        accept="image/*"
+                                                        className="hidden"
+                                                        onChange={(e) => handleCampaignMediaFile(e.target.files?.[0] || null)}
+                                                    />
+                                                </label>
+                                                {campaignMediaUrl && (
+                                                    <div className="md:col-span-2 border border-gray-300 bg-white p-3 flex items-center gap-3">
+                                                        <div className="w-16 h-16 border border-gray-300 bg-gray-100 overflow-hidden flex-shrink-0">
+                                                            <img
+                                                                src={campaignMediaUrl}
+                                                                alt="Selected campaign media"
+                                                                className="w-full h-full object-cover"
+                                                            />
+                                                        </div>
+                                                        <div className="min-w-0 flex-1">
+                                                            <p className="text-xs font-bold uppercase">Browser-local media ready</p>
+                                                            <p className="text-xs font-mono text-gray-500 truncate">
+                                                                Saved in localStorage, not the database.
+                                                            </p>
+                                                        </div>
+                                                        <button
+                                                            type="button"
+                                                            onClick={() => updateCampaignMediaUrl('')}
+                                                            className="btn-wireframe text-xs h-8 px-3 bg-white"
+                                                        >
+                                                            Clear
+                                                        </button>
+                                                    </div>
+                                                )}
+                                                {!selectedTemplateCanSendWithMedia && (
+                                                    <p className="md:col-span-2 text-xs font-mono text-red-600">
+                                                        This selected template does not have a matching approved media copy yet.
+                                                    </p>
+                                                )}
+                                            </div>
+                                        )}
+
+                                        {!mediaAvailableForCampaign && (
+                                            <p className="text-xs font-mono text-gray-500">
+                                                Media is available for normal send-now campaigns only.
+                                            </p>
+                                        )}
+                                    </div>
+
                                     {messageMode === 'freeform' && (
                                         <div className="p-4 border border-gray-200 bg-gray-50 rounded-md">
                                             <label className="text-xs font-bold uppercase mb-2 block text-gray-700">Message Style (Envelope)</label>
@@ -1250,12 +1541,10 @@ export default function CampaignsPage() {
                                             >
                                                 {(() => {
                                                     const isCampaignTemplateApproved = (wrapperKey: string) => {
-                                                        if (wrapperKey === 'none') return true;
+                                                        if (wrapperKey === 'none') return !campaignMediaEnabled;
                                                         const templateName = CAMPAIGN_ENVELOPE_MAP[wrapperKey];
                                                         if (!templateName) return false;
-                                                        return availableTemplates.some(t => 
-                                                            t.name === templateName && (t.status === 'APPROVED' || t.status === 'ACTIVE')
-                                                        );
+                                                        return !!findApprovedTemplate(templateName, campaignMediaEnabled);
                                                     };
 
                                                     const naturalConversations = [
@@ -1308,7 +1597,7 @@ export default function CampaignsPage() {
                                                 })()}
                                                 
                                                 <option disabled>─────────────────────────────────</option>
-                                                <option value="none">No Wrapper (Strict 24h limit applies!)</option>
+                                                <option value="none" disabled={campaignMediaEnabled}>No Wrapper (Strict 24h limit applies!)</option>
                                             </select>
                                             <p className="text-xs text-gray-500 font-mono">
                                                 {freeformWrapper === 'none' 
@@ -1344,9 +1633,11 @@ export default function CampaignsPage() {
                                                     <div className="animate-spin w-4 h-4 border-2 border-black border-t-transparent rounded-full" />
                                                     Loading templates...
                                                 </div>
-                                            ) : availableTemplates.filter(t => t.status === 'APPROVED' || t.status === 'ACTIVE').length === 0 ? (
+                                            ) : availableTemplates.filter(t => isTemplateApproved(t) && (mediaTemplateRequiredForCampaign ? t.mediaHeaderType === 'image' : !t.hasMediaHeader)).length === 0 ? (
                                                 <div className="text-xs font-mono text-red-600 bg-red-50 border border-red-200 p-3">
-                                                    No approved templates found for this page. Create and get templates approved on Facebook first.
+                                                    {mediaTemplateRequiredForCampaign
+                                                        ? 'No approved media templates found for this page. Submit image copies and wait for approval first.'
+                                                        : 'No approved templates found for this page. Create and get templates approved on Facebook first.'}
                                                 </div>
                                             ) : (
                                                 <>
@@ -1366,7 +1657,7 @@ export default function CampaignsPage() {
                                                     >
                                                         <option value="">-- Pick a template --</option>
                                                         {availableTemplates
-                                                            .filter(t => t.status === 'APPROVED' || t.status === 'ACTIVE')
+                                                            .filter(t => isTemplateApproved(t) && (mediaTemplateRequiredForCampaign ? t.mediaHeaderType === 'image' : !t.hasMediaHeader))
                                                             .map((tmpl) => (
                                                                 <option key={`${tmpl.name}-${tmpl.language}`} value={tmpl.name}>
                                                                     {tmpl.name.replace(/_/g, ' ')} ({tmpl.language}) — {tmpl.category}
@@ -1683,6 +1974,9 @@ export default function CampaignsPage() {
                             (!isLoop && useAiMessage && !aiPrompt.trim()) ||
                             (!isLoop && !useAiMessage && messageMode === 'template' && !selectedTemplateName) ||
                             (!isLoop && !useAiMessage && !messageParts.some((part) => part.trim())) ||
+                            (!isLoop && !useAiMessage && campaignMediaEnabled && (!mediaAvailableForCampaign || !campaignMediaUrl.trim())) ||
+                            (!isLoop && !useAiMessage && campaignMediaEnabled && messageMode === 'freeform' && freeformWrapper === 'none') ||
+                            (!isLoop && !useAiMessage && campaignMediaEnabled && messageMode === 'template' && !selectedTemplateCanSendWithMedia) ||
                             ((isLoop || audienceMode === 'specific') &&
                                 ((!isSelectAllMode && selectedContactIds.size === 0) ||
                                     (isSelectAllMode && contactsTotal === 0))) ||

@@ -3,6 +3,8 @@ import { getServerSession } from 'next-auth';
 import { authOptions } from '@/lib/auth';
 import { serializeCampaignMessageSequence } from '@/lib/campaign-message-sequence';
 import { chunkArray } from '@/lib/chunking';
+import { getMediaTemplateName } from '@/lib/facebook-templates';
+import type { TemplateMediaType } from '@/lib/facebook-templates';
 import { getPhilippinesScheduledAtIso, getTomorrowPhilippinesDateParts } from '@/lib/philippines-time';
 import { sendCampaignById } from '@/lib/campaign-send';
 import { getSupabaseAdmin } from '@/lib/supabase';
@@ -389,6 +391,14 @@ export async function POST(
         const templateLanguage = typeof body.templateLanguage === 'string' && body.templateLanguage.trim()
             ? body.templateLanguage.trim()
             : 'en_US';
+        const rawMediaHeader = body.templateMediaHeader;
+        const templateMediaHeader =
+            rawMediaHeader &&
+            rawMediaHeader.type === 'image' &&
+            typeof rawMediaHeader.url === 'string' &&
+            rawMediaHeader.url.trim()
+                ? { type: 'image' as const, url: rawMediaHeader.url.trim() }
+                : undefined;
 
         if (deliveryMode === 'now' && !messageText) {
             return NextResponse.json(
@@ -404,16 +414,33 @@ export async function POST(
             );
         }
 
-        const templateName =
+        if (deliveryMode === 'best_time_next_day' && templateMediaHeader) {
+            return NextResponse.json(
+                { error: 'Bad Request', message: 'Media attachments are not available for best-time scheduled bulk messages yet.' },
+                { status: 400 }
+            );
+        }
+
+        const baseTemplateName =
             envelopeWrapper === 'template'
                 ? requestedTemplateName
                 : envelopeWrapper === 'none'
                     ? null
                     : ENVELOPE_TEMPLATE_MAP[envelopeWrapper] || null;
+        const templateName = templateMediaHeader && baseTemplateName
+            ? getMediaTemplateName(baseTemplateName, 'image')
+            : baseTemplateName;
 
         if (envelopeWrapper === 'template' && !templateName) {
             return NextResponse.json(
                 { error: 'Bad Request', message: 'Pick an approved template before sending.' },
+                { status: 400 }
+            );
+        }
+
+        if (templateMediaHeader && !templateName) {
+            return NextResponse.json(
+                { error: 'Bad Request', message: 'Media sends require an approved media-header utility template.' },
                 { status: 400 }
             );
         }
@@ -654,7 +681,8 @@ export async function POST(
             userId: session.user.id,
             sendBatchSize: 20,
             delayBetweenBatchesMs: 50,
-            maxProcessingTimeMs: 240000
+            maxProcessingTimeMs: 240000,
+            templateMediaHeader
         });
 
         return NextResponse.json({

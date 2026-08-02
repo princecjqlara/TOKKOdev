@@ -1,8 +1,14 @@
 'use client';
 
 import { useState, useEffect, useCallback } from 'react';
-import { RefreshCw, CheckCircle, XCircle, Clock, FileText, AlertTriangle } from 'lucide-react';
-import { UTILITY_TEMPLATES } from '@/lib/facebook-templates';
+import { RefreshCw, CheckCircle, XCircle, Clock, FileText, AlertTriangle, Image as ImageIcon } from 'lucide-react';
+import {
+    DEFAULT_MEDIA_TEMPLATE_SAMPLE_URL,
+    UTILITY_TEMPLATES,
+    getMediaTemplateName,
+    isMediaTemplateName
+} from '@/lib/facebook-templates';
+import type { TemplateMediaType } from '@/lib/facebook-templates';
 
 type Page = {
     id: string;
@@ -17,9 +23,13 @@ type TemplateStatus = {
     category: string;
     language: string;
     bodyText: string;
+    hasMediaHeader: boolean;
+    mediaHeaderType?: TemplateMediaType | null;
 };
 
 const SYSTEM_TEMPLATE_NAMES = new Set(UTILITY_TEMPLATES.map((template) => template.name));
+const MEDIA_SYSTEM_TEMPLATE_NAMES = new Set(UTILITY_TEMPLATES.map((template) => getMediaTemplateName(template.name)));
+const MEDIA_SAMPLE_STORAGE_KEY = 'tokko:template-media-sample-url';
 
 async function readApiResponse(response: Response) {
     const contentType = response.headers.get('content-type') || '';
@@ -39,8 +49,10 @@ export default function TemplatesPage() {
     const [templates, setTemplates] = useState<TemplateStatus[]>([]);
     const [loading, setLoading] = useState(false);
     const [submitting, setSubmitting] = useState(false);
+    const [submittingMedia, setSubmittingMedia] = useState(false);
     const [filter, setFilter] = useState<'all' | 'system' | 'approved' | 'rejected'>('system');
     const [errorMessage, setErrorMessage] = useState<string | null>(null);
+    const [mediaSampleUrl, setMediaSampleUrl] = useState(DEFAULT_MEDIA_TEMPLATE_SAMPLE_URL);
 
     // Fetch pages
     useEffect(() => {
@@ -58,6 +70,18 @@ export default function TemplatesPage() {
             }
         })();
     }, []);
+
+    useEffect(() => {
+        const stored = window.localStorage.getItem(MEDIA_SAMPLE_STORAGE_KEY);
+        if (stored) {
+            setMediaSampleUrl(stored);
+        }
+    }, []);
+
+    const updateMediaSampleUrl = (value: string) => {
+        setMediaSampleUrl(value);
+        window.localStorage.setItem(MEDIA_SAMPLE_STORAGE_KEY, value);
+    };
 
     // Fetch templates when page changes
     const fetchTemplates = useCallback(async () => {
@@ -142,19 +166,80 @@ export default function TemplatesPage() {
         }
     };
 
+    const handleSubmitMediaAll = async () => {
+        if (!selectedPageId || submittingMedia) return;
+        setSubmittingMedia(true);
+        setErrorMessage(null);
+        try {
+            const totals = {
+                submitted: 0,
+                errors: 0,
+                alreadyExisted: 0
+            };
+            let firstError: string | null = null;
+            const templateNames = UTILITY_TEMPLATES.map((template) => template.name);
+            const batchSize = 10;
+
+            for (let index = 0; index < templateNames.length; index += batchSize) {
+                const batchTemplateNames = templateNames.slice(index, index + batchSize);
+                const res = await fetch('/api/facebook/templates/submit-all', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        pageId: selectedPageId,
+                        limit: batchSize,
+                        templateNames: batchTemplateNames,
+                        mediaVariant: true,
+                        mediaType: 'image',
+                        sampleMediaUrl: mediaSampleUrl
+                    })
+                });
+                const data = await readApiResponse(res);
+                if (!res.ok || !data.success) {
+                    const message = data.message || data.detail || 'Unknown error';
+                    setErrorMessage(message);
+                    throw new Error(message);
+                }
+
+                totals.submitted += data.summary.submittedThisRequest || 0;
+                totals.errors += data.summary.errors || 0;
+                totals.alreadyExisted = data.summary.alreadyExisted || totals.alreadyExisted;
+
+                if (!firstError && data.summary.errors > 0 && Array.isArray(data.results)) {
+                    const errorResult = data.results.find((r: any) => r.action === 'error');
+                    firstError = errorResult?.error || null;
+                }
+            }
+
+            let msg = `Image media templates submitted!\n\nSubmitted this run: ${totals.submitted}\nErrors: ${totals.errors}\nAlready existed: ${totals.alreadyExisted}`;
+            if (firstError) {
+                msg += `\n\nError reason: ${firstError}`;
+            }
+            alert(msg);
+            await fetchTemplates();
+            return;
+        } catch (err) {
+            alert(`Error: ${(err as Error).message}`);
+            return;
+        } finally {
+            setSubmittingMedia(false);
+        }
+    };
+
     // Filter templates
     const filteredTemplates = templates.filter(t => {
-        if (filter === 'system') return SYSTEM_TEMPLATE_NAMES.has(t.name);
+        if (filter === 'system') return SYSTEM_TEMPLATE_NAMES.has(t.name) || MEDIA_SYSTEM_TEMPLATE_NAMES.has(t.name);
         if (filter === 'approved') return t.status === 'APPROVED' || t.status === 'ACTIVE';
         if (filter === 'rejected') return t.status === 'REJECTED';
         return true; // 'all'
     });
 
     // Count stats
-    const systemTemplates = templates.filter(t => SYSTEM_TEMPLATE_NAMES.has(t.name));
+    const systemTemplates = templates.filter(t => SYSTEM_TEMPLATE_NAMES.has(t.name) || MEDIA_SYSTEM_TEMPLATE_NAMES.has(t.name));
     const approvedCount = systemTemplates.filter(t => t.status === 'APPROVED' || t.status === 'ACTIVE').length;
     const rejectedCount = systemTemplates.filter(t => t.status === 'REJECTED').length;
     const pendingCount = systemTemplates.filter(t => t.status === 'PENDING').length;
+    const approvedImageCount = systemTemplates.filter(t => t.mediaHeaderType === 'image' && (t.status === 'APPROVED' || t.status === 'ACTIVE')).length;
 
     const getStatusBadge = (status: string) => {
         switch (status) {
@@ -227,6 +312,33 @@ export default function TemplatesPage() {
                     >
                         {submitting ? 'Submitting...' : 'Submit Missing'}
                     </button>
+
+                    <button
+                        onClick={handleSubmitMediaAll}
+                        disabled={submittingMedia || !selectedPageId}
+                        className="btn-wireframe h-10 bg-white px-4 whitespace-nowrap"
+                        title="Submit duplicate image-header templates for approval"
+                    >
+                        {submittingMedia ? 'Submitting Image...' : 'Submit Image Copies'}
+                    </button>
+                </div>
+            </div>
+
+            <div className="mb-6 border border-black bg-white p-4">
+                <div className="flex flex-col md:flex-row gap-3 md:items-end">
+                    <div className="flex-1">
+                        <label className="label-wireframe mb-1">Image Approval Sample</label>
+                        <input
+                            type="url"
+                            value={mediaSampleUrl}
+                            onChange={(e) => updateMediaSampleUrl(e.target.value)}
+                            placeholder={DEFAULT_MEDIA_TEMPLATE_SAMPLE_URL}
+                            className="input-wireframe"
+                        />
+                    </div>
+                    <div className="border border-gray-300 bg-gray-50 px-3 py-2 text-xs font-mono text-gray-600 md:w-72">
+                        Stored in this browser only. Image names end in {` ${getMediaTemplateName('template').replace('template', '')}`}.
+                    </div>
                 </div>
             </div>
 
@@ -243,7 +355,7 @@ export default function TemplatesPage() {
             )}
 
             {/* Stats Cards */}
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-6">
+            <div className="grid grid-cols-2 md:grid-cols-5 gap-3 mb-6">
                 <div className="border border-black p-4 bg-white">
                     <p className="text-xs font-bold uppercase text-gray-500 mb-1">Total (System)</p>
                     <p className="text-2xl font-black">{systemTemplates.length}</p>
@@ -259,6 +371,10 @@ export default function TemplatesPage() {
                 <div className="border border-yellow-700 p-4 bg-yellow-50">
                     <p className="text-xs font-bold uppercase text-yellow-700 mb-1">Pending</p>
                     <p className="text-2xl font-black text-yellow-800">{pendingCount}</p>
+                </div>
+                <div className="border border-blue-700 p-4 bg-blue-50">
+                    <p className="text-xs font-bold uppercase text-blue-700 mb-1">Photo Templates</p>
+                    <p className="text-2xl font-black text-blue-800">{approvedImageCount}</p>
                 </div>
             </div>
 
@@ -307,13 +423,14 @@ export default function TemplatesPage() {
                                 <th className="text-left px-4 py-3 text-xs font-bold uppercase text-gray-600 w-10">#</th>
                                 <th className="text-left px-4 py-3 text-xs font-bold uppercase text-gray-600">Status</th>
                                 <th className="text-left px-4 py-3 text-xs font-bold uppercase text-gray-600">Template Name</th>
+                                <th className="text-left px-4 py-3 text-xs font-bold uppercase text-gray-600">Media</th>
                                 <th className="text-left px-4 py-3 text-xs font-bold uppercase text-gray-600">Category</th>
                                 <th className="text-left px-4 py-3 text-xs font-bold uppercase text-gray-600 min-w-[300px]">Message Body</th>
                             </tr>
                         </thead>
                         <tbody>
                             {filteredTemplates.map((t, idx) => {
-                                const isSystem = SYSTEM_TEMPLATE_NAMES.has(t.name);
+                                const isSystem = SYSTEM_TEMPLATE_NAMES.has(t.name) || MEDIA_SYSTEM_TEMPLATE_NAMES.has(t.name);
                                 return (
                                     <tr
                                         key={t.id || t.name + idx}
@@ -329,6 +446,21 @@ export default function TemplatesPage() {
                                                 <span className="ml-2 text-[10px] font-bold uppercase px-1.5 py-0.5 bg-blue-100 text-blue-700 border border-blue-300">
                                                     SYSTEM
                                                 </span>
+                                            )}
+                                            {isMediaTemplateName(t.name) && (
+                                                <span className="ml-2 text-[10px] font-bold uppercase px-1.5 py-0.5 bg-gray-100 text-gray-700 border border-gray-300">
+                                                    MEDIA COPY
+                                                </span>
+                                            )}
+                                        </td>
+                                        <td className="px-4 py-3">
+                                            {t.hasMediaHeader ? (
+                                                <span className="inline-flex items-center gap-1 text-xs font-bold uppercase text-blue-700">
+                                                    <ImageIcon className="w-3.5 h-3.5" />
+                                                    Image
+                                                </span>
+                                            ) : (
+                                                <span className="text-xs font-mono text-gray-400">Message only</span>
                                             )}
                                         </td>
                                         <td className="px-4 py-3">

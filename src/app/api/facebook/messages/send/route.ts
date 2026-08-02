@@ -7,6 +7,8 @@ import {
     sendMessage,
     UtilityTemplate
 } from '@/lib/facebook';
+import { getMediaTemplateName } from '@/lib/facebook-templates';
+import type { TemplateMediaType } from '@/lib/facebook-templates';
 import { chunkArray } from '@/lib/chunking';
 import { replaceTemplateVariablesForParts, ContactRecord } from '@/lib/placeholders';
 import { stopWorkflowAutomationsFromPageMessage } from '@/lib/workflow-automations';
@@ -106,6 +108,24 @@ function extractBodyTemplateText(template: Record<string, unknown>): string {
     }) as Record<string, unknown> | undefined;
 
     return typeof bodyComponent?.text === 'string' ? bodyComponent.text : '';
+}
+
+function getTemplateMediaHeaderType(template: Record<string, unknown>): TemplateMediaType | null {
+    const components = template.components;
+    if (!Array.isArray(components)) {
+        return null;
+    }
+
+    for (const component of components) {
+        if (!component || typeof component !== 'object') continue;
+        const componentRecord = component as Record<string, unknown>;
+        const type = typeof componentRecord.type === 'string' ? componentRecord.type.toUpperCase() : '';
+        const format = typeof componentRecord.format === 'string' ? componentRecord.format.toUpperCase() : '';
+        if (type === 'HEADER' && format === 'IMAGE') return 'image';
+        if (type === 'HEADER' && format === 'VIDEO') return 'video';
+    }
+
+    return null;
 }
 
 function isExactOfferBodyTemplate(template: Record<string, unknown>): boolean {
@@ -279,7 +299,8 @@ export async function POST(request: NextRequest) {
             buttonPlaceholderMode: rawButtonPlaceholderMode,
             envelopeWrapper: rawEnvelopeWrapper,
             templateName: rawTemplateName,
-            templateLanguage: rawTemplateLanguage
+            templateLanguage: rawTemplateLanguage,
+            templateMediaHeader: rawTemplateMediaHeader
         } = body as {
             pageId?: string;
             contactIds?: string[];
@@ -292,6 +313,7 @@ export async function POST(request: NextRequest) {
             envelopeWrapper?: string;
             templateName?: string;
             templateLanguage?: string;
+            templateMediaHeader?: { type?: string; url?: string };
         };
 
         const resolvedMessage = resolveMessageParts(rawMessageText, rawMessagePart1, rawMessagePart2);
@@ -331,6 +353,13 @@ export async function POST(request: NextRequest) {
                 ? rawTemplateName.trim()
                 : undefined;
         const requestedExactTemplateLanguage = normalizeLanguageCode(rawTemplateLanguage);
+        const templateMediaHeader =
+            rawTemplateMediaHeader &&
+            rawTemplateMediaHeader.type === 'image' &&
+            typeof rawTemplateMediaHeader.url === 'string' &&
+            rawTemplateMediaHeader.url.trim()
+                ? { type: 'image' as const, url: rawTemplateMediaHeader.url.trim() }
+                : undefined;
 
         // Map envelopeWrapper to target template name
         let targetEnvelopeTemplateName: string | undefined = undefined;
@@ -357,6 +386,17 @@ export async function POST(request: NextRequest) {
                 default: targetEnvelopeTemplateName = 'general_msg_v1'; break;
             }
         }
+
+        if (templateMediaHeader) {
+            if (!targetEnvelopeTemplateName) {
+                return NextResponse.json(
+                    { error: 'Bad Request', message: 'Media sends require an approved media-header utility template.' },
+                    { status: 400 }
+                );
+            }
+            targetEnvelopeTemplateName = getMediaTemplateName(targetEnvelopeTemplateName, 'image');
+        }
+
         // When envelopeWrapper is 'template', force UTILITY messaging type to use auto-selected template
         const forceUtilityMode = rawEnvelopeWrapper === 'template' || !!targetEnvelopeTemplateName;
 
@@ -785,9 +825,16 @@ export async function POST(request: NextRequest) {
                         const matchesRequestedButtons = (template: Record<string, unknown>) => {
                             return templateMatchesRequestedButtons(template, requestedButtons);
                         };
+                        const matchesRequestedMedia = (template: Record<string, unknown>) => {
+                            const mediaHeaderType = getTemplateMediaHeaderType(template);
+                            return templateMediaHeader
+                                ? mediaHeaderType === 'image'
+                                : mediaHeaderType === null;
+                        };
 
                         const supportTeamTemplate = sendableTemplates.find((template) => {
                             return (
+                                matchesRequestedMedia(template) &&
                                 isSupportTeamTemplate(template) &&
                                 countPlaceholders(template) === 2 &&
                                 matchesRequestedButtons(template)
@@ -795,15 +842,15 @@ export async function POST(request: NextRequest) {
                         });
 
                         const twoPlaceholderTemplate = sendableTemplates.find((template) => {
-                            return countPlaceholders(template) === 2 && matchesRequestedButtons(template);
+                            return matchesRequestedMedia(template) && countPlaceholders(template) === 2 && matchesRequestedButtons(template);
                         });
 
                         const anyApprovedWithPlaceholder = sendableTemplates.find((template) => {
-                            return hasEditablePlaceholder(template) && matchesRequestedButtons(template);
+                            return matchesRequestedMedia(template) && hasEditablePlaceholder(template) && matchesRequestedButtons(template);
                         });
 
                         const onePlaceholderTemplate = sendableTemplates.find((template) => {
-                            return countPlaceholders(template) === 1 && matchesRequestedButtons(template);
+                            return matchesRequestedMedia(template) && countPlaceholders(template) === 1 && matchesRequestedButtons(template);
                         });
 
                         const exactEnvelopeTemplate = targetEnvelopeTemplateName
@@ -812,6 +859,7 @@ export async function POST(request: NextRequest) {
                                     typeof (t as any).name === 'string' &&
                                     (t as any).name === targetEnvelopeTemplateName;
                                 if (!nameMatches) return false;
+                                if (!matchesRequestedMedia(t)) return false;
                                 if (!requestedExactTemplateLanguage) return true;
                                 const templateLanguage = extractTemplateLanguageCode(t);
                                 return !templateLanguage || templateLanguage === requestedExactTemplateLanguage;
@@ -819,8 +867,11 @@ export async function POST(request: NextRequest) {
                             : undefined;
 
                         if (requestedExactTemplateName && !exactEnvelopeTemplate) {
+                            const expectedTemplateName = templateMediaHeader
+                                ? getMediaTemplateName(requestedExactTemplateName, 'image')
+                                : requestedExactTemplateName;
                             const statuses = utilityTemplates
-                                .filter((template) => (template as any).name === requestedExactTemplateName)
+                                .filter((template) => (template as any).name === expectedTemplateName)
                                 .map((template) => {
                                     const status = normalizeTemplateStatus(template.status) || 'UNKNOWN';
                                     const language = extractTemplateLanguageCode(template) || 'unknown';
@@ -828,8 +879,8 @@ export async function POST(request: NextRequest) {
                                 })
                                 .join(', ');
                             utilityTemplateBootstrapError = statuses
-                                ? `Selected template '${requestedExactTemplateName}' is not approved/active for this page. Existing statuses: ${statuses}`
-                                : `Selected template '${requestedExactTemplateName}' was not found on this page.`;
+                                ? `Selected template '${expectedTemplateName}' is not approved/active for this page. Existing statuses: ${statuses}`
+                                : `Selected template '${expectedTemplateName}' was not found on this page.`;
                             return false;
                         }
 
@@ -854,11 +905,14 @@ export async function POST(request: NextRequest) {
                                     requestedButtons.length > 0
                                         ? ' with matching buttons'
                                         : ' without buttons';
+                                const mediaRequirement = templateMediaHeader
+                                    ? ' with an image header'
+                                    : ' without an image header';
                                 const bodyRequirement = requiresSupportTeamTemplate
                                     ? ' and 2-part support-team body'
                                     : ' and {{1}} placeholder';
                                 utilityTemplateBootstrapError =
-                                    `No approved utility template${buttonRequirement}${bodyRequirement} found. Existing statuses: ${statuses}`;
+                                    `No approved utility template${buttonRequirement}${mediaRequirement}${bodyRequirement} found. Existing statuses: ${statuses}`;
                                 return false;
                             }
 
@@ -1118,7 +1172,8 @@ export async function POST(request: NextRequest) {
                         msgType === 'UTILITY' ? utilityTemplateName : undefined,
                         utilityTemplateLanguage,
                         utilityBodyParameters,
-                        responseButtons
+                        responseButtons,
+                        msgType === 'UTILITY' ? templateMediaHeader : undefined
                     );
                     console.log(`✅ Successfully sent message to contact ${contact.id} (PSID: ${contact.psid})`);
 

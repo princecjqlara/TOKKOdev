@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { sendMessage } from '../facebook';
+import { sendMessage, sendUtilityMessage } from '../facebook';
 
 function createJsonResponse(ok: boolean, payload: unknown, status: number = 200, statusText: string = 'OK') {
     return {
@@ -184,6 +184,51 @@ describe('sendMessage', () => {
         expect(components[0].parameters[0].text).toBe('Your order is ready');
     });
 
+    it('sends UTILITY template with dynamic image header and body text', async () => {
+        const fetchMock = vi
+            .fn()
+            .mockResolvedValue(createJsonResponse(true, { message_id: 'mid.media' }));
+        vi.stubGlobal('fetch', fetchMock);
+
+        await sendMessage(
+            'page_1',
+            'token_1',
+            'psid_1',
+            'Your appointment is confirmed',
+            'UTILITY',
+            'idle_salon_image_update_v2',
+            'en_US',
+            ['Your appointment is confirmed'],
+            undefined,
+            { type: 'image', url: 'https://example.com/updated-photo.jpg' }
+        );
+
+        const [, requestInit] = fetchMock.mock.calls[0];
+        const payload = JSON.parse((requestInit as RequestInit).body as string);
+        expect(payload.messaging_type).toBe('UTILITY');
+        expect(payload.message.template.name).toBe('idle_salon_image_update_v2');
+        expect(payload.message.template.components).toEqual([
+            {
+                type: 'header',
+                parameters: [
+                    {
+                        type: 'image',
+                        url: 'https://example.com/updated-photo.jpg'
+                    }
+                ]
+            },
+            {
+                type: 'body',
+                parameters: [
+                    {
+                        type: 'text',
+                        text: 'Your appointment is confirmed'
+                    }
+                ]
+            }
+        ]);
+    });
+
     it('does not include buttons for HUMAN_AGENT messages', async () => {
         const fetchMock = vi
             .fn()
@@ -215,4 +260,37 @@ describe('sendMessage', () => {
         expect(payload.message.template).toBeUndefined();
     });
 
+});
+
+describe('sendUtilityMessage', () => {
+    it('sends template media header when provided', async () => {
+        const fetchMock = vi
+            .fn()
+            .mockResolvedValue(createJsonResponse(true, { message_id: 'mid.utility.media', recipient_id: 'psid_1' }));
+        vi.stubGlobal('fetch', fetchMock);
+
+        await sendUtilityMessage(
+            'page_1',
+            'token_1',
+            'psid_1',
+            'idle_salon_image_update_v2',
+            'en_US',
+            ['Your appointment moved to 4 PM'],
+            { type: 'image', url: 'https://example.com/changed-photo.png' }
+        );
+
+        const [requestUrl, requestInit] = fetchMock.mock.calls[0];
+        expect(requestUrl).toBe('https://graph.facebook.com/v21.0/page_1/messages?access_token=token_1');
+
+        const payload = JSON.parse((requestInit as RequestInit).body as string);
+        expect(payload.message.template.components[0]).toEqual({
+            type: 'header',
+            parameters: [
+                {
+                    type: 'image',
+                    url: 'https://example.com/changed-photo.png'
+                }
+            ]
+        });
+    });
 });

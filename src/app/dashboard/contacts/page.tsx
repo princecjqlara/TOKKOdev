@@ -16,7 +16,8 @@ import {
     Link2,
     Plus,
     Calendar,
-    Download
+    Download,
+    Image as ImageIcon
 } from 'lucide-react';
 import Pagination from '@/components/Pagination';
 import Modal from '@/components/Modal';
@@ -29,7 +30,8 @@ import {
 } from '@/lib/send-errors';
 import { createRequestGate } from '@/lib/request-gate';
 import { getSupabaseClient } from '@/lib/supabase';
-import { UTILITY_TEMPLATES } from '@/lib/facebook-templates';
+import { UTILITY_TEMPLATES, getBaseTemplateName, getMediaTemplateName } from '@/lib/facebook-templates';
+import type { TemplateMediaType } from '@/lib/facebook-templates';
 import { runContactSyncToCompletion } from '@/lib/contact-sync-client';
 
 // Map envelope wrapper values to template names
@@ -108,6 +110,25 @@ type BestTimeScheduleStatus = {
     allBestTimesSent: boolean;
 };
 
+const CONTACT_MEDIA_DRAFT_STORAGE_PREFIX = 'tokko:contact-bulk-media-draft:';
+const CAMPAIGN_MEDIA_STORAGE_PREFIX = 'tokko:campaign-media:';
+const MAX_LOCAL_MEDIA_BYTES = 3 * 1024 * 1024;
+
+type StoredCampaignMedia = {
+    url: string;
+    type?: TemplateMediaType;
+    templateName: string;
+    savedAt: string;
+};
+
+function getContactMediaDraftStorageKey(pageId: string) {
+    return `${CONTACT_MEDIA_DRAFT_STORAGE_PREFIX}${pageId}`;
+}
+
+function getCampaignMediaStorageKey(campaignId: string) {
+    return `${CAMPAIGN_MEDIA_STORAGE_PREFIX}${campaignId}`;
+}
+
 const DATE_PRESETS: Array<{ value: DatePreset; label: string }> = [
     { value: 'today', label: 'Today' },
     { value: 'yesterday', label: 'Yesterday' },
@@ -167,6 +188,8 @@ type AvailableTemplate = {
     language?: string;
     category?: string;
     bodyText?: string;
+    hasMediaHeader?: boolean;
+    mediaHeaderType?: TemplateMediaType | null;
 };
 
 const URL_SCHEME_REGEX = /^[a-z][a-z\d+\-.]*:/i;
@@ -311,6 +334,8 @@ export default function ContactsPage() {
     const [messagePart1, setMessagePart1] = useState('');
     const [messagePart2, setMessagePart2] = useState('');
     const [bulkDeliveryMode, setBulkDeliveryMode] = useState<BulkDeliveryMode>('now');
+    const [bulkMediaEnabled, setBulkMediaEnabled] = useState(false);
+    const [bulkMediaUrl, setBulkMediaUrl] = useState('');
     const [scheduledMessages, setScheduledMessages] = useState(['', '', '']);
     const [bestTimeCampaigns, setBestTimeCampaigns] = useState<BestTimeScheduledCampaign[]>([]);
     const [bestTimeScheduleStatus, setBestTimeScheduleStatus] = useState<BestTimeScheduleStatus | null>(null);
@@ -348,6 +373,8 @@ export default function ContactsPage() {
         actionLoading ||
         hasMessageButtonErrors ||
         dynamicModeMissingButton ||
+        (bulkMediaEnabled && bulkDeliveryMode !== 'now') ||
+        (bulkMediaEnabled && !bulkMediaUrl.trim()) ||
         (bulkDeliveryMode === 'best_time_next_day' ? !scheduledMessagesComplete : !messagePart1.trim());
     const realtimeRefreshTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
     const realtimeFallbackIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -388,6 +415,28 @@ export default function ContactsPage() {
     }, [selectedPageId, page, pageSize, search, selectedTagFilters, excludedTagFilters, dateFrom, dateTo, dateFilterMode]);
 
     useEffect(() => {
+        if (!selectedPageId) return;
+        const stored = window.localStorage.getItem(getContactMediaDraftStorageKey(selectedPageId));
+        if (!stored) {
+            setBulkMediaUrl('');
+            return;
+        }
+
+        try {
+            const parsed = JSON.parse(stored) as { url?: string; type?: TemplateMediaType };
+            setBulkMediaUrl(typeof parsed.url === 'string' ? parsed.url : '');
+        } catch {
+            setBulkMediaUrl(stored);
+        }
+    }, [selectedPageId]);
+
+    useEffect(() => {
+        if (bulkDeliveryMode === 'best_time_next_day') {
+            setBulkMediaEnabled(false);
+        }
+    }, [bulkDeliveryMode]);
+
+    useEffect(() => {
         if (selectedPageId) {
             const fetchTemplates = async () => {
                 try {
@@ -405,7 +454,8 @@ export default function ContactsPage() {
                     );
                     setAvailableTemplates(templates);
                     const approvedTemplates = templates.filter((template: AvailableTemplate) =>
-                        template.status === 'APPROVED' || template.status === 'ACTIVE'
+                        (template.status === 'APPROVED' || template.status === 'ACTIVE') &&
+                        template.hasMediaHeader !== true
                     );
                     setSelectedTemplateName((current) => {
                         if (current && approvedTemplates.some((template: AvailableTemplate) => template.name === current)) {
@@ -806,9 +856,25 @@ export default function ContactsPage() {
         setExcludedIds(new Set());
     };
 
+    const mediaAvailableForBulk = bulkDeliveryMode === 'now';
+    const mediaRequiredForBulk = bulkMediaEnabled && mediaAvailableForBulk;
+    const mediaTemplateRequiredForBulk = mediaRequiredForBulk;
+    const isApprovedTemplate = (template: AvailableTemplate) =>
+        template.status === 'APPROVED' || template.status === 'ACTIVE';
+    const findApprovedTemplate = (templateName: string, requireMedia: boolean = mediaTemplateRequiredForBulk) => {
+        const expectedName = requireMedia ? getMediaTemplateName(templateName, 'image') : getBaseTemplateName(templateName);
+        return availableTemplates.find((template) =>
+            isApprovedTemplate(template) &&
+            template.name === expectedName &&
+            (requireMedia ? template.mediaHeaderType === 'image' : !template.hasMediaHeader)
+        );
+    };
     const approvedTemplates = availableTemplates.filter(
-        (template) => template.status === 'APPROVED' || template.status === 'ACTIVE'
+        (template) => isApprovedTemplate(template) && (mediaTemplateRequiredForBulk ? template.mediaHeaderType === 'image' : !template.hasMediaHeader)
     );
+    const approvedImageTemplateCount = availableTemplates.filter(
+        (template) => isApprovedTemplate(template) && template.mediaHeaderType === 'image'
+    ).length;
     const normalizedTemplateSearch = templateSearch.trim().toLowerCase();
     const visibleApprovedTemplates = normalizedTemplateSearch
         ? approvedTemplates.filter((template) =>
@@ -857,6 +923,41 @@ export default function ContactsPage() {
         }
 
         setEnvelopeWrapper(value);
+    };
+
+    const updateBulkMediaUrl = (value: string) => {
+        setBulkMediaUrl(value);
+        if (!selectedPageId) return;
+
+        if (value.trim()) {
+            window.localStorage.setItem(
+                getContactMediaDraftStorageKey(selectedPageId),
+                JSON.stringify({ url: value, type: 'image' })
+            );
+        } else {
+            window.localStorage.removeItem(getContactMediaDraftStorageKey(selectedPageId));
+        }
+    };
+
+    const handleBulkMediaFile = (file: File | null) => {
+        if (!file) return;
+        if (!file.type.startsWith('image/')) {
+            alert('Please choose an image file.');
+            return;
+        }
+        if (file.size > MAX_LOCAL_MEDIA_BYTES) {
+            alert('Please choose a media file under 3 MB so it can fit in browser local storage.');
+            return;
+        }
+
+        const reader = new FileReader();
+        reader.onload = () => {
+            if (typeof reader.result === 'string') {
+                updateBulkMediaUrl(reader.result);
+            }
+        };
+        reader.onerror = () => alert('Could not read that media file.');
+        reader.readAsDataURL(file);
     };
 
     const getAvailableTemplateBody = (templateName: string | null): string | null => {
@@ -936,10 +1037,25 @@ export default function ContactsPage() {
             return;
         }
 
+        if (bulkMediaEnabled && bulkDeliveryMode === 'best_time_next_day') {
+            alert('Media attachments are not available for best-time scheduled bulk messages yet.');
+            return;
+        }
+
+        if (mediaRequiredForBulk && !bulkMediaUrl.trim()) {
+            alert('Add an image before sending.');
+            return;
+        }
+
         if (envelopeWrapper === 'template' && !selectedTemplateName) {
             alert('Pick an approved template before sending.');
             return;
         }
+
+        const normalizedBulkMediaUrl = bulkMediaUrl.trim();
+        const templateMediaHeader = mediaTemplateRequiredForBulk
+            ? { type: 'image' as const, url: normalizedBulkMediaUrl }
+            : undefined;
 
         setActionLoading(true);
         setBulkSendProgress(
@@ -1001,6 +1117,7 @@ export default function ContactsPage() {
                     envelopeWrapper,
                     templateName: envelopeWrapper === 'template' ? selectedTemplateName : undefined,
                     templateLanguage: envelopeWrapper === 'template' ? selectedTemplateLanguage : undefined,
+                    templateMediaHeader,
                     selection
                 })
             });
@@ -1045,6 +1162,18 @@ export default function ContactsPage() {
                 throw new Error('Tracked campaign was created without an ID.');
             }
 
+            if (templateMediaHeader && createData.campaign?.template_name) {
+                window.localStorage.setItem(
+                    getCampaignMediaStorageKey(campaignId),
+                    JSON.stringify({
+                        url: normalizedBulkMediaUrl,
+                        type: 'image',
+                        templateName: createData.campaign.template_name,
+                        savedAt: new Date().toISOString()
+                    } satisfies StoredCampaignMedia)
+                );
+            }
+
             let sendData = createData.send || {};
             let sent = Number(sendData.sent || 0);
             let failed = Number(sendData.failed || 0);
@@ -1064,7 +1193,8 @@ export default function ContactsPage() {
                     body: JSON.stringify({
                         sendBatchSize: 20,
                         delayBetweenBatchesMs: 50,
-                        maxProcessingTimeMs: 240000
+                        maxProcessingTimeMs: 240000,
+                        templateMediaHeader
                     })
                 });
 
@@ -1209,6 +1339,16 @@ export default function ContactsPage() {
             return;
         }
 
+        if (bulkMediaEnabled && bulkDeliveryMode !== 'now') {
+            alert('Media attachments are not available for scheduled bulk messages yet.');
+            return;
+        }
+
+        if (mediaRequiredForBulk && !bulkMediaUrl.trim()) {
+            alert('Add an image before sending.');
+            return;
+        }
+
         setActionLoading(true);
         try {
             setFailedContactIds([]);
@@ -1312,7 +1452,10 @@ export default function ContactsPage() {
                             buttonPlaceholderMode: false,
                             envelopeWrapper,
                             templateName: envelopeWrapper === 'template' ? selectedTemplateName : undefined,
-                            templateLanguage: envelopeWrapper === 'template' ? selectedTemplateLanguage : undefined
+                            templateLanguage: envelopeWrapper === 'template' ? selectedTemplateLanguage : undefined,
+                            templateMediaHeader: mediaTemplateRequiredForBulk
+                                ? { type: 'image' as const, url: bulkMediaUrl.trim() }
+                                : undefined
                         })
                     });
 
@@ -1701,6 +1844,16 @@ export default function ContactsPage() {
             return;
         }
 
+        if (bulkMediaEnabled && bulkDeliveryMode !== 'now') {
+            alert('Media attachments are not available for scheduled bulk messages yet.');
+            return;
+        }
+
+        if (mediaRequiredForBulk && !bulkMediaUrl.trim()) {
+            alert('Add an image before resending.');
+            return;
+        }
+
         setActionLoading(true);
         try {
             const response = await fetch('/api/facebook/messages/send', {
@@ -1717,7 +1870,10 @@ export default function ContactsPage() {
                     buttonPlaceholderMode: false,
                     envelopeWrapper,
                     templateName: envelopeWrapper === 'template' ? selectedTemplateName : undefined,
-                    templateLanguage: envelopeWrapper === 'template' ? selectedTemplateLanguage : undefined
+                    templateLanguage: envelopeWrapper === 'template' ? selectedTemplateLanguage : undefined,
+                    templateMediaHeader: mediaTemplateRequiredForBulk
+                        ? { type: 'image' as const, url: bulkMediaUrl.trim() }
+                        : undefined
                 })
             });
 
@@ -2620,6 +2776,7 @@ export default function ContactsPage() {
                                     type="button"
                                     onClick={() => {
                                         setBulkDeliveryMode('best_time_next_day');
+                                        setBulkMediaEnabled(false);
                                         resetBestTimeScheduleState();
                                     }}
                                     disabled={actionLoading}
@@ -2640,6 +2797,114 @@ export default function ContactsPage() {
                             )}
                         </div>
                     )}
+
+                    <div className="border border-gray-200 bg-gray-50 p-4 space-y-3">
+                        <div className="flex flex-col md:flex-row md:items-center justify-between gap-3">
+                            <div>
+                                <span className="font-bold uppercase text-sm flex items-center gap-1.5">
+                                    <ImageIcon className="w-4 h-4" />
+                                    Send Type
+                                </span>
+                                <p className="text-xs text-gray-500 font-mono mt-1">
+                                    Media is stored in this browser only. Photos use approved image header templates.
+                                </p>
+                            </div>
+                            <span className="text-xs font-mono text-gray-500">
+                                {approvedImageTemplateCount} approved photo templates
+                            </span>
+                        </div>
+
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                            <button
+                                type="button"
+                                onClick={() => {
+                                    setBulkMediaEnabled(false);
+                                    setSelectedTemplateName((current) => current ? getBaseTemplateName(current) : current);
+                                }}
+                                disabled={actionLoading}
+                                className={`border px-3 py-3 text-left ${
+                                    !bulkMediaEnabled
+                                        ? 'border-black bg-white'
+                                        : 'border-gray-300 bg-transparent'
+                                }`}
+                            >
+                                <p className="font-bold uppercase text-sm">Message only</p>
+                                <p className="text-xs text-gray-500 font-mono mt-1">Send text using the normal approved template set.</p>
+                            </button>
+                            <button
+                                type="button"
+                                onClick={() => {
+                                    setBulkMediaEnabled(true);
+                                    updateBulkMediaUrl('');
+                                    setSelectedTemplateName((current) => current ? getMediaTemplateName(current, 'image') : current);
+                                    if (envelopeWrapper === 'none') {
+                                        setEnvelopeWrapper('msg');
+                                    }
+                                }}
+                                disabled={!mediaAvailableForBulk || actionLoading}
+                                className={`border px-3 py-3 text-left ${
+                                    bulkMediaEnabled && mediaAvailableForBulk
+                                        ? 'border-black bg-white'
+                                        : 'border-gray-300 bg-transparent'
+                                }`}
+                            >
+                                <p className="font-bold uppercase text-sm">Photo as header</p>
+                                <p className="text-xs text-gray-500 font-mono mt-1">Attach an image and use approved image template copies.</p>
+                            </button>
+                        </div>
+
+                        {bulkMediaEnabled && mediaAvailableForBulk && (
+                            <div className="grid grid-cols-1 md:grid-cols-[1fr_auto] gap-3">
+                                <input
+                                    type="text"
+                                    value={bulkMediaUrl}
+                                    onChange={(event) => updateBulkMediaUrl(event.target.value)}
+                                    placeholder="Paste an image URL, or choose a small image file below"
+                                    className="input-wireframe"
+                                />
+                                <label className="btn-wireframe bg-white cursor-pointer justify-center">
+                                    <ImageIcon className="w-4 h-4 mr-2" />
+                                    Choose Photo
+                                    <input
+                                        type="file"
+                                        accept="image/*"
+                                        className="hidden"
+                                        onChange={(event) => handleBulkMediaFile(event.target.files?.[0] || null)}
+                                    />
+                                </label>
+                                {bulkMediaUrl && (
+                                    <div className="md:col-span-2 border border-gray-300 bg-white p-3 flex items-center gap-3">
+                                        <div className="w-16 h-16 border border-gray-300 bg-gray-100 overflow-hidden flex-shrink-0">
+                                            <img
+                                                src={bulkMediaUrl}
+                                                alt="Selected bulk media"
+                                                className="w-full h-full object-cover"
+                                            />
+                                        </div>
+                                        <div className="min-w-0 flex-1">
+                                            <p className="text-xs font-bold uppercase">Browser-local media ready</p>
+                                            <p className="text-xs font-mono text-gray-500 truncate">
+                                                Saved in localStorage, not the database.
+                                            </p>
+                                        </div>
+                                        <button
+                                            type="button"
+                                            onClick={() => updateBulkMediaUrl('')}
+                                            className="btn-wireframe text-xs h-8 px-3 bg-white"
+                                        >
+                                            Clear
+                                        </button>
+                                    </div>
+                                )}
+                            </div>
+                        )}
+
+                        {!mediaAvailableForBulk && (
+                            <p className="text-xs font-mono text-gray-500">
+                                Media is available for send-now bulk messages only. Scheduled media is not enabled yet.
+                            </p>
+                        )}
+                    </div>
 
                     <div className="p-4 border border-gray-200 bg-gray-50 rounded-md">
                         <label className="text-xs font-bold uppercase mb-2 block text-gray-700">Message Style (Envelope)</label>
@@ -2684,13 +2949,11 @@ export default function ContactsPage() {
                             <option value="template">Pick Approved Template...</option>
                             
                             {(() => {
-                                const isTemplateApproved = (wrapperKey: string) => {
+                                const isTemplateApprovedForWrapper = (wrapperKey: string) => {
                                     if (wrapperKey === 'template' || wrapperKey === 'none') return true;
                                     const templateName = ENVELOPE_TEMPLATE_MAP[wrapperKey];
                                     if (!templateName) return false;
-                                    return availableTemplates.some(t => 
-                                        t.name === templateName && (t.status === 'APPROVED' || t.status === 'ACTIVE')
-                                    );
+                                    return !!findApprovedTemplate(templateName, mediaTemplateRequiredForBulk);
                                 };
 
                                 const naturalConversations = [
@@ -2704,19 +2967,19 @@ export default function ContactsPage() {
                                     { value: 'casual_2', label: 'Casual (Just checking in)' },
                                     { value: 'casual_3', label: 'Casual (Quick reminder)' },
                                     { value: 'simple_1', label: 'Simple (Just a note)' }
-                                ].filter(t => isTemplateApproved(t.value));
+                                ].filter(t => isTemplateApprovedForWrapper(t.value));
                                 
                                 const legacyWrappers = [
                                     { value: 'msg', label: 'Standard Message ("Message from our team: [Your Text]")' },
                                     { value: 'notice', label: 'System Notice ("Important notice: [Your Text]")' },
                                     { value: 'alert', label: 'System Alert ("[Your Text]. This is an automated notification.")' }
-                                ].filter(t => isTemplateApproved(t.value));
+                                ].filter(t => isTemplateApprovedForWrapper(t.value));
                                 
                                 const actionButtons = [
                                     { value: 'btn_join', label: 'Join Meeting + [Join Meeting Button]' },
                                     { value: 'btn_details', label: 'Update Request + [View Details Button]' },
                                     { value: 'btn_book', label: 'New Notification + [Book Now Button]' }
-                                ].filter(t => isTemplateApproved(t.value));
+                                ].filter(t => isTemplateApprovedForWrapper(t.value));
                                 
                                 return (
                                     <>
@@ -2743,7 +3006,7 @@ export default function ContactsPage() {
                             })()}
                             
                             <option disabled>─────────────────────────────────</option>
-                            <option value="none">No Wrapper (Strict 24h limit applies!)</option>
+                            <option value="none" disabled={mediaTemplateRequiredForBulk}>No Wrapper (Strict 24h limit applies!)</option>
                         </select>
                         <p className="text-xs text-gray-500 font-mono">
                             {envelopeWrapper === 'none' 

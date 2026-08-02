@@ -6,6 +6,7 @@ import { normalizeContactName } from './contact-names';
 import { replaceTemplateVariables } from './placeholders';
 import { isRetryableSendError } from './send-errors';
 import { getSupabaseAdmin } from './supabase';
+import type { TemplateMediaType } from './facebook-templates';
 
 type SupabaseLike = ReturnType<typeof getSupabaseAdmin>;
 
@@ -22,6 +23,7 @@ type SendCampaignByIdOptions = {
     maxProcessingTimeMs?: number;
     sendRetryAttempts?: number;
     sendRetryDelayMs?: number;
+    templateMediaHeader?: { type: TemplateMediaType; url: string };
 };
 
 type SendCampaignByIdResult = {
@@ -44,7 +46,8 @@ export async function sendCampaignById({
     delayBetweenBatchesMs = 50,
     maxProcessingTimeMs = 240000,
     sendRetryAttempts = 2,
-    sendRetryDelayMs = 500
+    sendRetryDelayMs = 500,
+    templateMediaHeader
 }: SendCampaignByIdOptions): Promise<SendCampaignByIdResult> {
     try {
         const { data: campaign } = await supabase
@@ -383,7 +386,7 @@ export async function sendCampaignById({
 
                         for (let attempt = 0; attempt <= SEND_RETRY_ATTEMPTS; attempt++) {
                             try {
-                                await sendMessage(
+                                const sendArgs: Parameters<typeof sendMessage> = [
                                     page.fb_page_id,
                                     page.access_token,
                                     contact.psid,
@@ -392,7 +395,13 @@ export async function sendCampaignById({
                                     useTemplate ? campaign.template_name : undefined,
                                     useTemplate ? (campaign.template_language || 'en_US') : undefined,
                                     bodyParameters
-                                );
+                                ];
+
+                                if (useTemplate && templateMediaHeader) {
+                                    sendArgs.push(undefined, templateMediaHeader);
+                                }
+
+                                await sendMessage(...sendArgs);
                                 break;
                             } catch (sendError) {
                                 const errorMessage = (sendError as Error).message;

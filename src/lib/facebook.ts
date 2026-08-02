@@ -1,6 +1,7 @@
 import { FacebookPage, FacebookConversation } from '@/types';
 import { FACEBOOK_REAUTH_MESSAGE } from './facebook-permissions';
 import { isFacebookReauthMessage } from './facebook-errors';
+import type { TemplateMediaType } from './facebook-templates';
 
 // Re-export templates from dedicated file
 export { UTILITY_TEMPLATES } from './facebook-templates';
@@ -374,7 +375,8 @@ export async function sendMessage(
     templateName?: string,
     templateLanguage: string = DEFAULT_UTILITY_LANGUAGE,
     templateBodyParameters?: string[],
-    templateButtons?: Array<{ type: 'URL'; text: string; url: string } | { type: 'POSTBACK'; text: string; payload: string }>
+    templateButtons?: Array<{ type: 'URL'; text: string; url: string } | { type: 'POSTBACK'; text: string; payload: string }>,
+    templateMediaHeader?: { type: TemplateMediaType; url: string }
 ): Promise<{ message_id: string }> {
     // Build the request payload based on messaging type
     let bodyPayload: Record<string, unknown>;
@@ -417,31 +419,43 @@ export async function sendMessage(
             name: template,
             language: { code: templateLanguage }
         };
+        const components: Array<Record<string, unknown>> = [];
+
+        if (templateMediaHeader) {
+        components.push({
+            type: 'header',
+            parameters: [
+                {
+                    type: templateMediaHeader.type,
+                    url: templateMediaHeader.url
+                }
+            ]
+        });
+        }
 
         if (Array.isArray(templateBodyParameters) && templateBodyParameters.length > 0) {
             // Use explicitly provided body parameters (string array)
-            templatePayload.components = [
-                {
-                    type: 'body',
-                    parameters: templateBodyParameters.map((text) => ({
-                        type: 'text',
-                        text
-                    }))
-                }
-            ];
+            components.push({
+                type: 'body',
+                parameters: templateBodyParameters.map((text) => ({
+                    type: 'text',
+                    text
+                }))
+            });
         } else if (!Array.isArray(templateBodyParameters)) {
             // Fallback: use messageText as single parameter (only when no explicit params provided)
-            templatePayload.components = [
-                {
-                    type: 'body',
-                    parameters: [
-                        { type: 'text', text: messageText }
-                    ]
-                }
-            ];
+            components.push({
+                type: 'body',
+                parameters: [
+                    { type: 'text', text: messageText }
+                ]
+            });
         }
         // When templateBodyParameters is an empty array, omit components entirely
         // (template has no variable parameters)
+        if (components.length > 0) {
+            templatePayload.components = components;
+        }
 
         bodyPayload = {
             recipient: { id: recipientPsid },
@@ -516,6 +530,60 @@ export async function sendMessage(
         messageId: result.message_id
     });
     return result;
+}
+
+export async function sendMessengerMediaAttachment(
+    pageId: string,
+    pageAccessToken: string,
+    recipientPsid: string,
+    media: { type: TemplateMediaType; url: string },
+    messagingType: 'RESPONSE' | 'HUMAN_AGENT' = 'RESPONSE'
+): Promise<{ message_id: string; attachment_id?: string }> {
+    const bodyPayload: Record<string, unknown> = {
+        recipient: { id: recipientPsid },
+        message: {
+            attachment: {
+                type: media.type,
+                payload: {
+                    url: media.url,
+                    is_reusable: true
+                }
+            }
+        }
+    };
+
+    if (messagingType === 'HUMAN_AGENT') {
+        bodyPayload.messaging_type = 'MESSAGE_TAG';
+        bodyPayload.tag = 'HUMAN_AGENT';
+    } else {
+        bodyPayload.messaging_type = 'RESPONSE';
+    }
+
+    const response = await fetch(
+        `${FACEBOOK_GRAPH_URL}/me/messages?access_token=${pageAccessToken}`,
+        {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify(bodyPayload)
+        }
+    );
+
+    if (!response.ok) {
+        const errorData = await response.json().catch(() => ({ error: { message: 'Unknown error' } }));
+        const errorMessage = errorData.error?.message || `HTTP ${response.status}: ${response.statusText}`;
+        console.error('🔴 Facebook send media attachment error:', {
+            pageId,
+            recipientPsid,
+            status: response.status,
+            error: errorMessage,
+            fullError: errorData
+        });
+        throw new Error(errorMessage);
+    }
+
+    return await response.json();
 }
 
 // Message type for conversation history
@@ -640,10 +708,11 @@ export interface UtilityTemplate {
 export interface TemplateComponent {
     type: 'BODY' | 'HEADER' | 'BUTTONS';
     text?: string;
-    format?: 'TEXT' | 'IMAGE';
+    format?: 'TEXT' | 'IMAGE' | 'VIDEO';
     example?: {
         body_text?: string[][];
         header_text?: string[];
+        header_handle?: string[];
     };
     buttons?: TemplateButton[];
 }
@@ -764,10 +833,40 @@ export async function sendUtilityMessage(
     recipientPsid: string,
     templateName: string,
     languageCode: string,
-    bodyTexts: string | string[]
+    bodyTexts: string | string[],
+    mediaHeader?: { type: TemplateMediaType; url: string }
 ): Promise<{ message_id: string; recipient_id: string }> {
     const textsArray = Array.isArray(bodyTexts) ? bodyTexts : [bodyTexts];
     const parameters = textsArray.map((text) => ({ type: 'text' as const, text }));
+    const components: Array<Record<string, unknown>> = [];
+
+    if (mediaHeader) {
+        components.push({
+            type: 'header',
+            parameters: [
+                {
+                    type: mediaHeader.type,
+                    url: mediaHeader.url
+                }
+            ]
+        });
+    }
+
+    if (parameters.length > 0) {
+        components.push({
+            type: 'body',
+            parameters
+        });
+    }
+
+    const templatePayload: Record<string, unknown> = {
+        name: templateName,
+        language: { code: languageCode }
+    };
+
+    if (components.length > 0) {
+        templatePayload.components = components;
+    }
 
     const response = await fetch(
         `${FACEBOOK_GRAPH_URL}/${pageId}/messages?access_token=${pageAccessToken}`,
@@ -780,16 +879,7 @@ export async function sendUtilityMessage(
                 recipient: { id: recipientPsid },
                 messaging_type: 'UTILITY',
                 message: {
-                    template: {
-                        name: templateName,
-                        language: { code: languageCode },
-                        components: [
-                            {
-                                type: 'body',
-                                parameters
-                            }
-                        ]
-                    }
+                    template: templatePayload
                 }
             })
         }

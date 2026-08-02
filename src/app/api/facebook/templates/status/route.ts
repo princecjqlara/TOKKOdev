@@ -107,13 +107,25 @@ export async function GET(request: NextRequest) {
 
             // Extract body text from components
             let bodyText = '';
+            let hasMediaHeader = false;
+            let mediaHeaderType: 'image' | 'video' | null = null;
             if (Array.isArray(t.components)) {
-                const bodyComp = (t.components as Record<string, unknown>[]).find(
+                const components = t.components as Record<string, unknown>[];
+                const bodyComp = components.find(
                     (c) => c.type === 'BODY'
                 );
                 if (bodyComp && typeof bodyComp.text === 'string') {
                     bodyText = bodyComp.text;
                 }
+                const mediaHeader = components.find(
+                    (c) =>
+                        c.type === 'HEADER' &&
+                        (String(c.format || '').toUpperCase() === 'IMAGE' ||
+                            String(c.format || '').toUpperCase() === 'VIDEO')
+                );
+                hasMediaHeader = Boolean(mediaHeader);
+                const mediaFormat = String(mediaHeader?.format || '').toUpperCase();
+                mediaHeaderType = mediaFormat === 'VIDEO' ? 'video' : mediaFormat === 'IMAGE' ? 'image' : null;
             }
 
             return {
@@ -122,7 +134,9 @@ export async function GET(request: NextRequest) {
                 status,
                 category: typeof t.category === 'string' ? t.category.toUpperCase() : 'UNKNOWN',
                 language,
-                bodyText
+                bodyText,
+                hasMediaHeader,
+                mediaHeaderType
             };
         });
 
