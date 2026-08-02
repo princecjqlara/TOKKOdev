@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
     getCampaignMessagePreview,
     normalizeCampaignMessageParts,
+    parseCampaignMessageParts,
     parseCampaignMessageSequence,
     serializeCampaignMessageSequence
 } from '../campaign-message-sequence';
@@ -23,5 +24,18 @@ describe('campaign message sequences', () => {
 
         expect(parseCampaignMessageSequence(serialized)).toEqual(['Send this', 'Then this', 'Then this too']);
         expect(getCampaignMessagePreview(serialized)).toBe('1. Send this / 2. Then this / 3. Then this too');
+    });
+
+    it('round-trips ordered messages with per-message templates', () => {
+        const serialized = serializeCampaignMessageSequence([
+            { text: 'Send this', templateName: 'general_msg_v1', templateLanguage: 'en_US' },
+            { text: 'Then this', templateName: 'general_notice_v1', templateLanguage: 'en_US' }
+        ]);
+
+        expect(parseCampaignMessageParts(serialized)).toEqual([
+            { text: 'Send this', templateName: 'general_msg_v1', templateLanguage: 'en_US' },
+            { text: 'Then this', templateName: 'general_notice_v1', templateLanguage: 'en_US' }
+        ]);
+        expect(parseCampaignMessageSequence(serialized)).toEqual(['Send this', 'Then this']);
     });
 });

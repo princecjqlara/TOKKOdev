@@ -1,4 +1,4 @@
-import { sendMessage } from './facebook';
+import { sendMessage, sendMessengerMediaAttachment } from './facebook';
 import { ContactRecord, replaceTemplateVariables } from './placeholders';
 
 const HUMAN_AGENT_WINDOW_MS = 7 * 24 * 60 * 60 * 1000;
@@ -6,10 +6,13 @@ const MAX_FOLLOW_UP_STEPS = 10;
 const MAX_STEP_DELAY_MINUTES = 10080;
 
 export type WorkflowReplyAction = 'stop' | 'reset' | 'continue';
+export type WorkflowAutomationMediaType = 'image' | 'video';
 
 export type WorkflowAutomationStep = {
     message_text: string;
     delay_minutes: number;
+    media_type?: WorkflowAutomationMediaType | null;
+    media_url?: string | null;
 };
 
 export type WorkflowAutomationRecord = {
@@ -120,6 +123,14 @@ function normalizeStepDelay(value: unknown): number {
     return Math.min(MAX_STEP_DELAY_MINUTES, Math.max(0, Math.round(numericValue)));
 }
 
+function normalizeStepMediaType(value: unknown): WorkflowAutomationMediaType | null {
+    return value === 'image' || value === 'video' ? value : null;
+}
+
+function normalizeStepMediaUrl(value: unknown): string | null {
+    return typeof value === 'string' && value.trim() ? value.trim() : null;
+}
+
 export function normalizeWorkflowSteps(
     steps: unknown,
     fallbackMessageText?: string | null,
@@ -134,9 +145,15 @@ export function normalizeWorkflowSteps(
                 : typeof step.messageText === 'string'
                     ? step.messageText.trim()
                     : '',
-            delay_minutes: normalizeStepDelay(step.delay_minutes ?? step.delayMinutes)
+            delay_minutes: normalizeStepDelay(step.delay_minutes ?? step.delayMinutes),
+            media_type: normalizeStepMediaType(step.media_type ?? step.mediaType),
+            media_url: normalizeStepMediaUrl(step.media_url ?? step.mediaUrl)
         }))
-        .filter((step) => step.message_text.length > 0)
+        .filter((step) => step.message_text.length > 0 || Boolean(step.media_url))
+        .map((step) => ({
+            ...step,
+            media_type: step.media_url ? (step.media_type || 'image') : null
+        }))
         .slice(0, MAX_FOLLOW_UP_STEPS);
 
     if (normalized.length > 0) {
@@ -150,7 +167,9 @@ export function normalizeWorkflowSteps(
 
     return [{
         message_text: fallbackText,
-        delay_minutes: normalizeStepDelay(fallbackDelayMinutes)
+        delay_minutes: normalizeStepDelay(fallbackDelayMinutes),
+        media_type: null,
+        media_url: null
     }];
 }
 
@@ -467,26 +486,45 @@ export async function processDueFollowUpAutomationSteps(params: {
                 continue;
             }
 
-            const messageToSend = replaceTemplateVariables(step.message_text, {
+            const placeholderContact = {
                 id: contact.id,
                 psid: contact.psid,
                 page_id: contact.page_id,
                 name: contact.name || null,
                 last_interaction_at: contact.last_interaction_at || null
-            }).trim();
+            };
+            const messageToSend = replaceTemplateVariables(step.message_text, placeholderContact).trim();
+            const mediaUrl = step.media_url
+                ? replaceTemplateVariables(step.media_url, placeholderContact).trim()
+                : '';
 
-            if (!messageToSend) {
+            if (!messageToSend && !mediaUrl) {
                 result.skipped += 1;
                 continue;
             }
 
-            await sendMessage(
-                page.fb_page_id,
-                page.access_token,
-                contact.psid,
-                messageToSend,
-                'HUMAN_AGENT'
-            );
+            if (messageToSend) {
+                await sendMessage(
+                    page.fb_page_id,
+                    page.access_token,
+                    contact.psid,
+                    messageToSend,
+                    'HUMAN_AGENT'
+                );
+            }
+
+            if (mediaUrl) {
+                await sendMessengerMediaAttachment(
+                    page.fb_page_id,
+                    page.access_token,
+                    contact.psid,
+                    {
+                        type: step.media_type || 'image',
+                        url: mediaUrl
+                    },
+                    'HUMAN_AGENT'
+                );
+            }
 
             const nextStepIndex = stepIndex + 1;
             const nextStep = automation.steps[nextStepIndex];

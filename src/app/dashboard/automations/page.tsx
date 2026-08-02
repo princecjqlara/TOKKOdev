@@ -12,7 +12,9 @@ import {
     Trash2,
     Workflow,
     Plus,
-    X
+    X,
+    Image as ImageIcon,
+    Video
 } from 'lucide-react';
 
 type PageOption = {
@@ -37,10 +39,13 @@ type WorkflowAutomation = {
 };
 
 type ReplyAction = 'stop' | 'reset' | 'continue';
+type AutomationMediaType = 'image' | 'video';
 
 type AutomationStep = {
     message_text: string;
     delay_minutes: number;
+    media_type?: AutomationMediaType | null;
+    media_url?: string | null;
 };
 
 type AutomationForm = {
@@ -58,16 +63,24 @@ const emptyForm: AutomationForm = {
     steps: [
         {
             message_text: 'Hi {{first_name}}, just following up on your inquiry. Are you still interested?',
-            delay_minutes: 60
+            delay_minutes: 60,
+            media_type: null,
+            media_url: null
         },
         {
             message_text: 'Hi {{first_name}}, we still have slots available today. Would you like us to reserve one?',
-            delay_minutes: 1440
+            delay_minutes: 1440,
+            media_type: null,
+            media_url: null
         }
     ],
     reply_action: 'stop',
     page_stop_code: '#stopauto'
 };
+
+function normalizeMediaType(value: unknown): AutomationMediaType | null {
+    return value === 'image' || value === 'video' ? value : null;
+}
 
 function normalizeSteps(value: unknown, fallbackMessageText?: string, fallbackDelayMinutes?: number): AutomationStep[] {
     const steps = Array.isArray(value)
@@ -79,22 +92,32 @@ function normalizeSteps(value: unknown, fallbackMessageText?: string, fallbackDe
                     : typeof step.messageText === 'string'
                         ? step.messageText
                         : '',
-                delay_minutes: Number(step.delay_minutes ?? step.delayMinutes ?? 0)
+                delay_minutes: Number(step.delay_minutes ?? step.delayMinutes ?? 0),
+                media_type: normalizeMediaType(step.media_type ?? step.mediaType),
+                media_url: typeof step.media_url === 'string'
+                    ? step.media_url
+                    : typeof step.mediaUrl === 'string'
+                        ? step.mediaUrl
+                        : ''
             }))
-            .filter((step) => step.message_text.trim())
+            .filter((step) => step.message_text.trim() || step.media_url.trim())
         : [];
 
     if (steps.length > 0) {
         return steps.slice(0, 10).map((step) => ({
             message_text: step.message_text,
-            delay_minutes: Math.min(10080, Math.max(0, Math.round(Number.isFinite(step.delay_minutes) ? step.delay_minutes : 0)))
+            delay_minutes: Math.min(10080, Math.max(0, Math.round(Number.isFinite(step.delay_minutes) ? step.delay_minutes : 0))),
+            media_type: step.media_url.trim() ? (step.media_type || 'image') : null,
+            media_url: step.media_url.trim() || null
         }));
     }
 
     if (fallbackMessageText?.trim()) {
         return [{
             message_text: fallbackMessageText,
-            delay_minutes: Math.min(10080, Math.max(0, Math.round(fallbackDelayMinutes || 0)))
+            delay_minutes: Math.min(10080, Math.max(0, Math.round(fallbackDelayMinutes || 0))),
+            media_type: null,
+            media_url: null
         }];
     }
 
@@ -343,7 +366,12 @@ export default function AutomationsPage() {
             ...current,
             steps: [
                 ...current.steps,
-                { message_text: 'Hi {{first_name}}, following up again. Let us know if you want help.', delay_minutes: 1440 }
+                {
+                    message_text: 'Hi {{first_name}}, following up again. Let us know if you want help.',
+                    delay_minutes: 1440,
+                    media_type: null,
+                    media_url: null
+                }
             ].slice(0, 10)
         }));
     };
@@ -357,7 +385,7 @@ export default function AutomationsPage() {
         }));
     };
 
-    const hasValidStep = form.steps.some((step) => step.message_text.trim());
+    const hasValidStep = form.steps.some((step) => step.message_text.trim() || step.media_url?.trim());
 
     return (
         <div className="max-w-6xl mx-auto">
@@ -537,6 +565,51 @@ export default function AutomationsPage() {
                                                         </button>
                                                     ))}
                                                 </div>
+                                            </div>
+                                            <div>
+                                                <label className="font-mono text-[10px] font-bold uppercase text-gray-500 mb-1 block">Media</label>
+                                                <div className="grid grid-cols-3 gap-2 mb-2">
+                                                    <button
+                                                        type="button"
+                                                        onClick={() => updateStep(index, { media_type: null, media_url: null })}
+                                                        className={`border border-black px-2 py-2 text-[11px] font-bold uppercase ${
+                                                            !step.media_type ? 'bg-black text-white' : 'bg-white hover:bg-[#f5f5f5]'
+                                                        }`}
+                                                    >
+                                                        None
+                                                    </button>
+                                                    <button
+                                                        type="button"
+                                                        onClick={() => updateStep(index, { media_type: 'image', media_url: step.media_url || '' })}
+                                                        className={`border border-black px-2 py-2 text-[11px] font-bold uppercase flex items-center justify-center gap-1 ${
+                                                            step.media_type === 'image' ? 'bg-black text-white' : 'bg-white hover:bg-[#f5f5f5]'
+                                                        }`}
+                                                    >
+                                                        <ImageIcon className="w-3 h-3" />
+                                                        Photo
+                                                    </button>
+                                                    <button
+                                                        type="button"
+                                                        onClick={() => updateStep(index, { media_type: 'video', media_url: step.media_url || '' })}
+                                                        className={`border border-black px-2 py-2 text-[11px] font-bold uppercase flex items-center justify-center gap-1 ${
+                                                            step.media_type === 'video' ? 'bg-black text-white' : 'bg-white hover:bg-[#f5f5f5]'
+                                                        }`}
+                                                    >
+                                                        <Video className="w-3 h-3" />
+                                                        Video
+                                                    </button>
+                                                </div>
+                                                {step.media_type && (
+                                                    <input
+                                                        type="url"
+                                                        value={step.media_url || ''}
+                                                        onChange={(event) => updateStep(index, { media_url: event.target.value })}
+                                                        className="input-wireframe w-full text-sm"
+                                                        placeholder={step.media_type === 'image'
+                                                            ? 'https://example.com/photo.jpg'
+                                                            : 'https://example.com/video.mp4'}
+                                                    />
+                                                )}
                                             </div>
                                         </div>
                                     </div>

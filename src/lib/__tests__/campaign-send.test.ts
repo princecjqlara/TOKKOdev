@@ -219,6 +219,54 @@ describe('sendCampaignById', () => {
         );
     });
 
+    it('uses per-message templates when sending multiple campaign parts', async () => {
+        const supabase = createSupabaseMock('draft', {
+            messageText: serializeCampaignMessageSequence([
+                { text: 'First message', templateName: 'general_msg_v1', templateLanguage: 'en_US' },
+                { text: 'Second message', templateName: 'general_notice_v1', templateLanguage: 'en_US' }
+            ]),
+            recipients: [{
+                id: 'recipient_1',
+                contact_id: 'contact_1',
+                contacts: {
+                    psid: 'psid_1',
+                    name: 'Alex'
+                }
+            }]
+        });
+        vi.mocked(sendMessage).mockResolvedValue({ message_id: 'mid_1' });
+
+        const result = await sendCampaignById({
+            campaignId: 'campaign_1',
+            supabase: supabase as never
+        });
+
+        expect(result.status).toBe(200);
+        expect(sendMessage).toHaveBeenCalledTimes(2);
+        expect(sendMessage).toHaveBeenNthCalledWith(
+            1,
+            'fb_page_1',
+            'page_token',
+            'psid_1',
+            'First message',
+            'UTILITY',
+            'general_msg_v1',
+            'en_US',
+            ['First message']
+        );
+        expect(sendMessage).toHaveBeenNthCalledWith(
+            2,
+            'fb_page_1',
+            'page_token',
+            'psid_1',
+            'Second message',
+            'UTILITY',
+            'general_notice_v1',
+            'en_US',
+            ['Second message']
+        );
+    });
+
     it('retries transient send failures before marking a recipient failed', async () => {
         const supabase = createSupabaseMock('draft', {
             recipients: [{

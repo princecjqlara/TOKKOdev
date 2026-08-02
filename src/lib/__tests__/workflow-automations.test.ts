@@ -1,11 +1,13 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const mocks = vi.hoisted(() => ({
-    sendMessage: vi.fn()
+    sendMessage: vi.fn(),
+    sendMessengerMediaAttachment: vi.fn()
 }));
 
 vi.mock('../facebook', () => ({
-    sendMessage: mocks.sendMessage
+    sendMessage: mocks.sendMessage,
+    sendMessengerMediaAttachment: mocks.sendMessengerMediaAttachment
 }));
 
 import {
@@ -115,7 +117,9 @@ const automation = {
 describe('workflow automations', () => {
     beforeEach(() => {
         mocks.sendMessage.mockReset();
+        mocks.sendMessengerMediaAttachment.mockReset();
         mocks.sendMessage.mockResolvedValue({ message_id: 'mid_1' });
+        mocks.sendMessengerMediaAttachment.mockResolvedValue({ message_id: 'mid_media_1' });
     });
 
     it('normalizes codes before matching', () => {
@@ -235,6 +239,112 @@ describe('workflow automations', () => {
             current_step_index: 1,
             next_step_at: '2026-07-29T03:30:00.000Z'
         });
+    });
+
+    it('sends follow-up step media as a human-agent attachment after text', async () => {
+        const { supabase, stateUpdates } = createWorkflowSupabaseMock({
+            states: [{
+                id: 'state_1',
+                automation_id: 'automation_1',
+                contact_id: 'contact_1',
+                status: 'active',
+                current_step_index: 0,
+                next_step_at: '2026-07-29T02:30:00.000Z',
+                workflow_automations: {
+                    ...automation,
+                    steps: [{
+                        message_text: 'Hi {{first_name}}, here is the video.',
+                        delay_minutes: 30,
+                        media_type: 'video',
+                        media_url: 'https://example.com/{{first_name}}-tour.mp4'
+                    }],
+                    pages: { fb_page_id: 'fb_page_1', access_token: 'token_1' }
+                },
+                contacts: {
+                    id: 'contact_1',
+                    page_id: 'page_1',
+                    psid: 'psid_1',
+                    name: 'Juan Dela Cruz',
+                    last_interaction_at: '2026-07-29T02:00:00.000Z'
+                }
+            }]
+        });
+
+        const result = await processDueFollowUpAutomationSteps({
+            supabase,
+            now: new Date('2026-07-29T02:30:00.000Z')
+        });
+
+        expect(result.sent).toBe(1);
+        expect(mocks.sendMessage).toHaveBeenCalledWith(
+            'fb_page_1',
+            'token_1',
+            'psid_1',
+            'Hi Juan, here is the video.',
+            'HUMAN_AGENT'
+        );
+        expect(mocks.sendMessengerMediaAttachment).toHaveBeenCalledWith(
+            'fb_page_1',
+            'token_1',
+            'psid_1',
+            {
+                type: 'video',
+                url: 'https://example.com/Juan-tour.mp4'
+            },
+            'HUMAN_AGENT'
+        );
+        expect(stateUpdates[0]).toMatchObject({
+            status: 'completed',
+            current_step_index: 1
+        });
+    });
+
+    it('allows a media-only follow-up step', async () => {
+        const { supabase } = createWorkflowSupabaseMock({
+            states: [{
+                id: 'state_1',
+                automation_id: 'automation_1',
+                contact_id: 'contact_1',
+                status: 'active',
+                current_step_index: 0,
+                next_step_at: '2026-07-29T02:30:00.000Z',
+                workflow_automations: {
+                    ...automation,
+                    steps: [{
+                        message_text: '',
+                        delay_minutes: 30,
+                        media_type: 'image',
+                        media_url: 'https://example.com/photo.jpg'
+                    }],
+                    pages: { fb_page_id: 'fb_page_1', access_token: 'token_1' }
+                },
+                contacts: {
+                    id: 'contact_1',
+                    page_id: 'page_1',
+                    psid: 'psid_1',
+                    name: 'Juan Dela Cruz',
+                    last_interaction_at: '2026-07-29T02:00:00.000Z'
+                }
+            }]
+        });
+
+        const result = await processDueFollowUpAutomationSteps({
+            supabase,
+            now: new Date('2026-07-29T02:30:00.000Z')
+        });
+
+        expect(result.sent).toBe(1);
+        expect(mocks.sendMessage).not.toHaveBeenCalled();
+        expect(mocks.sendMessengerMediaAttachment).toHaveBeenCalledWith(
+            'fb_page_1',
+            'token_1',
+            'psid_1',
+            {
+                type: 'image',
+                url: 'https://example.com/photo.jpg'
+            },
+            'HUMAN_AGENT'
+        );
     });
 
     it('stops automation for a contact when a page message exactly matches the stop code', async () => {

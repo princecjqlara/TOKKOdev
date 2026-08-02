@@ -122,6 +122,21 @@ function getEndOfLocalDate(dateValue: string): string | null {
     return endDate.toISOString();
 }
 
+function getTomorrowPhilippinesDateInputValue(now = new Date()): string {
+    const parts = new Intl.DateTimeFormat('en-CA', {
+        timeZone: 'Asia/Manila',
+        year: 'numeric',
+        month: '2-digit',
+        day: '2-digit'
+    }).formatToParts(now);
+    const values = Object.fromEntries(parts.map((part) => [part.type, part.value]));
+    const year = Number(values.year);
+    const month = Number(values.month);
+    const day = Number(values.day);
+
+    return new Date(Date.UTC(year, month - 1, day + 1)).toISOString().slice(0, 10);
+}
+
 function getCampaignTemplateBodyText(key: string): string | null {
     const templateName = CAMPAIGN_ENVELOPE_MAP[key];
     if (!templateName) return null;
@@ -154,6 +169,11 @@ type TemplateStatus = {
     language: string;
     hasMediaHeader?: boolean;
     mediaHeaderType?: TemplateMediaType | null;
+};
+
+type MessagePartTemplateSelection = {
+    templateName: string | null;
+    templateLanguage: string;
 };
 
 export default function CampaignsPage() {
@@ -204,6 +224,7 @@ export default function CampaignsPage() {
     const [isSelectAllMode, setIsSelectAllMode] = useState(false);
     const [deliveryMode, setDeliveryMode] = useState<'now' | 'schedule'>('now');
     const [scheduledAt, setScheduledAt] = useState('');
+    const [useBestTimeTomorrow, setUseBestTimeTomorrow] = useState(false);
     const [dailySendTime, setDailySendTime] = useState('');
     const [recurrence, setRecurrence] = useState<'none' | 'daily'>('none');
     const [recurrenceEndAt, setRecurrenceEndAt] = useState('');
@@ -222,6 +243,9 @@ export default function CampaignsPage() {
     const [campaignMediaEnabled, setCampaignMediaEnabled] = useState(false);
     const [campaignMediaUrl, setCampaignMediaUrl] = useState('');
     const [messageParts, setMessageParts] = useState<string[]>(['']);
+    const [messagePartTemplates, setMessagePartTemplates] = useState<MessagePartTemplateSelection[]>([
+        { templateName: null, templateLanguage: 'en_US' }
+    ]);
     const [submittingTemplates, setSubmittingTemplates] = useState(false);
     const [templateSubmitResults, setTemplateSubmitResults] = useState<{
         summary: { total: number; approved: number; pending: number; errors: number; alreadyExisted: number };
@@ -508,14 +532,51 @@ export default function CampaignsPage() {
         }
     };
 
+    const updateMessagePartTemplate = (index: number, templateName: string | null) => {
+        const template = templateName
+            ? availableTemplates.find(t => t.name === templateName)
+            : null;
+
+        setMessagePartTemplates((current) => {
+            const next = [...current];
+            while (next.length <= index) {
+                next.push({ templateName: null, templateLanguage: 'en_US' });
+            }
+            next[index] = {
+                templateName,
+                templateLanguage: template && typeof template.language === 'string'
+                    ? template.language
+                    : 'en_US'
+            };
+            return next;
+        });
+    };
+
+    const getMessagePartTemplate = (index: number): MessagePartTemplateSelection => {
+        const perPart = messagePartTemplates[index];
+        if (perPart?.templateName) {
+            return perPart;
+        }
+
+        return {
+            templateName: selectedTemplateName,
+            templateLanguage: selectedTemplateLanguage
+        };
+    };
+
     const addMessagePart = () => {
         setMessageParts((parts) => [...parts, '']);
+        setMessagePartTemplates((parts) => [...parts, { templateName: null, templateLanguage: 'en_US' }]);
     };
 
     const removeMessagePart = (index: number) => {
         setMessageParts((parts) => {
             const nextParts = parts.filter((_, partIndex) => partIndex !== index);
             return nextParts.length > 0 ? nextParts : [''];
+        });
+        setMessagePartTemplates((parts) => {
+            const nextParts = parts.filter((_, partIndex) => partIndex !== index);
+            return nextParts.length > 0 ? nextParts : [{ templateName: null, templateLanguage: 'en_US' }];
         });
     };
 
@@ -532,6 +593,7 @@ export default function CampaignsPage() {
         setIsSelectAllMode(false);
         setDeliveryMode('now');
         setScheduledAt('');
+        setUseBestTimeTomorrow(false);
         setDailySendTime('');
         setRecurrence('none');
         setRecurrenceEndAt('');
@@ -541,6 +603,7 @@ export default function CampaignsPage() {
         setExcludedAudienceTagIds(new Set());
         setSelectedTemplateName(null);
         setSelectedTemplateLanguage('en_US');
+        setMessagePartTemplates([{ templateName: null, templateLanguage: 'en_US' }]);
         setMessageMode('freeform');
         setCampaignMediaEnabled(false);
         if (selectedPageId) {
@@ -602,10 +665,17 @@ export default function CampaignsPage() {
         const hasRecipients = usesDynamicAudience
             ? true
             : (isSelectAllMode ? contactsTotal > 0 : selectedContactIds.size > 0);
-        const cleanedMessageParts = messageParts.map((part) => part.trim()).filter(Boolean);
+        const cleanedMessageParts = messageParts
+            .map((part, index) => ({
+                text: part.trim(),
+                template: getMessagePartTemplate(index)
+            }))
+            .filter((part) => part.text.length > 0);
         const useCampaignMedia = !isLoop && !useAiMessage && deliveryMode === 'now' && campaignMediaEnabled;
         const useTemplateMedia = useCampaignMedia;
         const normalizedCampaignMediaUrl = campaignMediaUrl.trim();
+        const usesBestTimeTomorrow = !isLoop && deliveryMode === 'schedule' && useBestTimeTomorrow;
+        const scheduledBestTimeDate = usesBestTimeTomorrow ? getTomorrowPhilippinesDateInputValue() : null;
         if (!campaignName.trim() || !hasRecipients) return;
 
         // For loop campaigns, need aiPrompt
@@ -613,19 +683,21 @@ export default function CampaignsPage() {
         // For regular campaigns without AI: need messageText
         if (isLoop && !aiPrompt.trim()) return;
         if (!isLoop && useAiMessage && !aiPrompt.trim()) return;
-        if (!isLoop && !useAiMessage && messageMode === 'template' && !selectedTemplateName) return;
+        if (!isLoop && !useAiMessage && messageMode === 'template' && cleanedMessageParts.some((part) => !part.template.templateName)) return;
         if (!isLoop && !useAiMessage && cleanedMessageParts.length === 0) return;
         if (useCampaignMedia && !normalizedCampaignMediaUrl) return;
         if (useCampaignMedia && messageMode === 'freeform' && freeformWrapper === 'none') return;
 
         const resolvedScheduledAt =
-            !isLoop && deliveryMode === 'schedule' && recurrence === 'daily'
+            usesBestTimeTomorrow
+                ? null
+                : !isLoop && deliveryMode === 'schedule' && recurrence === 'daily'
                 ? getNextDailyScheduledAt(dailySendTime)
                 : !isLoop && deliveryMode === 'schedule' && scheduledAt
                 ? new Date(scheduledAt).toISOString()
                 : null;
 
-        if (!isLoop && deliveryMode === 'schedule' && !resolvedScheduledAt) return;
+        if (!isLoop && deliveryMode === 'schedule' && !usesBestTimeTomorrow && !resolvedScheduledAt) return;
         if (usesDynamicAudience && deliveryMode !== 'schedule') return;
 
         setActionLoading(true);
@@ -659,21 +731,42 @@ export default function CampaignsPage() {
                 contactIds = collected;
             }
 
-            const useTemplateInPayload = !isLoop && !useAiMessage && messageMode === 'template' && selectedTemplateName;
+            const useTemplateInPayload = !isLoop && !useAiMessage && messageMode === 'template' && cleanedMessageParts.length > 0;
 
             let payloadTemplateName: string | undefined = undefined;
             let payloadTemplateLanguage: string | undefined = undefined;
+            let payloadMessageParts: Array<string | { text: string; templateName?: string; templateLanguage?: string }> = cleanedMessageParts.map((part) => part.text);
 
             if (!isLoop && !useAiMessage) {
-                if (useTemplateInPayload && selectedTemplateName) {
-                    const selectedTemplate = findApprovedTemplate(selectedTemplateName, useTemplateMedia);
-                    if (!selectedTemplate) {
-                        throw new Error(useTemplateMedia
-                            ? 'Selected template does not have an approved media copy yet.'
-                            : 'Selected template is not approved for message-only sending.');
+                if (useTemplateInPayload) {
+                    const resolvedParts = cleanedMessageParts.map((part, index) => {
+                        const templateName = part.template.templateName;
+                        if (!templateName) {
+                            throw new Error(`Message ${index + 1} needs a template.`);
+                        }
+
+                        const selectedTemplate = findApprovedTemplate(templateName, useTemplateMedia);
+                        if (!selectedTemplate) {
+                            throw new Error(useTemplateMedia
+                                ? `Message ${index + 1} template does not have an approved media copy yet.`
+                                : `Message ${index + 1} template is not approved for message-only sending.`);
+                        }
+
+                        return {
+                            text: part.text,
+                            templateName: selectedTemplate.name,
+                            templateLanguage: typeof selectedTemplate.language === 'string'
+                                ? selectedTemplate.language
+                                : part.template.templateLanguage
+                        };
+                    });
+
+                    payloadMessageParts = resolvedParts;
+                    const firstTemplate = resolvedParts[0];
+                    if (firstTemplate) {
+                        payloadTemplateName = firstTemplate.templateName;
+                        payloadTemplateLanguage = firstTemplate.templateLanguage;
                     }
-                    payloadTemplateName = selectedTemplate.name;
-                    payloadTemplateLanguage = typeof selectedTemplate.language === 'string' ? selectedTemplate.language : selectedTemplateLanguage;
                 } else if (messageMode === 'freeform') {
                     if (freeformWrapper !== 'none') {
                         // Map the wrapper choice to the exact template name
@@ -698,10 +791,12 @@ export default function CampaignsPage() {
                 body: JSON.stringify({
                     pageId: selectedPageId,
                     name: campaignName.trim(),
-                    messageText: (isLoop || useAiMessage) ? null : cleanedMessageParts[0],
-                    messageParts: (isLoop || useAiMessage) ? undefined : cleanedMessageParts,
+                    messageText: (isLoop || useAiMessage) ? null : cleanedMessageParts[0]?.text,
+                    messageParts: (isLoop || useAiMessage) ? undefined : payloadMessageParts,
                     contactIds,
                     scheduledAt: resolvedScheduledAt,
+                    useBestTime: usesBestTimeTomorrow,
+                    scheduledDate: scheduledBestTimeDate,
                     audienceMode: usesDynamicAudience ? 'dynamic' : 'specific',
                     audienceRules: usesDynamicAudience ? {
                         startDate: audienceStartDate || null,
@@ -713,9 +808,9 @@ export default function CampaignsPage() {
                     aiPrompt: (isLoop || useAiMessage) ? aiPrompt.trim() : null,
                     templateName: payloadTemplateName,
                     templateLanguage: payloadTemplateLanguage,
-                    recurrence: !isLoop && deliveryMode === 'schedule' ? recurrence : 'none',
+                    recurrence: !isLoop && deliveryMode === 'schedule' && !usesBestTimeTomorrow ? recurrence : 'none',
                     recurrenceEndAt:
-                        !isLoop && deliveryMode === 'schedule' && recurrence === 'daily' && recurrenceEndAt
+                        !isLoop && deliveryMode === 'schedule' && !usesBestTimeTomorrow && recurrence === 'daily' && recurrenceEndAt
                             ? getEndOfLocalDate(recurrenceEndAt)
                             : null
                 })
@@ -941,8 +1036,20 @@ export default function CampaignsPage() {
     const approvedImageTemplateCount = availableTemplates.filter(
         (template) => isTemplateApproved(template) && template.mediaHeaderType === 'image'
     ).length;
-    const selectedTemplateCanSendWithMedia =
-        selectedTemplateName ? !!findApprovedTemplate(selectedTemplateName, mediaTemplateRequiredForCampaign) : true;
+    const approvedTemplatesForCampaign = availableTemplates.filter(
+        (template) => isTemplateApproved(template) && (mediaTemplateRequiredForCampaign ? template.mediaHeaderType === 'image' : !template.hasMediaHeader)
+    );
+    const messagePartTemplateStatuses = messageParts.map((part, index) => {
+        if (!part.trim()) return { hasTemplate: true, isApproved: true };
+        const templateName = getMessagePartTemplate(index).templateName;
+        return {
+            hasTemplate: !!templateName,
+            isApproved: !!templateName && !!findApprovedTemplate(templateName, mediaTemplateRequiredForCampaign)
+        };
+    });
+    const hasTemplateForEveryMessagePart = messagePartTemplateStatuses.every((status) => status.hasTemplate);
+    const selectedMessagePartTemplatesCanSend = messagePartTemplateStatuses.every((status) => status.isApproved);
+    const scheduleNeedsSpecificTime = !isLoop && deliveryMode === 'schedule' && !useBestTimeTomorrow;
 
     return (
         <div className="p-6 md:p-8 max-w-[1400px] mx-auto fade-in">
@@ -1238,7 +1345,10 @@ export default function CampaignsPage() {
                                 <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
                                     <button
                                         type="button"
-                                        onClick={() => setDeliveryMode('now')}
+                                        onClick={() => {
+                                            setDeliveryMode('now');
+                                            setUseBestTimeTomorrow(false);
+                                        }}
                                         className={`border px-3 py-3 text-left transition-colors ${deliveryMode === 'now' ? 'border-black bg-white' : 'border-gray-300 bg-transparent'
                                             }`}
                                     >
@@ -1268,11 +1378,14 @@ export default function CampaignsPage() {
                                 <div className="space-y-3">
                                     <div>
                                         <label className="label-wireframe mb-2">Repeat</label>
-                                        <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
+                                        <div className="grid grid-cols-1 md:grid-cols-3 gap-2">
                                             <button
                                                 type="button"
-                                                onClick={() => setRecurrence('none')}
-                                                className={`border px-3 py-2 text-left transition-colors ${recurrence === 'none' ? 'border-black bg-white' : 'border-gray-300 bg-transparent'}`}
+                                                onClick={() => {
+                                                    setUseBestTimeTomorrow(false);
+                                                    setRecurrence('none');
+                                                }}
+                                                className={`border px-3 py-2 text-left transition-colors ${recurrence === 'none' && !useBestTimeTomorrow ? 'border-black bg-white' : 'border-gray-300 bg-transparent'}`}
                                             >
                                                 <p className="font-bold uppercase text-sm">One-time</p>
                                                 <p className="text-xs text-gray-500 font-mono mt-1">Send once at the scheduled time.</p>
@@ -1280,6 +1393,7 @@ export default function CampaignsPage() {
                                             <button
                                                 type="button"
                                                 onClick={() => {
+                                                    setUseBestTimeTomorrow(false);
                                                     if (!dailySendTime && scheduledAt.includes('T')) {
                                                         setDailySendTime(scheduledAt.split('T')[1]?.slice(0, 5) || '');
                                                     }
@@ -1290,26 +1404,52 @@ export default function CampaignsPage() {
                                                 <p className="font-bold uppercase text-sm">Repeat Daily</p>
                                                 <p className="text-xs text-gray-500 font-mono mt-1">Re-send every day at the same time.</p>
                                             </button>
+                                            <button
+                                                type="button"
+                                                onClick={() => {
+                                                    if (audienceMode === 'dynamic') return;
+                                                    setUseBestTimeTomorrow(true);
+                                                    setRecurrence('none');
+                                                    setScheduledAt('');
+                                                    setDailySendTime('');
+                                                }}
+                                                disabled={audienceMode === 'dynamic'}
+                                                className={`border px-3 py-2 text-left transition-colors ${
+                                                    useBestTimeTomorrow
+                                                        ? 'border-black bg-white'
+                                                        : 'border-gray-300 bg-transparent'
+                                                } ${audienceMode === 'dynamic' ? 'opacity-50 cursor-not-allowed' : ''}`}
+                                            >
+                                                <p className="font-bold uppercase text-sm">Tomorrow Best Time</p>
+                                                <p className="text-xs text-gray-500 font-mono mt-1">Use each contact&apos;s best hour tomorrow.</p>
+                                            </button>
                                         </div>
                                     </div>
-                                    <div>
-                                        <label className="label-wireframe">
-                                            {recurrence === 'daily' ? 'Daily Send Time' : 'Scheduled Time'}
-                                        </label>
-                                        <input
-                                            type={recurrence === 'daily' ? 'time' : 'datetime-local'}
-                                            value={recurrence === 'daily' ? dailySendTime : scheduledAt}
-                                            onChange={(e) => {
-                                                if (recurrence === 'daily') {
-                                                    setDailySendTime(e.target.value);
-                                                } else {
-                                                    setScheduledAt(e.target.value);
-                                                }
-                                            }}
-                                            className="input-wireframe"
-                                        />
-                                    </div>
-                                    {recurrence === 'daily' && (
+                                    {useBestTimeTomorrow ? (
+                                        <div className="border border-dashed border-black bg-white p-3">
+                                            <p className="text-xs font-bold uppercase">Scheduled Date</p>
+                                            <p className="text-sm font-mono mt-1">{getTomorrowPhilippinesDateInputValue()} Asia/Manila</p>
+                                        </div>
+                                    ) : (
+                                        <div>
+                                            <label className="label-wireframe">
+                                                {recurrence === 'daily' ? 'Daily Send Time' : 'Scheduled Time'}
+                                            </label>
+                                            <input
+                                                type={recurrence === 'daily' ? 'time' : 'datetime-local'}
+                                                value={recurrence === 'daily' ? dailySendTime : scheduledAt}
+                                                onChange={(e) => {
+                                                    if (recurrence === 'daily') {
+                                                        setDailySendTime(e.target.value);
+                                                    } else {
+                                                        setScheduledAt(e.target.value);
+                                                    }
+                                                }}
+                                                className="input-wireframe"
+                                            />
+                                        </div>
+                                    )}
+                                    {recurrence === 'daily' && !useBestTimeTomorrow && (
                                         <div>
                                             <label className="label-wireframe">Stop Repeating After (optional)</label>
                                             <input
@@ -1516,9 +1656,9 @@ export default function CampaignsPage() {
                                                         </button>
                                                     </div>
                                                 )}
-                                                {!selectedTemplateCanSendWithMedia && (
+                                                {messageMode === 'template' && !selectedMessagePartTemplatesCanSend && (
                                                     <p className="md:col-span-2 text-xs font-mono text-red-600">
-                                                        This selected template does not have a matching approved media copy yet.
+                                                        One or more selected message templates do not have a matching approved media copy yet.
                                                     </p>
                                                 )}
                                             </div>
@@ -1627,13 +1767,13 @@ export default function CampaignsPage() {
                                     {/* Template Picker (shown when template mode) */}
                                     {messageMode === 'template' && (
                                         <div className="border border-dashed border-black bg-white p-4 space-y-3">
-                                            <label className="label-wireframe mb-0">Select Template</label>
+                                            <label className="label-wireframe mb-0">Default Template</label>
                                             {templatesLoading ? (
                                                 <div className="flex items-center gap-2 text-xs font-mono text-gray-500">
                                                     <div className="animate-spin w-4 h-4 border-2 border-black border-t-transparent rounded-full" />
                                                     Loading templates...
                                                 </div>
-                                            ) : availableTemplates.filter(t => isTemplateApproved(t) && (mediaTemplateRequiredForCampaign ? t.mediaHeaderType === 'image' : !t.hasMediaHeader)).length === 0 ? (
+                                            ) : approvedTemplatesForCampaign.length === 0 ? (
                                                 <div className="text-xs font-mono text-red-600 bg-red-50 border border-red-200 p-3">
                                                     {mediaTemplateRequiredForCampaign
                                                         ? 'No approved media templates found for this page. Submit image copies and wait for approval first.'
@@ -1656,14 +1796,15 @@ export default function CampaignsPage() {
                                                         className="input-wireframe"
                                                     >
                                                         <option value="">-- Pick a template --</option>
-                                                        {availableTemplates
-                                                            .filter(t => isTemplateApproved(t) && (mediaTemplateRequiredForCampaign ? t.mediaHeaderType === 'image' : !t.hasMediaHeader))
-                                                            .map((tmpl) => (
+                                                        {approvedTemplatesForCampaign.map((tmpl) => (
                                                                 <option key={`${tmpl.name}-${tmpl.language}`} value={tmpl.name}>
                                                                     {tmpl.name.replace(/_/g, ' ')} ({tmpl.language}) — {tmpl.category}
                                                                 </option>
-                                                            ))}
+                                                        ))}
                                                     </select>
+                                                    <p className="text-xs text-gray-400 font-mono">
+                                                        Message rows use this template unless you pick a different one on that row.
+                                                    </p>
 
                                                     {selectedTemplateName && (
                                                         <div className="space-y-2">
@@ -1736,6 +1877,25 @@ export default function CampaignsPage() {
                                                         </button>
                                                     )}
                                                 </div>
+                                                {messageMode === 'template' && (
+                                                    <div className="mb-2">
+                                                        <label className="text-[10px] font-bold uppercase text-gray-500 mb-1 block">
+                                                            Template for Message {index + 1}
+                                                        </label>
+                                                        <select
+                                                            value={messagePartTemplates[index]?.templateName || selectedTemplateName || ''}
+                                                            onChange={(e) => updateMessagePartTemplate(index, e.target.value || null)}
+                                                            className="input-wireframe text-xs"
+                                                        >
+                                                            <option value="">-- Pick a template --</option>
+                                                            {approvedTemplatesForCampaign.map((tmpl) => (
+                                                                <option key={`${index}-${tmpl.name}-${tmpl.language}`} value={tmpl.name}>
+                                                                    {tmpl.name.replace(/_/g, ' ')} ({tmpl.language}) â€” {tmpl.category}
+                                                                </option>
+                                                            ))}
+                                                        </select>
+                                                    </div>
+                                                )}
                                                 <textarea
                                                     value={part}
                                                     onChange={(e) => updateMessagePart(index, e.target.value)}
@@ -1779,6 +1939,7 @@ export default function CampaignsPage() {
                                         onClick={() => {
                                             setAudienceMode('dynamic');
                                             setDeliveryMode('schedule');
+                                            setUseBestTimeTomorrow(false);
                                         }}
                                         className={`border px-3 py-3 text-left transition-colors ${audienceMode === 'dynamic' ? 'border-black bg-white' : 'border-gray-300 bg-transparent'
                                             }`}
@@ -1972,15 +2133,15 @@ export default function CampaignsPage() {
                             actionLoading ||
                             (isLoop && !aiPrompt.trim()) ||
                             (!isLoop && useAiMessage && !aiPrompt.trim()) ||
-                            (!isLoop && !useAiMessage && messageMode === 'template' && !selectedTemplateName) ||
+                            (!isLoop && !useAiMessage && messageMode === 'template' && !hasTemplateForEveryMessagePart) ||
                             (!isLoop && !useAiMessage && !messageParts.some((part) => part.trim())) ||
                             (!isLoop && !useAiMessage && campaignMediaEnabled && (!mediaAvailableForCampaign || !campaignMediaUrl.trim())) ||
                             (!isLoop && !useAiMessage && campaignMediaEnabled && messageMode === 'freeform' && freeformWrapper === 'none') ||
-                            (!isLoop && !useAiMessage && campaignMediaEnabled && messageMode === 'template' && !selectedTemplateCanSendWithMedia) ||
+                            (!isLoop && !useAiMessage && campaignMediaEnabled && messageMode === 'template' && !selectedMessagePartTemplatesCanSend) ||
                             ((isLoop || audienceMode === 'specific') &&
                                 ((!isSelectAllMode && selectedContactIds.size === 0) ||
                                     (isSelectAllMode && contactsTotal === 0))) ||
-                            (!isLoop && deliveryMode === 'schedule' && (recurrence === 'daily' ? !dailySendTime : !scheduledAt)) ||
+                            (scheduleNeedsSpecificTime && (recurrence === 'daily' ? !dailySendTime : !scheduledAt)) ||
                             (!isLoop && audienceMode === 'dynamic' && deliveryMode !== 'schedule')
                         }
                         className="btn-wireframe bg-black text-white hover:bg-gray-800"

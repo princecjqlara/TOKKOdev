@@ -130,6 +130,8 @@ export interface WorkflowAutomation {
   steps: Array<{
     message_text: string;
     delay_minutes: number;
+    media_type?: 'image' | 'video' | null;
+    media_url?: string | null;
   }>;
   reply_action: 'stop' | 'reset' | 'continue';
   page_stop_code: string | null;

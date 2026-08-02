@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { NextRequest } from 'next/server';
-import { parseCampaignMessageSequence } from '../../../lib/campaign-message-sequence';
+import { parseCampaignMessageParts, parseCampaignMessageSequence } from '../../../lib/campaign-message-sequence';
 
 const mocks = vi.hoisted(() => ({
     getServerSession: vi.fn(),
@@ -158,6 +158,31 @@ describe('POST /api/campaigns', () => {
             'Then this',
             'Then this too'
         ]);
+    });
+
+    it('stores per-message template selections in the message sequence', async () => {
+        const supabase = createSupabaseMock();
+        mocks.getSupabaseAdmin.mockReturnValue(supabase);
+
+        const response = await POST(createRequest({
+            pageId: 'page_1',
+            name: 'Multi-template follow-up',
+            messageParts: [
+                { text: 'Send this', templateName: 'general_msg_v1', templateLanguage: 'en_US' },
+                { text: 'Then this', templateName: 'general_notice_v1', templateLanguage: 'en_US' }
+            ],
+            contactIds: ['contact_1'],
+            templateName: 'general_msg_v1',
+            templateLanguage: 'en_US'
+        }));
+
+        expect(response.status).toBe(200);
+        const inserted = supabase.campaignsInsert.mock.calls[0][0];
+        expect(parseCampaignMessageParts(inserted.message_text)).toEqual([
+            { text: 'Send this', templateName: 'general_msg_v1', templateLanguage: 'en_US' },
+            { text: 'Then this', templateName: 'general_notice_v1', templateLanguage: 'en_US' }
+        ]);
+        expect(inserted.template_name).toBe('general_msg_v1');
     });
 
     it('schedules best-time recipients on the selected Philippine calendar date', async () => {

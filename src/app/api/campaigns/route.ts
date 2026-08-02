@@ -152,8 +152,8 @@ export async function POST(request: NextRequest) {
         const recurrence = rawRecurrence === 'daily' ? 'daily' : 'none';
         const recurrenceEndAt = recurrence === 'daily' ? normalizeScheduledAt(rawRecurrenceEndAt) : null;
         const messageParts = normalizeCampaignMessageParts(rawMessageParts);
-        const campaignMessageText = messageParts.length > 0
-            ? serializeCampaignMessageSequence(messageParts)
+        const campaignMessageText = Array.isArray(rawMessageParts) && messageParts.length > 0
+            ? serializeCampaignMessageSequence(rawMessageParts)
             : typeof messageText === 'string'
                 ? messageText
                 : '';

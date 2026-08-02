@@ -1,7 +1,7 @@
 import { generatePersonalizedMessage } from './ai';
-import { parseCampaignMessageSequence } from './campaign-message-sequence';
+import { parseCampaignMessageParts } from './campaign-message-sequence';
 import { getConversationIdForPsid, getConversationMessages, sendMessage, getPageTemplates, createUtilityTemplate, UTILITY_TEMPLATES } from './facebook';
-import { UTILITY_TEMPLATES as TEMPLATE_DEFS } from './facebook-templates';
+import { getBaseTemplateName, UTILITY_TEMPLATES as TEMPLATE_DEFS } from './facebook-templates';
 import { normalizeContactName } from './contact-names';
 import { replaceTemplateVariables } from './placeholders';
 import { isRetryableSendError } from './send-errors';
@@ -317,7 +317,7 @@ export async function sendCampaignById({
                 }
 
                 try {
-                    let messagesToSend = parseCampaignMessageSequence(campaign.message_text);
+                    let messagesToSend = parseCampaignMessageParts(campaign.message_text);
 
                     const normalizedContactName = normalizeContactName(contact.name);
                     const placeholderContact = {
@@ -349,32 +349,34 @@ export async function sendCampaignById({
                                 normalizedContactName || 'Friend',
                                 messages
                             );
-                            messagesToSend = [messageToSend];
+                            messagesToSend = [{ text: messageToSend }];
 
                             console.log(`🤖 AI generated message for ${contact.name || contact.psid}`);
                         } catch (aiError) {
                             console.warn(`⚠️ AI generation failed for ${contact.psid}, using fallback:`, (aiError as Error).message);
-                            messagesToSend = [replaceTemplateVariables(campaign.ai_prompt, placeholderContact)];
+                            messagesToSend = [{ text: replaceTemplateVariables(campaign.ai_prompt, placeholderContact) }];
                         }
                     } else {
-                        messagesToSend = messagesToSend.map((message) =>
-                            replaceTemplateVariables(message, placeholderContact)
-                        );
+                        messagesToSend = messagesToSend.map((message) => ({
+                            ...message,
+                            text: replaceTemplateVariables(message.text, placeholderContact)
+                        }));
                     }
 
                     if (messagesToSend.length === 0) {
                         throw new Error('No message content available');
                     }
 
-                    const useTemplate = !!(campaign.template_name);
-                    const messagingType = useTemplate ? 'UTILITY' : 'HUMAN_AGENT';
-
-                    // Build body parameters for UTILITY template messages.
-                    // Look up paramCount from template definitions to send correct number of params.
-                    const templateDef = useTemplate ? TEMPLATE_DEFS.find(t => t.name === campaign.template_name) : undefined;
-                    const paramCount = templateDef?.paramCount ?? 1;
-
-                    for (const messageToSend of messagesToSend) {
+                    for (const messagePart of messagesToSend) {
+                        const messageToSend = messagePart.text;
+                        const templateName = messagePart.templateName || campaign.template_name || undefined;
+                        const templateLanguage = messagePart.templateLanguage || campaign.template_language || 'en_US';
+                        const useTemplate = !!templateName;
+                        const messagingType = useTemplate ? 'UTILITY' : 'HUMAN_AGENT';
+                        const templateDef = useTemplate
+                            ? TEMPLATE_DEFS.find(t => t.name === getBaseTemplateName(templateName as string))
+                            : undefined;
+                        const paramCount = templateDef?.paramCount ?? 1;
                         let bodyParameters: string[] | undefined;
                         if (useTemplate) {
                             if (paramCount === 2) {
@@ -392,8 +394,8 @@ export async function sendCampaignById({
                                     contact.psid,
                                     messageToSend,
                                     messagingType,
-                                    useTemplate ? campaign.template_name : undefined,
-                                    useTemplate ? (campaign.template_language || 'en_US') : undefined,
+                                    templateName,
+                                    useTemplate ? templateLanguage : undefined,
                                     bodyParameters
                                 ];
 
