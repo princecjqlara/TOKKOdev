@@ -47,6 +47,7 @@ type StoredCampaignMedia = {
     type?: TemplateMediaType;
     templateName: string;
     savedAt: string;
+    mediaHeaders?: Array<{ url: string; type?: TemplateMediaType } | null>;
 };
 
 function getCampaignMediaStorageKey(campaignId: string) {
@@ -65,10 +66,19 @@ function readStoredCampaignMedia(campaignId: string): StoredCampaignMedia | null
 
     try {
         const parsed = JSON.parse(raw) as StoredCampaignMedia;
-        if (typeof parsed.url === 'string' && parsed.url.trim()) {
+        const url = typeof parsed.url === 'string' ? parsed.url.trim() : '';
+        const mediaHeaders = Array.isArray(parsed.mediaHeaders)
+            ? parsed.mediaHeaders.map((header) => {
+                const headerUrl = typeof header?.url === 'string' ? header.url.trim() : '';
+                return headerUrl ? { url: headerUrl, type: 'image' as const } : null;
+            })
+            : undefined;
+        if (url || mediaHeaders?.some(Boolean)) {
             return {
                 ...parsed,
-                type: 'image'
+                url,
+                type: 'image',
+                mediaHeaders
             };
         }
         return null;
@@ -243,6 +253,7 @@ export default function CampaignsPage() {
     const [campaignMediaEnabled, setCampaignMediaEnabled] = useState(false);
     const [campaignMediaUrl, setCampaignMediaUrl] = useState('');
     const [messageParts, setMessageParts] = useState<string[]>(['']);
+    const [messagePartMediaUrls, setMessagePartMediaUrls] = useState<string[]>(['']);
     const [messagePartTemplates, setMessagePartTemplates] = useState<MessagePartTemplateSelection[]>([
         { templateName: null, templateLanguage: 'en_US' }
     ]);
@@ -525,6 +536,38 @@ export default function CampaignsPage() {
         reader.readAsDataURL(file);
     };
 
+    const updateMessagePartMediaUrl = (index: number, value: string) => {
+        setMessagePartMediaUrls((urls) => {
+            const next = [...urls];
+            while (next.length <= index) {
+                next.push('');
+            }
+            next[index] = value;
+            return next;
+        });
+    };
+
+    const handleMessagePartMediaFile = (index: number, file: File | null) => {
+        if (!file) return;
+        if (!file.type.startsWith('image/')) {
+            alert('Please choose an image file.');
+            return;
+        }
+        if (file.size > MAX_LOCAL_MEDIA_BYTES) {
+            alert('Please choose a media file under 3 MB so it can fit in browser local storage.');
+            return;
+        }
+
+        const reader = new FileReader();
+        reader.onload = () => {
+            if (typeof reader.result === 'string') {
+                updateMessagePartMediaUrl(index, reader.result);
+            }
+        };
+        reader.onerror = () => alert('Could not read that media file.');
+        reader.readAsDataURL(file);
+    };
+
     const updateMessagePart = (index: number, value: string) => {
         setMessageParts((parts) => parts.map((part, partIndex) => partIndex === index ? value : part));
         if (index === 0) {
@@ -567,6 +610,7 @@ export default function CampaignsPage() {
     const addMessagePart = () => {
         setMessageParts((parts) => [...parts, '']);
         setMessagePartTemplates((parts) => [...parts, { templateName: null, templateLanguage: 'en_US' }]);
+        setMessagePartMediaUrls((urls) => [...urls, '']);
     };
 
     const removeMessagePart = (index: number) => {
@@ -578,12 +622,17 @@ export default function CampaignsPage() {
             const nextParts = parts.filter((_, partIndex) => partIndex !== index);
             return nextParts.length > 0 ? nextParts : [{ templateName: null, templateLanguage: 'en_US' }];
         });
+        setMessagePartMediaUrls((urls) => {
+            const nextUrls = urls.filter((_, partIndex) => partIndex !== index);
+            return nextUrls.length > 0 ? nextUrls : [''];
+        });
     };
 
     const handleOpenCreateModal = async () => {
         setCampaignName('');
         setMessageText('');
         setMessageParts(['']);
+        setMessagePartMediaUrls(['']);
         setSelectedContactIds(new Set());
         setContactsPage(1);
         setIsLoop(false);
@@ -667,6 +716,7 @@ export default function CampaignsPage() {
             : (isSelectAllMode ? contactsTotal > 0 : selectedContactIds.size > 0);
         const cleanedMessageParts = messageParts
             .map((part, index) => ({
+                index,
                 text: part.trim(),
                 template: getMessagePartTemplate(index)
             }))
@@ -674,6 +724,11 @@ export default function CampaignsPage() {
         const useCampaignMedia = !isLoop && !useAiMessage && deliveryMode === 'now' && campaignMediaEnabled;
         const useTemplateMedia = useCampaignMedia;
         const normalizedCampaignMediaUrl = campaignMediaUrl.trim();
+        const resolvedMessagePartMediaHeaders = cleanedMessageParts.map((part) => {
+            const url = (messagePartMediaUrls[part.index] || '').trim() || normalizedCampaignMediaUrl;
+            return url ? { type: 'image' as const, url } : null;
+        });
+        const hasResolvedMessagePartMedia = resolvedMessagePartMediaHeaders.some(Boolean);
         const usesBestTimeTomorrow = !isLoop && deliveryMode === 'schedule' && useBestTimeTomorrow;
         const scheduledBestTimeDate = usesBestTimeTomorrow ? getTomorrowPhilippinesDateInputValue() : null;
         if (!campaignName.trim() || !hasRecipients) return;
@@ -685,7 +740,7 @@ export default function CampaignsPage() {
         if (!isLoop && useAiMessage && !aiPrompt.trim()) return;
         if (!isLoop && !useAiMessage && messageMode === 'template' && cleanedMessageParts.some((part) => !part.template.templateName)) return;
         if (!isLoop && !useAiMessage && cleanedMessageParts.length === 0) return;
-        if (useCampaignMedia && !normalizedCampaignMediaUrl) return;
+        if (useCampaignMedia && !hasResolvedMessagePartMedia) return;
         if (useCampaignMedia && messageMode === 'freeform' && freeformWrapper === 'none') return;
 
         const resolvedScheduledAt =
@@ -830,6 +885,7 @@ export default function CampaignsPage() {
                         url: normalizedCampaignMediaUrl,
                         type: 'image',
                         templateName: payloadTemplateName,
+                        mediaHeaders: resolvedMessagePartMediaHeaders,
                         savedAt: new Date().toISOString()
                     } satisfies StoredCampaignMedia)
                 );
@@ -850,7 +906,14 @@ export default function CampaignsPage() {
         setSendingCampaignId(campaignId);
         try {
             const storedMedia = readStoredCampaignMedia(campaignId);
-            if (isMediaTemplateName(campaign.template_name) && !storedMedia?.url) {
+            const fallbackMediaHeader = storedMedia?.url
+                ? { type: 'image' as const, url: storedMedia.url }
+                : undefined;
+            const messageMediaHeaders = storedMedia?.mediaHeaders?.map((header) => (
+                header?.url ? { type: 'image' as const, url: header.url } : undefined
+            ));
+            const hasStoredMedia = Boolean(fallbackMediaHeader) || Boolean(messageMediaHeaders?.some(Boolean));
+            if (isMediaTemplateName(campaign.template_name) && !hasStoredMedia) {
                 alert('This campaign uses a media template, but the media is not available in this browser local storage.');
                 return;
             }
@@ -859,9 +922,8 @@ export default function CampaignsPage() {
                 sendBatchSize: 20,
                 delayBetweenBatchesMs: 50,
                 maxProcessingTimeMs: 240000,
-                templateMediaHeader: storedMedia?.url
-                    ? { type: 'image' as const, url: storedMedia.url }
-                    : undefined
+                templateMediaHeader: fallbackMediaHeader,
+                templateMediaHeaders: messageMediaHeaders
             };
             let response = await fetch(`/api/campaigns/${campaignId}/send`, {
                 method: 'POST',
@@ -1050,6 +1112,7 @@ export default function CampaignsPage() {
     const hasTemplateForEveryMessagePart = messagePartTemplateStatuses.every((status) => status.hasTemplate);
     const selectedMessagePartTemplatesCanSend = messagePartTemplateStatuses.every((status) => status.isApproved);
     const scheduleNeedsSpecificTime = !isLoop && deliveryMode === 'schedule' && !useBestTimeTomorrow;
+    const hasCampaignMediaForMessages = Boolean(campaignMediaUrl.trim()) || messagePartMediaUrls.some((url) => url.trim());
 
     return (
         <div className="p-6 md:p-8 max-w-[1400px] mx-auto fade-in">
@@ -1905,6 +1968,48 @@ export default function CampaignsPage() {
                                                     rows={index === 0 ? 4 : 3}
                                                     className="input-wireframe resize-none h-auto p-3"
                                                 />
+                                                {campaignMediaEnabled && mediaAvailableForCampaign && (
+                                                    <div className="mt-2 grid grid-cols-1 md:grid-cols-[1fr_auto] gap-2">
+                                                        <input
+                                                            type="text"
+                                                            value={messagePartMediaUrls[index] || ''}
+                                                            onChange={(e) => updateMessagePartMediaUrl(index, e.target.value)}
+                                                            placeholder={`Optional photo URL for message ${index + 1}; blank uses default photo`}
+                                                            className="input-wireframe text-xs"
+                                                        />
+                                                        <label className="btn-wireframe bg-white cursor-pointer justify-center text-xs h-9 px-3">
+                                                            <ImageIcon className="w-3 h-3 mr-1" />
+                                                            Photo
+                                                            <input
+                                                                type="file"
+                                                                accept="image/*"
+                                                                className="hidden"
+                                                                onChange={(e) => handleMessagePartMediaFile(index, e.target.files?.[0] || null)}
+                                                            />
+                                                        </label>
+                                                        {messagePartMediaUrls[index] && (
+                                                            <div className="md:col-span-2 border border-gray-300 bg-white p-2 flex items-center gap-2">
+                                                                <div className="w-10 h-10 border border-gray-300 bg-gray-100 overflow-hidden flex-shrink-0">
+                                                                    <img
+                                                                        src={messagePartMediaUrls[index]}
+                                                                        alt={`Message ${index + 1} media`}
+                                                                        className="w-full h-full object-cover"
+                                                                    />
+                                                                </div>
+                                                                <p className="text-xs font-mono text-gray-500 min-w-0 flex-1 truncate">
+                                                                    Message {index + 1} uses its own photo header.
+                                                                </p>
+                                                                <button
+                                                                    type="button"
+                                                                    onClick={() => updateMessagePartMediaUrl(index, '')}
+                                                                    className="btn-wireframe text-xs h-7 px-2 bg-white"
+                                                                >
+                                                                    Clear
+                                                                </button>
+                                                            </div>
+                                                        )}
+                                                    </div>
+                                                )}
                                             </div>
                                         ))}
                                         {messageMode === 'template' && (
@@ -2135,7 +2240,7 @@ export default function CampaignsPage() {
                             (!isLoop && useAiMessage && !aiPrompt.trim()) ||
                             (!isLoop && !useAiMessage && messageMode === 'template' && !hasTemplateForEveryMessagePart) ||
                             (!isLoop && !useAiMessage && !messageParts.some((part) => part.trim())) ||
-                            (!isLoop && !useAiMessage && campaignMediaEnabled && (!mediaAvailableForCampaign || !campaignMediaUrl.trim())) ||
+                            (!isLoop && !useAiMessage && campaignMediaEnabled && (!mediaAvailableForCampaign || !hasCampaignMediaForMessages)) ||
                             (!isLoop && !useAiMessage && campaignMediaEnabled && messageMode === 'freeform' && freeformWrapper === 'none') ||
                             (!isLoop && !useAiMessage && campaignMediaEnabled && messageMode === 'template' && !selectedMessagePartTemplatesCanSend) ||
                             ((isLoop || audienceMode === 'specific') &&

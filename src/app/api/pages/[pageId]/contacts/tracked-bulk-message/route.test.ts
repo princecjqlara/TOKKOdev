@@ -320,6 +320,13 @@ describe('POST /api/pages/[pageId]/contacts/tracked-bulk-message', () => {
             name: 'Best time bulk',
             deliveryMode: 'best_time_next_day',
             scheduledMessages: ['First', 'Second', 'Third'],
+            templateName: 'general_msg_v1',
+            templateLanguage: 'en_US',
+            scheduledMessageTemplates: [
+                { templateName: 'general_msg_v1', templateLanguage: 'en_US' },
+                { templateName: 'general_notice_v1', templateLanguage: 'en_US' },
+                { templateName: 'general_alert_v1', templateLanguage: 'en_US' }
+            ],
             envelopeWrapper: 'none',
             selection: {
                 mode: 'specific',
@@ -346,19 +353,25 @@ describe('POST /api/pages/[pageId]/contacts/tracked-bulk-message', () => {
         expect(supabase.campaignsInsert).toHaveBeenNthCalledWith(
             1,
             expect.objectContaining({
-                scheduled_at: '2026-07-30T01:00:00.000Z'
+                scheduled_at: '2026-07-30T01:00:00.000Z',
+                template_name: 'general_msg_v1',
+                template_language: 'en_US'
             })
         );
         expect(supabase.campaignsInsert).toHaveBeenNthCalledWith(
             2,
             expect.objectContaining({
-                scheduled_at: '2026-07-30T06:00:00.000Z'
+                scheduled_at: '2026-07-30T06:00:00.000Z',
+                template_name: 'general_notice_v1',
+                template_language: 'en_US'
             })
         );
         expect(supabase.campaignsInsert).toHaveBeenNthCalledWith(
             3,
             expect.objectContaining({
-                scheduled_at: '2026-07-30T12:00:00.000Z'
+                scheduled_at: '2026-07-30T12:00:00.000Z',
+                template_name: 'general_alert_v1',
+                template_language: 'en_US'
             })
         );
         expect(supabase.campaignRecipientsInsert).toHaveBeenCalledTimes(3);

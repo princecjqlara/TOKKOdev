@@ -267,6 +267,62 @@ describe('sendCampaignById', () => {
         );
     });
 
+    it('uses per-message media headers when sending multiple template parts', async () => {
+        const supabase = createSupabaseMock('draft', {
+            messageText: serializeCampaignMessageSequence([
+                { text: 'First message', templateName: 'general_msg_v1_media_v1', templateLanguage: 'en_US' },
+                { text: 'Second message', templateName: 'general_notice_v1_media_v1', templateLanguage: 'en_US' }
+            ]),
+            recipients: [{
+                id: 'recipient_1',
+                contact_id: 'contact_1',
+                contacts: {
+                    psid: 'psid_1',
+                    name: 'Alex'
+                }
+            }]
+        });
+        vi.mocked(sendMessage).mockResolvedValue({ message_id: 'mid_1' });
+
+        const result = await sendCampaignById({
+            campaignId: 'campaign_1',
+            supabase: supabase as never,
+            templateMediaHeaders: [
+                { type: 'image', url: 'https://example.com/first.jpg' },
+                { type: 'image', url: 'https://example.com/second.jpg' }
+            ]
+        });
+
+        expect(result.status).toBe(200);
+        expect(sendMessage).toHaveBeenCalledTimes(2);
+        expect(sendMessage).toHaveBeenNthCalledWith(
+            1,
+            'fb_page_1',
+            'page_token',
+            'psid_1',
+            'First message',
+            'UTILITY',
+            'general_msg_v1_media_v1',
+            'en_US',
+            ['First message'],
+            undefined,
+            { type: 'image', url: 'https://example.com/first.jpg' }
+        );
+        expect(sendMessage).toHaveBeenNthCalledWith(
+            2,
+            'fb_page_1',
+            'page_token',
+            'psid_1',
+            'Second message',
+            'UTILITY',
+            'general_notice_v1_media_v1',
+            'en_US',
+            ['Second message'],
+            undefined,
+            { type: 'image', url: 'https://example.com/second.jpg' }
+        );
+    });
+
     it('retries transient send failures before marking a recipient failed', async () => {
         const supabase = createSupabaseMock('draft', {
             recipients: [{

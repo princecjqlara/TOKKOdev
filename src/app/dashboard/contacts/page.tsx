@@ -110,6 +110,11 @@ type BestTimeScheduleStatus = {
     allBestTimesSent: boolean;
 };
 
+type ScheduledMessageTemplateSelection = {
+    templateName: string | null;
+    templateLanguage: string;
+};
+
 const CONTACT_MEDIA_DRAFT_STORAGE_PREFIX = 'tokko:contact-bulk-media-draft:';
 const CAMPAIGN_MEDIA_STORAGE_PREFIX = 'tokko:campaign-media:';
 const MAX_LOCAL_MEDIA_BYTES = 3 * 1024 * 1024;
@@ -337,6 +342,11 @@ export default function ContactsPage() {
     const [bulkMediaEnabled, setBulkMediaEnabled] = useState(false);
     const [bulkMediaUrl, setBulkMediaUrl] = useState('');
     const [scheduledMessages, setScheduledMessages] = useState(['', '', '']);
+    const [scheduledMessageTemplates, setScheduledMessageTemplates] = useState<ScheduledMessageTemplateSelection[]>([
+        { templateName: null, templateLanguage: 'en_US' },
+        { templateName: null, templateLanguage: 'en_US' },
+        { templateName: null, templateLanguage: 'en_US' }
+    ]);
     const [bestTimeCampaigns, setBestTimeCampaigns] = useState<BestTimeScheduledCampaign[]>([]);
     const [bestTimeScheduleStatus, setBestTimeScheduleStatus] = useState<BestTimeScheduleStatus | null>(null);
     const [bestTimeStatusLoading, setBestTimeStatusLoading] = useState(false);
@@ -971,6 +981,18 @@ export default function ContactsPage() {
         )));
     };
 
+    const updateScheduledMessageTemplate = (index: number, templateName: string | null) => {
+        const template = templateName ? approvedTemplates.find((item) => item.name === templateName) : null;
+        setScheduledMessageTemplates((current) => current.map((selection, selectionIndex) => (
+            selectionIndex === index
+                ? {
+                    templateName,
+                    templateLanguage: template?.language || 'en_US'
+                }
+                : selection
+        )));
+    };
+
     const resetBestTimeScheduleState = () => {
         setBestTimeCampaigns([]);
         setBestTimeScheduleStatus(null);
@@ -1114,6 +1136,12 @@ export default function ContactsPage() {
                     messagePart2,
                     deliveryMode: bulkDeliveryMode,
                     scheduledMessages: bulkDeliveryMode === 'best_time_next_day' ? scheduledMessages : undefined,
+                    scheduledMessageTemplates: bulkDeliveryMode === 'best_time_next_day'
+                        ? scheduledMessageTemplates.map((selection) => ({
+                            templateName: selection.templateName || undefined,
+                            templateLanguage: selection.templateName ? selection.templateLanguage : undefined
+                        }))
+                        : undefined,
                     envelopeWrapper,
                     templateName: envelopeWrapper === 'template' ? selectedTemplateName : undefined,
                     templateLanguage: envelopeWrapper === 'template' ? selectedTemplateLanguage : undefined,
@@ -3138,10 +3166,25 @@ export default function ContactsPage() {
                                     </p>
                                 </div>
                                 {scheduledMessages.map((message, index) => (
-                                    <div key={index}>
+                                    <div key={index} className="border border-gray-200 bg-gray-50 p-3 space-y-2">
                                         <label className="block text-xs font-bold uppercase mb-1">
                                             Message {index + 1} of 3
                                         </label>
+                                        <select
+                                            className="input-wireframe text-xs"
+                                            value={scheduledMessageTemplates[index]?.templateName || ''}
+                                            onChange={(event) => updateScheduledMessageTemplate(index, event.target.value || null)}
+                                        >
+                                            <option value="">Use selected message style</option>
+                                            {approvedTemplates.map((template) => (
+                                                <option
+                                                    key={`${index}-${template.name}-${template.language || 'en_US'}`}
+                                                    value={template.name}
+                                                >
+                                                    {template.name.replace(/_/g, ' ')} ({template.language || 'en_US'})
+                                                </option>
+                                            ))}
+                                        </select>
                                         <textarea
                                             value={message}
                                             onChange={(event) => updateScheduledMessage(index, event.target.value)}
@@ -3221,7 +3264,7 @@ export default function ContactsPage() {
                         {bulkDeliveryMode === 'best_time_next_day' ? (
                             <div className="bg-blue-50 text-blue-800 p-3 border border-blue-200">
                                 <p className="text-xs font-mono">
-                                    <b>Note:</b> Best-time scheduled bulk messages use the selected envelope/template for all 3 scheduled messages. Custom inline buttons are disabled for this scheduled flow.
+                                    <b>Note:</b> Best-time scheduled bulk messages can use the selected envelope/template by default, or a different approved template per scheduled message. Custom inline buttons are disabled for this scheduled flow.
                                 </p>
                             </div>
                         ) : envelopeWrapper.startsWith('btn_') ? (

@@ -32,6 +32,7 @@ type ScheduledCampaignSummary = {
     scheduledAt: string;
     scheduledAtPh: string;
     recipients: number;
+    templateName: string | null;
 };
 
 const ENVELOPE_TEMPLATE_MAP: Record<string, string> = {
@@ -102,6 +103,27 @@ function normalizeScheduledMessages(value: unknown): string[] {
     return value
         .slice(0, 3)
         .map((message) => (typeof message === 'string' ? message.trim() : ''));
+}
+
+function normalizeScheduledMessageTemplates(value: unknown): Array<{ templateName: string | null; templateLanguage: string | null }> {
+    if (!Array.isArray(value)) return [];
+    return value
+        .slice(0, 3)
+        .map((item) => {
+            if (!item || typeof item !== 'object') {
+                return { templateName: null, templateLanguage: null };
+            }
+
+            const record = item as Record<string, unknown>;
+            return {
+                templateName: typeof record.templateName === 'string' && record.templateName.trim()
+                    ? record.templateName.trim()
+                    : null,
+                templateLanguage: typeof record.templateLanguage === 'string' && record.templateLanguage.trim()
+                    ? record.templateLanguage.trim()
+                    : null
+            };
+        });
 }
 
 function normalizeHour(value: unknown): number | null {
@@ -384,6 +406,7 @@ export async function POST(
         const messagePart2 = typeof body.messagePart2 === 'string' ? body.messagePart2.trim() : '';
         const messageText = [messagePart1, messagePart2].filter(Boolean).join('\n\n');
         const scheduledMessages = normalizeScheduledMessages(body.scheduledMessages);
+        const scheduledMessageTemplates = normalizeScheduledMessageTemplates(body.scheduledMessageTemplates);
         const envelopeWrapper = typeof body.envelopeWrapper === 'string' ? body.envelopeWrapper : 'msg';
         const requestedTemplateName = typeof body.templateName === 'string' && body.templateName.trim()
             ? body.templateName.trim()
@@ -553,6 +576,9 @@ export async function POST(
             const scheduledCampaigns: ScheduledCampaignSummary[] = [];
 
             for (let messageIndex = 0; messageIndex < 3; messageIndex++) {
+                const scheduledTemplate = scheduledMessageTemplates[messageIndex];
+                const scheduledTemplateName = scheduledTemplate?.templateName || templateName;
+                const scheduledTemplateLanguage = scheduledTemplate?.templateLanguage || templateLanguage;
                 const recipientSchedules = eligibleContacts.map((contact) => ({
                     contactId: contact.id,
                     scheduledAt: getPhilippinesScheduledAtIso(contact.hours[messageIndex], dateParts)
@@ -579,8 +605,8 @@ export async function POST(
                         is_loop: false,
                         loop_status: 'stopped',
                         use_ai_message: false,
-                        template_name: templateName,
-                        template_language: templateName ? templateLanguage : null,
+                        template_name: scheduledTemplateName,
+                        template_language: scheduledTemplateName ? scheduledTemplateLanguage : null,
                         recurrence: 'none'
                     })
                     .select()
@@ -610,7 +636,8 @@ export async function POST(
                     messageNumber: messageIndex + 1,
                     scheduledAt: earliestScheduledAt,
                     scheduledAtPh: formatPhilippinesScheduledAt(earliestScheduledAt),
-                    recipients: eligibleContacts.length
+                    recipients: eligibleContacts.length,
+                    templateName: scheduledTemplateName
                 });
             }
 

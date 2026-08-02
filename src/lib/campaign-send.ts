@@ -24,6 +24,7 @@ type SendCampaignByIdOptions = {
     sendRetryAttempts?: number;
     sendRetryDelayMs?: number;
     templateMediaHeader?: { type: TemplateMediaType; url: string };
+    templateMediaHeaders?: Array<{ type: TemplateMediaType; url: string } | null | undefined>;
 };
 
 type SendCampaignByIdResult = {
@@ -47,7 +48,8 @@ export async function sendCampaignById({
     maxProcessingTimeMs = 240000,
     sendRetryAttempts = 2,
     sendRetryDelayMs = 500,
-    templateMediaHeader
+    templateMediaHeader,
+    templateMediaHeaders
 }: SendCampaignByIdOptions): Promise<SendCampaignByIdResult> {
     try {
         const { data: campaign } = await supabase
@@ -367,7 +369,8 @@ export async function sendCampaignById({
                         throw new Error('No message content available');
                     }
 
-                    for (const messagePart of messagesToSend) {
+                    for (let messageIndex = 0; messageIndex < messagesToSend.length; messageIndex++) {
+                        const messagePart = messagesToSend[messageIndex];
                         const messageToSend = messagePart.text;
                         const templateName = messagePart.templateName || campaign.template_name || undefined;
                         const templateLanguage = messagePart.templateLanguage || campaign.template_language || 'en_US';
@@ -399,8 +402,9 @@ export async function sendCampaignById({
                                     bodyParameters
                                 ];
 
-                                if (useTemplate && templateMediaHeader) {
-                                    sendArgs.push(undefined, templateMediaHeader);
+                                const messageMediaHeader = templateMediaHeaders?.[messageIndex] || templateMediaHeader;
+                                if (useTemplate && messageMediaHeader) {
+                                    sendArgs.push(undefined, messageMediaHeader);
                                 }
 
                                 await sendMessage(...sendArgs);
