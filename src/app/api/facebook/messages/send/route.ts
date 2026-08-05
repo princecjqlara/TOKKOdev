@@ -12,6 +12,7 @@ import type { TemplateMediaType } from '@/lib/facebook-templates';
 import { chunkArray } from '@/lib/chunking';
 import { replaceTemplateVariablesForParts, ContactRecord } from '@/lib/placeholders';
 import { stopWorkflowAutomationsFromPageMessage } from '@/lib/workflow-automations';
+import { recordPageActivity } from '@/lib/activity-history';
 import {
     applyDynamicButtonValue,
     ButtonMode,
@@ -754,6 +755,22 @@ export async function POST(request: NextRequest) {
 
         if (stoppedAutomations > 0) {
             console.log(`Workflow automation stop code detected. Stopped ${stoppedAutomations} automation states without sending the code.`);
+            await recordPageActivity(supabase, {
+                pageId,
+                actorUserId: userId,
+                actionType: 'bulk_workflows_stopped',
+                entityType: 'workflow_automation_states',
+                summary: `Stopped ${stoppedAutomations} workflow automation state${stoppedAutomations === 1 ? '' : 's'}`,
+                targetCount: contactIds.length,
+                successCount: stoppedAutomations,
+                details: {
+                    requestedContactCount: contactIds.length,
+                    validContactCount: allContacts.length,
+                    filteredContactCount: totalFiltered,
+                    notFoundContactCount: totalNotFound,
+                    stopCodeMessage: messageText
+                }
+            });
             return NextResponse.json({
                 success: true,
                 stoppedAutomations,
@@ -1328,6 +1345,40 @@ export async function POST(request: NextRequest) {
                 console.error(`❌   ACTION REQUIRED: Sync the page again to fix page_id and psid issues`);
             }
         }
+
+        const auditFailureCount = Math.max(0, contactIds.length - results.sent);
+        await recordPageActivity(supabase, {
+            pageId,
+            actorUserId: userId,
+            actionType: 'bulk_message_direct',
+            entityType: 'contacts',
+            summary: `Sent a direct bulk message to ${results.sent} of ${contactIds.length} contact${contactIds.length === 1 ? '' : 's'}`,
+            targetCount: contactIds.length,
+            successCount: results.sent,
+            failureCount: auditFailureCount,
+            status: auditFailureCount === 0 ? 'completed' : results.sent > 0 ? 'partial' : 'failed',
+            startedAt: new Date(startTime).toISOString(),
+            details: {
+                messageText,
+                messagingType,
+                envelopeWrapper: rawEnvelopeWrapper || null,
+                templateName: messagingType === 'UTILITY' ? utilityTemplateName : null,
+                templateLanguage: messagingType === 'UTILITY' ? utilityTemplateLanguage : null,
+                hasMedia: Boolean(templateMediaHeader),
+                mediaType: templateMediaHeader?.type || null,
+                buttonCount: requestedButtons.length,
+                requestedContactCount: contactIds.length,
+                foundContactCount: totalFound,
+                validContactCount: allContacts.length,
+                filteredContactCount: filteredCount,
+                notFoundContactCount: notFoundCount,
+                sendFailureCount: results.failed,
+                errorSample: results.errors.slice(0, 100),
+                errorListTruncated: results.errors.length > 100,
+                contactSample: allContacts.slice(0, 100).map((contact) => ({ id: contact.id, name: contact.name, psid: contact.psid })),
+                contactListTruncated: allContacts.length > 100
+            }
+        });
 
         return NextResponse.json({
             success: true,

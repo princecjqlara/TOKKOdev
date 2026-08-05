@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getServerSession } from 'next-auth';
 import { authOptions } from '@/lib/auth';
 import { getSupabaseAdmin } from '@/lib/supabase';
+import { recordPageActivity } from '@/lib/activity-history';
 
 // POST /api/pages/[pageId]/contacts/bulk-add-tags - Add tags to contacts
 export async function POST(
@@ -78,6 +79,26 @@ export async function POST(
 
             if (error) throw error;
         }
+
+        await recordPageActivity(supabase, {
+            pageId,
+            actorUserId: session.user.id,
+            actionType: 'bulk_tags_added',
+            entityType: 'contacts',
+            summary: `Added ${tagIds.length} tag${tagIds.length === 1 ? '' : 's'} to ${validContactIds.length} contact${validContactIds.length === 1 ? '' : 's'}`,
+            targetCount: validContactIds.length,
+            successCount: validContactIds.length,
+            details: {
+                requestedContactCount: contactIds.length,
+                matchedContactCount: validContactIds.length,
+                tagCount: tagIds.length,
+                assignmentCount: entries.length,
+                tagIds: tagIds.slice(0, 100),
+                contactIds: validContactIds.slice(0, 100),
+                tagListTruncated: tagIds.length > 100,
+                contactListTruncated: validContactIds.length > 100
+            }
+        });
 
         return NextResponse.json({
             success: true,

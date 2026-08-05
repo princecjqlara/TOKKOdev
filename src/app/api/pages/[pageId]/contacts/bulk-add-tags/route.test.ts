@@ -44,6 +44,7 @@ function createSupabaseMock() {
     const contactsSelect = vi.fn().mockReturnValue({ in: contactsIn });
 
     const upsert = vi.fn().mockResolvedValue({ error: null });
+    const activityInsert = vi.fn().mockResolvedValue({ error: null });
 
     const from = vi.fn((table: string) => {
         if (table === 'user_pages') {
@@ -64,12 +65,19 @@ function createSupabaseMock() {
             };
         }
 
+        if (table === 'page_activity_history') {
+            return {
+                insert: activityInsert
+            };
+        }
+
         throw new Error(`Unexpected table: ${table}`);
     });
 
     return {
         from,
-        upsert
+        upsert,
+        activityInsert
     };
 }
 
@@ -105,6 +113,15 @@ describe('POST /api/pages/[pageId]/contacts/bulk-add-tags', () => {
                 onConflict: 'contact_id,tag_id',
                 ignoreDuplicates: true
             }
+        );
+        expect(supabase.activityInsert).toHaveBeenCalledWith(
+            expect.objectContaining({
+                page_id: 'page_1',
+                actor_user_id: 'user_1',
+                action_type: 'bulk_tags_added',
+                target_count: 1,
+                success_count: 1
+            })
         );
     });
 });

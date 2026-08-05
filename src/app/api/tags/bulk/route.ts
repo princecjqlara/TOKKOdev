@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getServerSession } from 'next-auth';
 import { authOptions } from '@/lib/auth';
 import { getSupabaseAdmin } from '@/lib/supabase';
+import { recordPageActivity } from '@/lib/activity-history';
 
 // DELETE /api/tags/bulk - Bulk delete tags
 export async function DELETE(request: NextRequest) {
@@ -14,6 +15,7 @@ export async function DELETE(request: NextRequest) {
                 { status: 401 }
             );
         }
+        const userId = session.user.id;
 
         const body = await request.json();
         const { tagIds } = body;
@@ -64,6 +66,8 @@ export async function DELETE(request: NextRequest) {
             })
             .map(tag => tag.id);
 
+        const allowedTags = tags.filter(tag => allowedTagIds.includes(tag.id));
+
         if (allowedTagIds.length === 0) {
             return NextResponse.json(
                 { error: 'Forbidden', message: 'No permission to delete any of the specified tags' },
@@ -84,6 +88,29 @@ export async function DELETE(request: NextRequest) {
             .in('id', allowedTagIds);
 
         if (error) throw error;
+
+        const pageIds = [...new Set(allowedTags.flatMap((tag) => {
+            if (tag.page_id) return [tag.page_id as string];
+            if (tag.owner_type === 'page' && tag.owner_id) return [tag.owner_id as string];
+            return [];
+        }))];
+        await Promise.all(pageIds.map((pageId) => {
+            const pageTags = allowedTags.filter((tag) => tag.page_id === pageId || (tag.owner_type === 'page' && tag.owner_id === pageId));
+            return recordPageActivity(supabase, {
+                pageId,
+                actorUserId: userId,
+                actionType: 'bulk_tags_deleted',
+                entityType: 'tags',
+                summary: `Deleted ${pageTags.length} tag${pageTags.length === 1 ? '' : 's'}`,
+                targetCount: pageTags.length,
+                successCount: pageTags.length,
+                details: {
+                    tags: pageTags.map((tag) => ({ id: tag.id, name: tag.name, color: tag.color, ownerType: tag.owner_type })),
+                    totalTagsDeletedAcrossPages: allowedTagIds.length,
+                    skippedTagCount: tagIds.length - allowedTagIds.length
+                }
+            });
+        }));
 
         return NextResponse.json({
             success: true,

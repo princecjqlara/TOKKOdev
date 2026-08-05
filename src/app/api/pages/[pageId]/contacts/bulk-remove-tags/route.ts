@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getServerSession } from 'next-auth';
 import { authOptions } from '@/lib/auth';
 import { getSupabaseAdmin } from '@/lib/supabase';
+import { recordPageActivity } from '@/lib/activity-history';
 
 // POST /api/pages/[pageId]/contacts/bulk-remove-tags - Remove tags from contacts
 export async function POST(
@@ -61,11 +62,31 @@ export async function POST(
         // Delete contact_tags entries only for verified contacts
         const { error, count } = await supabase
             .from('contact_tags')
-            .delete()
+            .delete({ count: 'exact' })
             .in('contact_id', validContactIds)
             .in('tag_id', tagIds);
 
         if (error) throw error;
+
+        await recordPageActivity(supabase, {
+            pageId,
+            actorUserId: session.user.id,
+            actionType: 'bulk_tags_removed',
+            entityType: 'contacts',
+            summary: `Removed tags from ${validContactIds.length} contact${validContactIds.length === 1 ? '' : 's'}`,
+            targetCount: validContactIds.length,
+            successCount: validContactIds.length,
+            details: {
+                requestedContactCount: contactIds.length,
+                matchedContactCount: validContactIds.length,
+                tagCount: tagIds.length,
+                removedAssignmentCount: count || 0,
+                tagIds: tagIds.slice(0, 100),
+                contactIds: validContactIds.slice(0, 100),
+                tagListTruncated: tagIds.length > 100,
+                contactListTruncated: validContactIds.length > 100
+            }
+        });
 
         return NextResponse.json({
             success: true,

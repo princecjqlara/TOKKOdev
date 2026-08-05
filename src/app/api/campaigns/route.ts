@@ -5,6 +5,7 @@ import { normalizeCampaignMessageParts, serializeCampaignMessageSequence } from 
 import { getNextPhilippinesScheduledAtIso, getPhilippinesDatePartsFromDateString, getPhilippinesScheduledAtIso } from '@/lib/philippines-time';
 import { getSupabaseAdmin } from '@/lib/supabase';
 import { PaginatedResponse, Campaign } from '@/types';
+import { recordPageActivity } from '@/lib/activity-history';
 
 function normalizeStringArray(value: unknown): string[] {
     if (!Array.isArray(value)) {
@@ -460,7 +461,7 @@ export async function DELETE(request: NextRequest) {
         // Get campaign and verify access
         const { data: campaign } = await supabase
             .from('campaigns')
-            .select('page_id')
+            .select('*')
             .eq('id', id)
             .single();
 
@@ -498,6 +499,27 @@ export async function DELETE(request: NextRequest) {
             .eq('id', id);
 
         if (error) throw error;
+
+        await recordPageActivity(supabase, {
+            pageId: campaign.page_id,
+            actorUserId: session.user.id,
+            actionType: 'bulk_campaign_deleted',
+            entityType: 'campaign',
+            entityId: campaign.id,
+            summary: `Deleted campaign: ${campaign.name || campaign.id}`,
+            targetCount: Number(campaign.total_recipients || 0),
+            successCount: Number(campaign.sent_count || 0),
+            failureCount: Number(campaign.failed_count || 0),
+            details: {
+                campaignName: campaign.name,
+                campaignStatus: campaign.status,
+                messageText: campaign.message_text,
+                templateName: campaign.template_name,
+                scheduledAt: campaign.scheduled_at,
+                originallyCreatedBy: campaign.created_by,
+                originallyCreatedAt: campaign.created_at
+            }
+        });
 
         return NextResponse.json({ success: true });
     } catch (error) {
