@@ -1221,7 +1221,7 @@ export default function ContactsPage() {
                     body: JSON.stringify({
                         sendBatchSize: 20,
                         delayBetweenBatchesMs: 50,
-                        maxProcessingTimeMs: 240000,
+                        maxProcessingTimeMs: 45000,
                         templateMediaHeader
                     })
                 });

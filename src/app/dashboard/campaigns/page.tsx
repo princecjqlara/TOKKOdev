@@ -921,7 +921,7 @@ export default function CampaignsPage() {
             const sendPayload = {
                 sendBatchSize: 20,
                 delayBetweenBatchesMs: 50,
-                maxProcessingTimeMs: 240000,
+                maxProcessingTimeMs: 45000,
                 templateMediaHeader: fallbackMediaHeader,
                 templateMediaHeaders: messageMediaHeaders
             };

@@ -301,13 +301,13 @@ describe('POST /api/pages/[pageId]/contacts/tracked-bulk-message', () => {
             { campaign_id: 'campaign_1', contact_id: 'contact_9', status: 'pending' },
             { campaign_id: 'campaign_1', contact_id: 'contact_10', status: 'pending' }
         ]);
-        expect(mocks.sendCampaignById).toHaveBeenCalledWith(
-            expect.objectContaining({
-                campaignId: 'campaign_1',
-                sendBatchSize: 20,
-                delayBetweenBatchesMs: 50
-            })
-        );
+        expect(body.send).toEqual(expect.objectContaining({
+            partial: true,
+            sent: 0,
+            failed: 0,
+            remaining: 5
+        }));
+        expect(mocks.sendCampaignById).not.toHaveBeenCalled();
     });
 
     it('schedules three best-time campaigns for tomorrow PH time without sending immediately', async () => {

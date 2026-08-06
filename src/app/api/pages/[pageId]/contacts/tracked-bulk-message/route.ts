@@ -4,9 +4,7 @@ import { authOptions } from '@/lib/auth';
 import { serializeCampaignMessageSequence } from '@/lib/campaign-message-sequence';
 import { chunkArray } from '@/lib/chunking';
 import { getMediaTemplateName } from '@/lib/facebook-templates';
-import type { TemplateMediaType } from '@/lib/facebook-templates';
 import { getPhilippinesScheduledAtIso, getTomorrowPhilippinesDateParts } from '@/lib/philippines-time';
-import { sendCampaignById } from '@/lib/campaign-send';
 import { getSupabaseAdmin } from '@/lib/supabase';
 import { fetchAllSupabaseRows } from '@/lib/supabase-pagination';
 
@@ -702,23 +700,26 @@ export async function POST(
             }
         }
 
-        const sendResult = await sendCampaignById({
-            campaignId: campaign.id,
-            supabase,
-            userId: session.user.id,
-            sendBatchSize: 20,
-            delayBetweenBatchesMs: 50,
-            maxProcessingTimeMs: 240000,
-            templateMediaHeader
-        });
-
         return NextResponse.json({
             success: true,
             campaign,
             recipients: contactIds.length,
             totalMatched,
             selectedRange,
-            send: sendResult.body
+            // Delivery is deliberately continued by the browser through the
+            // bounded campaign send endpoint. This keeps campaign creation and
+            // recipient materialization from sharing one deployment timeout
+            // with the actual Facebook sends.
+            send: {
+                success: true,
+                partial: true,
+                sent: 0,
+                failed: 0,
+                processed: 0,
+                total: contactIds.length,
+                remaining: contactIds.length,
+                message: 'Campaign created and ready to send.'
+            }
         });
     } catch (error) {
         console.error('Error creating tracked bulk message:', error);

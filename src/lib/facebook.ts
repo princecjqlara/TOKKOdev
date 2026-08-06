@@ -365,6 +365,7 @@ export async function subscribePageToAppWebhook(
 //   'UTILITY' - outside 7-day window (requires template)
 const DEFAULT_UTILITY_TEMPLATE = 'account_general_notification';
 const DEFAULT_UTILITY_LANGUAGE = 'en_US';
+const FACEBOOK_SEND_TIMEOUT_MS = 20_000;
 
 export async function sendMessage(
     pageId: string,
@@ -498,17 +499,33 @@ export async function sendMessage(
         }
     }
 
-    // Facebook Messenger API endpoint - use /me/messages with page access token
-    const response = await fetch(
-        `${FACEBOOK_GRAPH_URL}/me/messages?access_token=${pageAccessToken}`,
-        {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json'
-            },
-            body: JSON.stringify(bodyPayload)
+    // Facebook Messenger API endpoint - use /me/messages with page access token.
+    // A stalled upstream request must not consume the entire campaign function
+    // lifetime and prevent its completed recipient statuses from being saved.
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), FACEBOOK_SEND_TIMEOUT_MS);
+    let response: Response;
+
+    try {
+        response = await fetch(
+            `${FACEBOOK_GRAPH_URL}/me/messages?access_token=${pageAccessToken}`,
+            {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify(bodyPayload),
+                signal: controller.signal
+            }
+        );
+    } catch (error) {
+        if (controller.signal.aborted) {
+            throw new Error(`Facebook send timed out after ${FACEBOOK_SEND_TIMEOUT_MS / 1000} seconds`);
         }
-    );
+        throw error;
+    } finally {
+        clearTimeout(timeoutId);
+    }
 
     if (!response.ok) {
         const errorData = await response.json().catch(() => ({ error: { message: 'Unknown error' } }));

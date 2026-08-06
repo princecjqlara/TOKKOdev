@@ -7,6 +7,12 @@ import type { TemplateMediaType } from '@/lib/facebook-templates';
 // Increase timeout for sending campaigns (up to 5 minutes)
 export const maxDuration = 300;
 
+// Keep every browser-driven invocation comfortably below the deployment
+// timeout. The client continues while `partial` is true, and recipient status
+// makes every subsequent invocation resume from pending recipients only.
+const MAX_RECIPIENTS_PER_INVOCATION = 500;
+const MAX_PROCESSING_TIME_MS = 45_000;
+
 function normalizeTemplateMediaHeader(value: unknown): { type: TemplateMediaType; url: string } | undefined {
     if (!value || typeof value !== 'object') return undefined;
     const record = value as Record<string, unknown>;
@@ -37,12 +43,17 @@ export async function POST(
     const templateMediaHeaders = Array.isArray(body.templateMediaHeaders)
         ? body.templateMediaHeaders.map(normalizeTemplateMediaHeader)
         : undefined;
+    const delayBetweenBatchesMs = typeof body.delayBetweenBatchesMs === 'number'
+        ? Math.max(0, Math.min(body.delayBetweenBatchesMs, 250))
+        : undefined;
     const result = await sendCampaignById({
         campaignId,
         userId: session.user.id,
         sendBatchSize: typeof body.sendBatchSize === 'number' ? body.sendBatchSize : undefined,
-        delayBetweenBatchesMs: typeof body.delayBetweenBatchesMs === 'number' ? body.delayBetweenBatchesMs : undefined,
-        maxProcessingTimeMs: typeof body.maxProcessingTimeMs === 'number' ? body.maxProcessingTimeMs : undefined,
+        maxRecipientsPerRun: MAX_RECIPIENTS_PER_INVOCATION,
+        delayBetweenBatchesMs,
+        maxProcessingTimeMs: MAX_PROCESSING_TIME_MS,
+        sendRetryAttempts: 1,
         templateMediaHeader,
         templateMediaHeaders
     });
