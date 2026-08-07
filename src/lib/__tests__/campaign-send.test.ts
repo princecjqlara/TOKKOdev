@@ -29,6 +29,7 @@ function createSupabaseMock(
         use_ai_message: false,
         is_loop: false,
         ai_prompt: null,
+        total_recipients: (options.recipients?.length || 0) + (options.remainingPendingCount || 0),
         pages: {
             fb_page_id: 'fb_page_1',
             access_token: 'page_token',
@@ -43,8 +44,16 @@ function createSupabaseMock(
     const campaignEqId = vi.fn().mockReturnValue({ single: campaignSingle });
     const campaignSelect = vi.fn().mockReturnValue({ eq: campaignEqId });
 
-    const campaignUpdateEq = vi.fn().mockResolvedValue({ error: null });
-    const campaignUpdate = vi.fn().mockReturnValue({ eq: campaignUpdateEq });
+    const campaignUpdateEq = vi.fn();
+    const campaignUpdate = vi.fn().mockImplementation((updates: Record<string, unknown>) => {
+        if (typeof updates.status === 'string') campaignRecord.status = updates.status as typeof campaignRecord.status;
+        const query: any = {
+            eq: vi.fn(() => query),
+            then: (resolve: (value: { error: null }) => unknown) => Promise.resolve({ error: null }).then(resolve)
+        };
+        campaignUpdateEq.mockImplementation(query.eq);
+        return query;
+    });
 
     const userPageSingle = vi.fn().mockResolvedValue({
         data: { page_id: 'page_1' },
@@ -54,48 +63,46 @@ function createSupabaseMock(
     const userPageEqUser = vi.fn().mockReturnValue({ eq: userPageEqPage });
     const userPageSelect = vi.fn().mockReturnValue({ eq: userPageEqUser });
 
-    const recipientsRange = vi.fn((from: number, to: number) => Promise.resolve({
-        data: (options.recipients || []).slice(from, to + 1),
-        error: null
-    }));
-    const recipientsOr = vi.fn().mockReturnValue({ range: recipientsRange });
-    const recipientsEqStatus = vi.fn().mockReturnValue({ range: recipientsRange, or: recipientsOr });
-    const recipientsEqCampaign = vi.fn().mockReturnValue({ eq: recipientsEqStatus });
     let sentCount = 0;
     let failedCount = 0;
-    let pendingCount = (options.recipients?.length || 0) + (options.remainingPendingCount || 0);
-    const recipientsCountEqStatus = vi.fn((_column: string, status: string) => Promise.resolve({
-        count:
-            status === 'sent'
-                ? sentCount
-                : status === 'failed'
-                    ? failedCount
-                    : status === 'pending'
-                        ? pendingCount
-                        : 0,
-        error: null
-    }));
-    const recipientsCountEqCampaign = vi.fn().mockReturnValue({ eq: recipientsCountEqStatus });
-    const recipientsSelect = vi.fn((_columns: string, queryOptions?: { head?: boolean }) => {
-        if (queryOptions?.head) {
-            return { eq: recipientsCountEqCampaign };
+    const pendingRecipients = [...(options.recipients || [])];
+    const fixedRemaining = options.remainingPendingCount || 0;
+    const claimRpc = vi.fn();
+    const finishBatchRpc = vi.fn();
+    const rpc = vi.fn(async (name: string, args: Record<string, any>) => {
+        if (name === 'claim_campaign_recipients') {
+            claimRpc(args);
+            const claimed = pendingRecipients.splice(0, args.p_batch_size).map(recipient => ({
+                contact_id: recipient.contact_id,
+                contact_psid: recipient.contacts.psid,
+                contact_name: recipient.contacts.name || null,
+                contact_best_hour: null,
+                claim_token: 'claim_token_1'
+            }));
+            return { data: claimed, error: null };
         }
 
-        return { eq: recipientsEqCampaign };
-    });
-    const recipientsUpdateEq = vi.fn().mockResolvedValue({ error: null });
-    const recipientsUpdate = vi.fn((updates: { status?: string }) => {
-        if (updates.status === 'sent') {
-            sentCount += 1;
-            pendingCount = Math.max(0, pendingCount - 1);
+        if (name === 'finish_campaign_recipient_batch') {
+            finishBatchRpc(args);
+            for (const result of args.p_results) {
+                if (result.success) sentCount += 1;
+                else failedCount += 1;
+            }
+            return { data: args.p_results.length, error: null };
         }
 
-        if (updates.status === 'failed') {
-            failedCount += 1;
-            pendingCount = Math.max(0, pendingCount - 1);
+        if (name === 'get_campaign_delivery_progress') {
+            return {
+                data: [{
+                    sent_count: sentCount,
+                    failed_count: failedCount,
+                    remaining_count: pendingRecipients.length + fixedRemaining
+                }],
+                error: null
+            };
         }
 
-        return { eq: recipientsUpdateEq };
+        throw new Error(`Unexpected RPC: ${name}`);
     });
 
     const from = vi.fn((table: string) => {
@@ -112,23 +119,16 @@ function createSupabaseMock(
             };
         }
 
-        if (table === 'campaign_recipients') {
-            return {
-                select: recipientsSelect,
-                update: recipientsUpdate
-            };
-        }
-
         throw new Error(`Unexpected table: ${table}`);
     });
 
     return {
         from,
+        rpc,
         campaignUpdate,
         campaignUpdateEq,
-        recipientsUpdate,
-        recipientsOr,
-        recipientsRange
+        claimRpc,
+        finishBatchRpc
     };
 }
 
@@ -170,7 +170,7 @@ describe('sendCampaignById', () => {
         );
         expect(supabase.campaignUpdate).toHaveBeenNthCalledWith(
             2,
-            expect.objectContaining({ status: 'completed', failed_count: 0 })
+            expect.objectContaining({ status: 'completed' })
         );
     });
 
@@ -349,15 +349,12 @@ describe('sendCampaignById', () => {
         expect(result.sent).toBe(1);
         expect(result.failed).toBe(0);
         expect(sendMessage).toHaveBeenCalledTimes(2);
-        expect(supabase.recipientsUpdate).toHaveBeenCalledWith(
-            expect.objectContaining({ status: 'sent' })
-        );
-        expect(supabase.recipientsUpdate).not.toHaveBeenCalledWith(
-            expect.objectContaining({ status: 'failed' })
-        );
+        expect(supabase.finishBatchRpc).toHaveBeenCalledWith(expect.objectContaining({
+            p_results: [{ contact_id: 'contact_1', success: true, error_message: null }]
+        }));
     });
 
-    it('fetches every pending recipient page without a per-run recipient cap', async () => {
+    it('claims every pending recipient in bounded atomic batches without a per-run cap', async () => {
         const recipients = Array.from({ length: 2001 }, (_, index) => ({
             id: `recipient_${index + 1}`,
             contact_id: `contact_${index + 1}`,
@@ -380,8 +377,8 @@ describe('sendCampaignById', () => {
         expect(result.sent).toBe(2001);
         expect(result.failed).toBe(0);
         expect(sendMessage).toHaveBeenCalledTimes(2001);
-        expect(supabase.recipientsRange).toHaveBeenNthCalledWith(1, 0, 1999);
-        expect(supabase.recipientsRange).toHaveBeenNthCalledWith(2, 2000, 3999);
+        expect(supabase.claimRpc).toHaveBeenCalledTimes(82);
+        expect(supabase.claimRpc).toHaveBeenNthCalledWith(1, expect.objectContaining({ p_batch_size: 25 }));
     });
 
     it('caps fetched recipients for short cron runs', async () => {
@@ -410,8 +407,8 @@ describe('sendCampaignById', () => {
         expect(result.body.partial).toBe(true);
         expect(result.sent).toBe(10);
         expect(sendMessage).toHaveBeenCalledTimes(10);
-        expect(supabase.recipientsRange).toHaveBeenCalledTimes(1);
-        expect(supabase.recipientsRange).toHaveBeenCalledWith(0, 9);
+        expect(supabase.claimRpc).toHaveBeenCalledTimes(2);
+        expect(supabase.claimRpc).toHaveBeenLastCalledWith(expect.objectContaining({ p_batch_size: 5 }));
     });
 
     it('cron sends only due recipients and keeps campaign scheduled while future recipients remain', async () => {
@@ -437,14 +434,13 @@ describe('sendCampaignById', () => {
 
         expect(result.status).toBe(200);
         expect(sendMessage).toHaveBeenCalledTimes(1);
-        expect(supabase.recipientsOr).toHaveBeenCalledWith(
-            'scheduled_at.lte.2026-07-20T10:00:00.000Z,next_scheduled_at.lte.2026-07-20T10:00:00.000Z'
-        );
+        expect(supabase.claimRpc).toHaveBeenCalledWith(expect.objectContaining({
+            p_due_at: '2026-07-20T10:00:00.000Z',
+            p_include_unscheduled: false
+        }));
         expect(supabase.campaignUpdate).toHaveBeenLastCalledWith(
             expect.objectContaining({
-                status: 'scheduled',
-                sent_count: 1,
-                failed_count: 0
+                status: 'scheduled'
             })
         );
     });
@@ -472,8 +468,9 @@ describe('sendCampaignById', () => {
 
         expect(result.status).toBe(200);
         expect(sendMessage).toHaveBeenCalledTimes(1);
-        expect(supabase.recipientsOr).toHaveBeenCalledWith(
-            'scheduled_at.is.null,scheduled_at.lte.2026-07-20T10:00:00.000Z,next_scheduled_at.lte.2026-07-20T10:00:00.000Z'
-        );
+        expect(supabase.claimRpc).toHaveBeenCalledWith(expect.objectContaining({
+            p_due_at: '2026-07-20T10:00:00.000Z',
+            p_include_unscheduled: true
+        }));
     });
 });

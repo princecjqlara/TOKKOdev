@@ -30,7 +30,7 @@ export async function GET(
 
         const { data: campaign } = await supabase
             .from('campaigns')
-            .select('page_id')
+            .select('page_id, status, recipient_history_purged_at')
             .eq('id', campaignId)
             .single();
 
@@ -55,31 +55,40 @@ export async function GET(
             );
         }
 
-        let query = supabase
-            .from('campaign_recipients')
-            .select('id, contact_id, status, error_message, contacts(name, psid)', { count: 'exact' })
-            .eq('campaign_id', campaignId)
-            .order('created_at', { ascending: false });
-
-        if (status) {
-            query = query.eq('status', status);
-        }
-
         const from = (page - 1) * pageSize;
         const to = from + pageSize - 1;
-        query = query.range(from, to);
+        const source = status === 'failed' ? 'campaign_delivery_failures' : 'campaign_recipients';
+        let query = supabase
+            .from(source)
+            .select('contact_id, error_message, contacts(name, psid)', { count: 'exact' })
+            .eq('campaign_id', campaignId);
+
+        if (source === 'campaign_recipients' && status) {
+            query = query.eq('status', status === 'processing' ? 'processing' : status);
+        }
+
+        query = query
+            .order(source === 'campaign_delivery_failures' ? 'failed_at' : 'created_at', { ascending: false })
+            .range(from, to);
 
         const { data: recipients, error, count } = await query;
 
         if (error) throw error;
 
-        const items = normalizeCampaignRecipientErrors(recipients || []);
+        const items = normalizeCampaignRecipientErrors((recipients || []).map(recipient => ({
+            ...recipient,
+            id: recipient.contact_id,
+            status,
+            error_message: recipient.error_message || (status === 'processing' ? 'Delivery in progress' : 'Queued for delivery')
+        })));
 
         return NextResponse.json({
             items,
             page,
             pageSize,
-            total: count || 0
+            total: count || 0,
+            archived: status === 'sent' || Boolean(campaign.recipient_history_purged_at),
+            archivedAt: campaign.recipient_history_purged_at || null
         } as PaginatedResponse<CampaignRecipientError>);
     } catch (error) {
         console.error('Error fetching campaign recipients:', error);

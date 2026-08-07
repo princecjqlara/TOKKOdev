@@ -3,6 +3,7 @@ import { getSupabaseAdmin } from '@/lib/supabase';
 import { sendMessage } from '@/lib/facebook';
 import { generatePersonalizedMessage } from '@/lib/ai';
 import { getNextPhilippinesScheduledAtIso } from '@/lib/philippines-time';
+import { claimCampaignRecipients, finishLoopCampaignRecipient } from '@/lib/campaign-recipient-queue';
 
 export const dynamic = 'force-dynamic';
 
@@ -73,23 +74,17 @@ export async function GET(_request: NextRequest) {
                 continue;
             }
 
-            // Get recipients due for contact (scheduled_at or next_scheduled_at <= NOW)
             const now = new Date().toISOString();
-            const { data: dueRecipients, error: recipientError } = await supabase
-                .from('campaign_recipients')
-                .select(`
-                    id,
-                    contact_id,
-                    message_sent_count,
-                    contacts(id, psid, name, best_contact_hour)
-                `)
-                .eq('campaign_id', campaign.id)
-                .or(`scheduled_at.lte.${now},next_scheduled_at.lte.${now}`)
-                .eq('status', 'pending')
-                .limit(MAX_MESSAGES_PER_RUN);
-
-            if (recipientError) {
-                results.errors.push(`Campaign ${campaign.id}: ${recipientError.message}`);
+            let dueRecipients;
+            try {
+                dueRecipients = await claimCampaignRecipients({
+                    supabase,
+                    campaignId: campaign.id,
+                    batchSize: MAX_MESSAGES_PER_RUN,
+                    dueAt: now
+                });
+            } catch (recipientError) {
+                results.errors.push(`Campaign ${campaign.id}: ${(recipientError as Error).message}`);
                 continue;
             }
 
@@ -102,10 +97,15 @@ export async function GET(_request: NextRequest) {
 
             // Process each recipient
             for (const recipient of dueRecipients) {
-                const contactData = recipient.contacts;
-                const contact = Array.isArray(contactData) ? contactData[0] : contactData;
-
-                if (!contact?.psid) {
+                if (!recipient.contact_psid) {
+                    await finishLoopCampaignRecipient({
+                        supabase,
+                        campaignId: campaign.id,
+                        contactId: recipient.contact_id,
+                        claimToken: recipient.claim_token,
+                        success: false,
+                        errorMessage: 'Contact missing PSID'
+                    });
                     results.messagesFailed++;
                     continue;
                 }
@@ -118,7 +118,7 @@ export async function GET(_request: NextRequest) {
                     try {
                         const conversationId = await getConversationIdForPsid(
                             page.fb_page_id,
-                            contact.psid,
+                            recipient.contact_psid,
                             page.access_token
                         );
 
@@ -135,7 +135,7 @@ export async function GET(_request: NextRequest) {
                     }
 
                     // Generate AI message using conversation context
-                    const contactName = contact.name || 'there';
+                    const contactName = recipient.contact_name || 'there';
                     const messageText = await generatePersonalizedMessage(
                         campaign.ai_prompt || 'Just checking in with you!',
                         contactName,
@@ -147,43 +147,37 @@ export async function GET(_request: NextRequest) {
                     await sendMessage(
                         page.fb_page_id,
                         page.access_token,
-                        contact.psid,
+                        recipient.contact_psid,
                         messageText,
                         'HUMAN_AGENT'
                     );
 
                     // Calculate next scheduled time at the next PH best-time hour.
-                    const bestHour = contact.best_contact_hour ?? 12;
+                    const bestHour = recipient.contact_best_hour ?? 12;
                     const nextScheduledAt = getNextPhilippinesScheduledAtIso(bestHour);
 
-                    // Update recipient: increment count, set next schedule
-                    await supabase
-                        .from('campaign_recipients')
-                        .update({
-                            status: 'pending', // Keep pending for loop
-                            message_sent_count: (recipient.message_sent_count || 0) + 1,
-                            last_contacted_at: new Date().toISOString(),
-                            next_scheduled_at: nextScheduledAt,
-                            scheduled_at: null // Clear initial schedule
-                        })
-                        .eq('id', recipient.id);
+                    await finishLoopCampaignRecipient({
+                        supabase,
+                        campaignId: campaign.id,
+                        contactId: recipient.contact_id,
+                        claimToken: recipient.claim_token,
+                        success: true,
+                        nextScheduledAt
+                    });
 
                     results.messagesSent++;
-                    console.log(`✅ Sent to ${contact.name || contact.psid}`);
+                    console.log(`Sent to ${recipient.contact_name || recipient.contact_psid}`);
                 } catch (sendError) {
                     results.messagesFailed++;
-                    console.error(`❌ Failed to send to ${contact.psid}:`, sendError);
-
-                    // Mark as failed after too many attempts
-                    if ((recipient.message_sent_count || 0) >= 3) {
-                        await supabase
-                            .from('campaign_recipients')
-                            .update({
-                                status: 'failed',
-                                error_message: (sendError as Error).message
-                            })
-                            .eq('id', recipient.id);
-                    }
+                    console.error(`Failed to send to ${recipient.contact_psid}:`, sendError);
+                    await finishLoopCampaignRecipient({
+                        supabase,
+                        campaignId: campaign.id,
+                        contactId: recipient.contact_id,
+                        claimToken: recipient.claim_token,
+                        success: false,
+                        errorMessage: (sendError as Error).message
+                    });
                 }
             }
 

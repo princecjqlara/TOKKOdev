@@ -19,6 +19,7 @@ type ScheduledCampaign = {
     audience_start_date: string | null;
     audience_include_tag_ids: string[] | null;
     audience_exclude_tag_ids: string[] | null;
+    audience_materialized_at: string | null;
     recurrence: string | null;
     recurrence_end_at: string | null;
     scheduled_at: string | null;
@@ -27,7 +28,7 @@ type ScheduledCampaign = {
 };
 
 const SCHEDULED_CAMPAIGN_SELECT =
-    'id, page_id, audience_mode, audience_start_date, audience_include_tag_ids, audience_exclude_tag_ids, recurrence, recurrence_end_at, scheduled_at, status, updated_at';
+    'id, page_id, audience_mode, audience_start_date, audience_include_tag_ids, audience_exclude_tag_ids, audience_materialized_at, recurrence, recurrence_end_at, scheduled_at, status, updated_at';
 
 async function claimCampaign(
     supabase: ReturnType<typeof getSupabaseAdmin>,
@@ -101,7 +102,7 @@ async function getDueRecipientLevelCampaigns(
     const { data: dueRecipients, error } = await supabase
         .from('campaign_recipients')
         .select(`campaign_id, campaigns!inner(${SCHEDULED_CAMPAIGN_SELECT}, is_loop)`)
-        .eq('status', 'pending')
+        .in('status', ['pending', 'processing'])
         .lte('scheduled_at', now)
         .eq('campaigns.is_loop', false)
         .in('campaigns.status', ['scheduled', 'sending'])
@@ -161,7 +162,7 @@ export async function GET(_request: NextRequest) {
                 continue;
             }
 
-            if (campaign.audience_mode === 'dynamic') {
+            if (campaign.audience_mode === 'dynamic' && !campaign.audience_materialized_at) {
                 const contactIds = await resolveCampaignAudienceContactIds({
                     supabase,
                     pageId: campaign.page_id,
@@ -191,6 +192,7 @@ export async function GET(_request: NextRequest) {
                     .from('campaigns')
                     .update({
                         total_recipients: contactIds.length,
+                        audience_materialized_at: new Date().toISOString(),
                         updated_at: new Date().toISOString()
                     })
                     .eq('id', campaign.id);

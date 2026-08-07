@@ -164,6 +164,8 @@ export interface PaginatedResponse<T> {
   page: number;
   pageSize: number;
   total: number;
+  archived?: boolean;
+  archivedAt?: string | null;
 }
 
 export interface ApiError {

@@ -1,8 +1,12 @@
 // One-time migration script to add template_name and template_language columns
 import { createClient } from '@supabase/supabase-js';
 
-const supabaseUrl = 'https://pnhzpeyzpwsmwcuafgpw.supabase.co';
-const supabaseServiceKey = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InBuaHpwZXl6cHdzbXdjdWFmZ3B3Iiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc2NTI3NzkyMCwiZXhwIjoyMDgwODUzOTIwfQ.ZjqZesBGClf2Pw-bybb1Kn-F9KpA0D6jj-m76xUImTg';
+const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL ?? process.env.SUPABASE_URL;
+const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+
+if (!supabaseUrl || !supabaseServiceKey) {
+  throw new Error('Set NEXT_PUBLIC_SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY before running this migration.');
+}
 
 const supabase = createClient(supabaseUrl, supabaseServiceKey);
 
@@ -32,7 +36,7 @@ async function run() {
       console.log('------------------------------------------------------');
       console.log(sql);
       console.log('------------------------------------------------------');
-      console.log('\nGo to: https://supabase.com/dashboard/project/pnhzpeyzpwsmwcuafgpw/sql/new');
+      console.log('\nOpen your project in the Supabase SQL Editor and run the SQL above.');
     } else {
       console.log('✅ Columns already exist! No migration needed.');
       console.log('Test result:', testData);

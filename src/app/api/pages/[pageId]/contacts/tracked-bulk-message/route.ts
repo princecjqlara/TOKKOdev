@@ -182,7 +182,7 @@ async function getBulkScheduleStatus(
 
     const { data: campaigns, error: campaignError } = await supabase
         .from('campaigns')
-        .select('id, page_id')
+        .select('id, page_id, total_recipients, sent_count, failed_count')
         .eq('page_id', pageId)
         .in('id', uniqueCampaignIds);
 
@@ -203,46 +203,27 @@ async function getBulkScheduleStatus(
         };
     }
 
-    const [totalResult, sentResult, failedResult, pendingResult] = await Promise.all([
-        supabase
-            .from('campaign_recipients')
-            .select('id', { count: 'exact', head: true })
-            .in('campaign_id', allowedCampaignIds),
-        supabase
-            .from('campaign_recipients')
-            .select('id', { count: 'exact', head: true })
-            .in('campaign_id', allowedCampaignIds)
-            .eq('status', 'sent'),
-        supabase
-            .from('campaign_recipients')
-            .select('id', { count: 'exact', head: true })
-            .in('campaign_id', allowedCampaignIds)
-            .eq('status', 'failed'),
-        supabase
-            .from('campaign_recipients')
-            .select('id', { count: 'exact', head: true })
-            .in('campaign_id', allowedCampaignIds)
-            .eq('status', 'pending')
-    ]);
+    const { count: pending, error: pendingError } = await supabase
+        .from('campaign_recipients')
+        .select('contact_id', { count: 'exact', head: true })
+        .in('campaign_id', allowedCampaignIds)
+        .in('status', ['pending', 'processing']);
 
-    const firstError = totalResult.error || sentResult.error || failedResult.error || pendingResult.error;
-    if (firstError) {
-        throw firstError;
-    }
+    if (pendingError) throw pendingError;
 
-    const total = totalResult.count || 0;
-    const sent = sentResult.count || 0;
-    const failed = failedResult.count || 0;
-    const pending = pendingResult.count || 0;
+    const total = (campaigns || []).reduce((sum, campaign) => sum + Number(campaign.total_recipients || 0), 0);
+    const sent = (campaigns || []).reduce((sum, campaign) => sum + Number(campaign.sent_count || 0), 0);
+    const failed = (campaigns || []).reduce((sum, campaign) => sum + Number(campaign.failed_count || 0), 0);
+    const pendingCount = pending || 0;
 
     return {
         campaignIds: allowedCampaignIds,
         total,
         sent,
         failed,
-        pending,
-        notYetSent: pending + failed,
-        allBestTimesSent: total > 0 && sent === total && failed === 0 && pending === 0
+        pending: pendingCount,
+        notYetSent: pendingCount + failed,
+        allBestTimesSent: total > 0 && sent === total && failed === 0 && pendingCount === 0
     };
 }
 

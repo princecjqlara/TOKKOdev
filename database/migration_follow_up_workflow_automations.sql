@@ -52,3 +52,6 @@ CHECK (status IN ('active', 'stopped', 'completed'));
 CREATE INDEX IF NOT EXISTS idx_workflow_automation_states_due
 ON workflow_automation_states(next_step_at, status)
 WHERE next_step_at IS NOT NULL;
+
+-- Refresh PostgREST immediately so API queries can use the new columns.
+NOTIFY pgrst, 'reload schema';

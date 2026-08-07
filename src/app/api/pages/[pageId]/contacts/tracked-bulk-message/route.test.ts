@@ -199,7 +199,13 @@ function createBestTimeSupabaseMock() {
                 select: () => ({
                     eq: () => ({
                         in: () => Promise.resolve({
-                            data: campaignIds.map((id) => ({ id, page_id: 'page_1' })),
+                            data: campaignIds.map((id) => ({
+                                id,
+                                page_id: 'page_1',
+                                total_recipients: 2,
+                                sent_count: 0,
+                                failed_count: 0
+                            })),
                             error: null
                         })
                     })
@@ -211,12 +217,9 @@ function createBestTimeSupabaseMock() {
             return {
                 insert: campaignRecipientsInsert,
                 select: () => ({
-                    in: () => Object.assign(
-                        createCountResult(6),
-                        {
-                            eq: (_column: string, status: string) => createCountResult(status === 'pending' ? 6 : 0)
-                        }
-                    )
+                    in: () => ({
+                        in: () => createCountResult(6)
+                    })
                 })
             };
         }

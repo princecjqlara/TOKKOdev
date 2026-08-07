@@ -386,6 +386,9 @@ function ActivityRows({ item, expanded, onToggle, errors, errorTotal, errorsLoad
     errorTotal: number; errorsLoading: boolean; onLoadErrors: () => void;
 }) {
     const actorLabel = item.actor?.name || item.actor?.email || 'Former / unknown user';
+    const recipientHistoryPurgedAt = typeof item.details.recipientHistoryPurgedAt === 'string'
+        ? item.details.recipientHistoryPurgedAt
+        : null;
     return (
         <>
             <tr className="hover:bg-gray-50 align-top">
@@ -426,7 +429,12 @@ function ActivityRows({ item, expanded, onToggle, errors, errorTotal, errorsLoad
                                 {Object.entries(item.details).map(([key, value]) => <Detail key={key} label={humanize(key)} value={detailValue(value)} boxed />)}
                             </div>
                         </div>
-                        {item.source === 'campaign' && item.failureCount > 0 && (
+                        {item.source === 'campaign' && item.failureCount > 0 && recipientHistoryPurgedAt && (
+                            <p className="border border-amber-700 bg-amber-50 p-3 font-mono text-xs text-amber-900">
+                                Recipient-level details were archived on {formatDateTime(recipientHistoryPurgedAt)}. Campaign totals remain available above.
+                            </p>
+                        )}
+                        {item.source === 'campaign' && item.failureCount > 0 && !recipientHistoryPurgedAt && (
                             <div>
                                 <button onClick={onLoadErrors} disabled={errorsLoading} className="btn-wireframe text-xs">
                                     {errorsLoading ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : <AlertTriangle className="w-4 h-4 mr-2" />} View recipient failures

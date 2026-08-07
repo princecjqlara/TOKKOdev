@@ -65,6 +65,17 @@ SUPABASE_SERVICE_ROLE_KEY=your-supabase-service-role-key
 
 4. Set up the database:
 Run the SQL schema from `database/schema.sql` in your Supabase SQL editor.
+Then run `database/migration_database_retention.sql` to install bounded campaign-history retention and automatic database maintenance.
+For production, also run `database/migration_database_control_plane.sql` to add schema-version tracking, database health snapshots, integrity constraints, and maintenance observability.
+High-volume installations can then run `database/migration_compact_contact_interactions.sql` and its finalize migration to replace unbounded raw interaction events with compatible hourly counters.
+
+For large campaigns, deploy the compact delivery queue in this exact order:
+
+1. Run `database/migration_compact_campaign_delivery_prepare.sql`. It is additive and safe with the older sender.
+2. Deploy the application code that uses atomic recipient claims and batch completion RPCs.
+3. Confirm the new deployment is healthy, then run `database/migration_compact_campaign_delivery_finalize.sql` once. The finalizer preserves campaign totals and failures, removes completed one-time queue rows, and replaces the random recipient UUID with the `(campaign_id, contact_id)` primary key.
+
+Do not run the finalizer before step 2. Older senders calculate progress from terminal queue rows that the finalizer intentionally removes.
 
 5. Run the development server:
 ```bash

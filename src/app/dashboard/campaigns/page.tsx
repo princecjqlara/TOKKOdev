@@ -225,6 +225,7 @@ export default function CampaignsPage() {
     const [errorsPage, setErrorsPage] = useState(1);
     const [errorsPageSize, setErrorsPageSize] = useState(25);
     const [errorsTotal, setErrorsTotal] = useState(0);
+    const [errorsArchivedAt, setErrorsArchivedAt] = useState<string | null>(null);
 
     // Contacts pagination and filtering for modal
     const [contactsPage, setContactsPage] = useState(1);
@@ -356,6 +357,7 @@ export default function CampaignsPage() {
 
             setCampaignErrors(data.items || []);
             setErrorsTotal(data.total || 0);
+            setErrorsArchivedAt(data.archivedAt || null);
         } catch (error) {
             console.error('Error fetching campaign errors:', error);
         } finally {
@@ -2309,13 +2311,16 @@ export default function CampaignsPage() {
                     setErrorsPage(1);
                     setErrorsPageSize(25);
                     setErrorsTotal(0);
+                    setErrorsArchivedAt(null);
                 }}
                 title="Failed Recipients"
                 size="lg"
             >
                 <div className="space-y-4">
                     <p className="font-mono text-sm text-gray-500">
-                        {errorsTotal > 0
+                        {errorsArchivedAt
+                            ? `Recipient-level history was archived on ${new Date(errorsArchivedAt).toLocaleString()}. Campaign totals are still retained.`
+                            : errorsTotal > 0
                             ? `${errorsTotal} failed recipients`
                             : 'No failed recipients found.'}
                     </p>
@@ -2328,7 +2333,7 @@ export default function CampaignsPage() {
                         <div className="max-h-64 overflow-y-auto border border-black">
                             {campaignErrors.length === 0 ? (
                                 <div className="p-6 text-center text-sm font-mono text-gray-500">
-                                    No failed recipients in this page.
+                                    {errorsArchivedAt ? 'Recipient details were removed by database retention.' : 'No failed recipients in this page.'}
                                 </div>
                             ) : (
                                 campaignErrors.map((entry) => (

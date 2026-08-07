@@ -67,28 +67,20 @@ export async function POST(
             );
         }
 
-        // Update campaign status to cancelled
-        await supabase
-            .from('campaigns')
-            .update({
-                status: 'cancelled',
-                updated_at: new Date().toISOString()
-            })
-            .eq('id', campaignId);
+        // Atomically stop the campaign and discard unsent queue rows. In-flight
+        // claimed rows are allowed to finish; no cancelled target is recorded
+        // as a delivery failure.
+        const { data: discardedRecipients, error: cancelError } = await supabase.rpc(
+            'cancel_campaign_delivery',
+            { p_campaign_id: campaignId }
+        );
 
-        // Mark all pending recipients as cancelled (not sent)
-        await supabase
-            .from('campaign_recipients')
-            .update({
-                status: 'failed',
-                error_message: 'Campaign cancelled by user'
-            })
-            .eq('campaign_id', campaignId)
-            .eq('status', 'pending');
+        if (cancelError) throw cancelError;
 
         return NextResponse.json({
             success: true,
-            message: 'Campaign cancelled successfully'
+            message: 'Campaign cancelled successfully',
+            discardedRecipients: Number(discardedRecipients || 0)
         });
     } catch (error) {
         console.error('Error cancelling campaign:', error);

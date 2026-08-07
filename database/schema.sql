@@ -118,8 +118,10 @@
         audience_start_date DATE,
         audience_include_tag_ids JSONB DEFAULT '[]',
         audience_exclude_tag_ids JSONB DEFAULT '[]',
+        audience_materialized_at TIMESTAMPTZ,
         started_at TIMESTAMPTZ,
         completed_at TIMESTAMPTZ,
+        recipient_history_purged_at TIMESTAMPTZ,
         total_recipients INTEGER DEFAULT 0,
         sent_count INTEGER DEFAULT 0,
         failed_count INTEGER DEFAULT 0,
@@ -130,16 +132,30 @@
 
     -- Campaign recipients table (tracks which contacts receive which campaigns)
     CREATE TABLE IF NOT EXISTS campaign_recipients (
-        id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
         campaign_id UUID NOT NULL REFERENCES campaigns(id) ON DELETE CASCADE,
         contact_id UUID NOT NULL REFERENCES contacts(id) ON DELETE CASCADE,
-        status TEXT NOT NULL DEFAULT 'pending', -- 'pending', 'sent', 'failed'
+        status TEXT NOT NULL DEFAULT 'pending', -- 'pending', 'processing', 'sent', 'failed'
         scheduled_at TIMESTAMPTZ,
         next_scheduled_at TIMESTAMPTZ,
         sent_at TIMESTAMPTZ,
         error_message TEXT,
+        claim_token UUID,
+        claimed_at TIMESTAMPTZ,
         created_at TIMESTAMPTZ DEFAULT NOW(),
-        UNIQUE(campaign_id, contact_id)
+        message_sent_count INTEGER DEFAULT 0,
+        last_contacted_at TIMESTAMPTZ,
+        PRIMARY KEY(campaign_id, contact_id)
+    );
+
+    -- Only failures need recipient-level history. Successful one-time delivery
+    -- rows are deleted immediately after campaign counters are incremented.
+    CREATE TABLE IF NOT EXISTS campaign_delivery_failures (
+        campaign_id UUID NOT NULL REFERENCES campaigns(id) ON DELETE CASCADE,
+        contact_id UUID NOT NULL REFERENCES contacts(id) ON DELETE CASCADE,
+        error_message TEXT NOT NULL,
+        failed_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        attempt_count SMALLINT NOT NULL DEFAULT 1 CHECK (attempt_count > 0),
+        PRIMARY KEY(campaign_id, contact_id)
     );
 
     -- Shared page audit history for bulk actions outside campaign sending
@@ -219,9 +235,7 @@
     CREATE INDEX IF NOT EXISTS idx_pages_fb_page_id ON pages(fb_page_id);
     CREATE INDEX IF NOT EXISTS idx_user_pages_user_id ON user_pages(user_id);
     CREATE INDEX IF NOT EXISTS idx_user_pages_page_id ON user_pages(page_id);
-    CREATE INDEX IF NOT EXISTS idx_contacts_page_id ON contacts(page_id);
-    CREATE INDEX IF NOT EXISTS idx_contacts_psid ON contacts(psid);
-    CREATE INDEX IF NOT EXISTS idx_contacts_page_psid ON contacts(page_id, psid);
+    -- UNIQUE (page_id, psid) already provides the contact lookup index.
     CREATE INDEX IF NOT EXISTS idx_contact_tags_contact_id ON contact_tags(contact_id);
     CREATE INDEX IF NOT EXISTS idx_contact_tags_tag_id ON contact_tags(tag_id);
     CREATE INDEX IF NOT EXISTS idx_contact_tags_created_by ON contact_tags(created_by);
@@ -234,9 +248,9 @@
     CREATE INDEX IF NOT EXISTS idx_campaigns_page_id ON campaigns(page_id);
     CREATE INDEX IF NOT EXISTS idx_campaigns_status ON campaigns(status);
     CREATE INDEX IF NOT EXISTS idx_campaigns_scheduled_at ON campaigns(scheduled_at);
-    CREATE INDEX IF NOT EXISTS idx_campaign_recipients_campaign_id ON campaign_recipients(campaign_id);
+    -- UNIQUE (campaign_id, contact_id) already indexes campaign_id.
     CREATE INDEX IF NOT EXISTS idx_campaign_recipients_contact_id ON campaign_recipients(contact_id);
-    CREATE INDEX IF NOT EXISTS idx_campaign_recipients_status ON campaign_recipients(status);
+    CREATE INDEX IF NOT EXISTS idx_campaign_delivery_failures_campaign_failed ON campaign_delivery_failures(campaign_id, failed_at DESC);
     CREATE INDEX IF NOT EXISTS idx_workflow_automations_page_enabled ON workflow_automations(page_id, enabled, trigger_type);
     CREATE INDEX IF NOT EXISTS idx_workflow_automation_states_contact ON workflow_automation_states(contact_id, status);
     CREATE INDEX IF NOT EXISTS idx_workflow_automation_states_automation ON workflow_automation_states(automation_id, status);
@@ -286,6 +300,7 @@
     ALTER TABLE contact_tags ENABLE ROW LEVEL SECURITY;
     ALTER TABLE campaigns ENABLE ROW LEVEL SECURITY;
     ALTER TABLE campaign_recipients ENABLE ROW LEVEL SECURITY;
+    ALTER TABLE campaign_delivery_failures ENABLE ROW LEVEL SECURITY;
     ALTER TABLE workflow_automations ENABLE ROW LEVEL SECURITY;
     ALTER TABLE workflow_automation_states ENABLE ROW LEVEL SECURITY;
 

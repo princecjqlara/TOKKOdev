@@ -6,6 +6,11 @@ import { normalizeContactName } from './contact-names';
 import { replaceTemplateVariables } from './placeholders';
 import { isRetryableSendError } from './send-errors';
 import { getSupabaseAdmin } from './supabase';
+import {
+    claimCampaignRecipients,
+    finishCampaignRecipientBatch,
+    getCampaignDeliveryProgress
+} from './campaign-recipient-queue';
 import type { TemplateMediaType } from './facebook-templates';
 
 type SupabaseLike = ReturnType<typeof getSupabaseAdmin>;
@@ -97,129 +102,6 @@ export async function sendCampaignById({
             .update({ status: 'sending', updated_at: new Date().toISOString() })
             .eq('id', campaignId);
 
-        async function getRecipientStatusCounts() {
-            const [sentResult, failedResult, pendingResult] = await Promise.all([
-                supabase
-                    .from('campaign_recipients')
-                    .select('id', { count: 'exact', head: true })
-                    .eq('campaign_id', campaignId)
-                    .eq('status', 'sent'),
-                supabase
-                    .from('campaign_recipients')
-                    .select('id', { count: 'exact', head: true })
-                    .eq('campaign_id', campaignId)
-                    .eq('status', 'failed'),
-                supabase
-                    .from('campaign_recipients')
-                    .select('id', { count: 'exact', head: true })
-                    .eq('campaign_id', campaignId)
-                    .eq('status', 'pending')
-            ]);
-
-            const firstError = sentResult.error || failedResult.error || pendingResult.error;
-            if (firstError) {
-                throw firstError;
-            }
-
-            return {
-                sent: sentResult.count || 0,
-                failed: failedResult.count || 0,
-                pending: pendingResult.count || 0
-            };
-        }
-
-        const startingCounts = await getRecipientStatusCounts();
-        let allRecipients: { id: string; contact_id: string; contacts: { psid: string; name?: string } | { psid: string; name?: string }[] | null }[] = [];
-        const RECIPIENT_FETCH_PAGE_SIZE = 2000;
-        const RECIPIENT_FETCH_LIMIT =
-            typeof maxRecipientsPerRun === 'number' && Number.isFinite(maxRecipientsPerRun)
-                ? Math.max(1, Math.floor(maxRecipientsPerRun))
-                : null;
-        let offset = 0;
-        let hasMore = true;
-
-        console.log(`📤 Fetching all recipients for campaign ${campaignId}...`);
-
-        while (hasMore) {
-            let recipientQuery = supabase
-                .from('campaign_recipients')
-                .select('id, contact_id, contacts(psid, name)')
-                .eq('campaign_id', campaignId)
-                .eq('status', 'pending');
-
-            if (dueAt) {
-                const dueFilters = [
-                    includeUnscheduledRecipients ? 'scheduled_at.is.null' : null,
-                    `scheduled_at.lte.${dueAt}`,
-                    `next_scheduled_at.lte.${dueAt}`
-                ].filter(Boolean);
-
-                recipientQuery = recipientQuery.or(
-                    dueFilters.join(',')
-                );
-            }
-
-            const remainingFetchLimit = RECIPIENT_FETCH_LIMIT === null
-                ? RECIPIENT_FETCH_PAGE_SIZE
-                : RECIPIENT_FETCH_LIMIT - allRecipients.length;
-
-            if (remainingFetchLimit <= 0) {
-                break;
-            }
-
-            const pageSize = Math.min(RECIPIENT_FETCH_PAGE_SIZE, remainingFetchLimit);
-            const { data: recipientBatch, error: recipientError } = await recipientQuery
-                .range(offset, offset + pageSize - 1);
-
-            if (recipientError) {
-                console.error(`❌ Error fetching recipients batch at offset ${offset}:`, recipientError);
-                break;
-            }
-
-            if (recipientBatch && recipientBatch.length > 0) {
-                allRecipients = allRecipients.concat(recipientBatch);
-                console.log(`📤 Fetched ${recipientBatch.length} recipients (total so far: ${allRecipients.length})`);
-                offset += RECIPIENT_FETCH_PAGE_SIZE;
-
-                hasMore =
-                    recipientBatch.length === pageSize &&
-                    (RECIPIENT_FETCH_LIMIT === null || allRecipients.length < RECIPIENT_FETCH_LIMIT);
-            } else {
-                hasMore = false;
-            }
-        }
-
-        const recipients = allRecipients;
-
-        if (!recipients?.length) {
-            const currentCounts = await getRecipientStatusCounts();
-            await supabase
-                .from('campaigns')
-                .update({
-                    status: currentCounts.pending > 0 ? 'scheduled' : 'completed',
-                    sent_count: currentCounts.sent,
-                    failed_count: currentCounts.failed,
-                    updated_at: new Date().toISOString()
-                })
-                .eq('id', campaignId);
-
-            return {
-                status: 200,
-                body: {
-                    success: true,
-                    sent: 0,
-                    failed: 0,
-                    pending: currentCounts.pending,
-                    message: currentCounts.pending > 0
-                        ? 'No recipients are due yet'
-                        : 'No recipients to send to'
-                },
-                success: true,
-                sent: 0,
-                failed: 0
-            };
-        }
-
         const pagesData = campaign.pages;
         const page = (Array.isArray(pagesData) ? pagesData[0] : pagesData) as { fb_page_id: string; access_token: string } | null;
 
@@ -232,52 +114,24 @@ export async function sendCampaignById({
                 failed: 0
             };
         }
-        let sent = 0;
-        let failed = 0;
-
+        let sentThisRun = 0;
+        let failedThisRun = 0;
+        let processedThisRun = 0;
         const SEND_BATCH_SIZE = Math.max(1, Math.min(sendBatchSize || 10, 25));
         const DELAY_BETWEEN_BATCHES = Math.max(0, delayBetweenBatchesMs || 0);
         const MAX_PROCESSING_TIME = Math.max(30000, Math.min(maxProcessingTimeMs || 240000, 270000));
         const SEND_RETRY_ATTEMPTS = Math.max(0, Math.min(sendRetryAttempts || 0, 3));
         const SEND_RETRY_DELAY = Math.max(0, Math.min(sendRetryDelayMs || 0, 5000));
+        const MAX_RECIPIENTS =
+            typeof maxRecipientsPerRun === 'number' && Number.isFinite(maxRecipientsPerRun)
+                ? Math.max(1, Math.floor(maxRecipientsPerRun))
+                : Number.MAX_SAFE_INTEGER;
         const startTime = Date.now();
+        const useAiMessages = campaign.use_ai_message || campaign.is_loop;
 
-        console.log(`📤 Starting campaign send: ${recipients.length} recipients in batches of ${SEND_BATCH_SIZE}`);
+        console.log(`Starting campaign ${campaignId} with atomic batches of ${SEND_BATCH_SIZE}`);
 
-        for (let i = 0; i < recipients.length; i += SEND_BATCH_SIZE) {
-            const elapsed = Date.now() - startTime;
-            if (elapsed > MAX_PROCESSING_TIME) {
-                const remainingCount = recipients.length - i;
-                console.warn(`⏱️ Campaign timeout: processed ${i}/${recipients.length}, ${remainingCount} remaining`);
-
-                await supabase
-                    .from('campaigns')
-                    .update({
-                        status: 'sending',
-                        sent_count: startingCounts.sent + sent,
-                        failed_count: startingCounts.failed + failed,
-                        updated_at: new Date().toISOString()
-                    })
-                    .eq('id', campaignId);
-
-                return {
-                    status: 200,
-                    body: {
-                        success: true,
-                        partial: true,
-                        sent: startingCounts.sent + sent,
-                        failed: startingCounts.failed + failed,
-                        processed: i,
-                        total: recipients.length,
-                        remaining: remainingCount,
-                        message: `Processed ${i} of ${recipients.length} recipients before timeout. ${remainingCount} remaining.`
-                    },
-                    success: true,
-                    sent: startingCounts.sent + sent,
-                    failed: startingCounts.failed + failed
-                };
-            }
-
+        while (processedThisRun < MAX_RECIPIENTS && Date.now() - startTime <= MAX_PROCESSING_TIME) {
             const { data: currentCampaign } = await supabase
                 .from('campaigns')
                 .select('status')
@@ -285,46 +139,45 @@ export async function sendCampaignById({
                 .single();
 
             if (currentCampaign?.status === 'cancelled') {
+                const progress = await getCampaignDeliveryProgress(supabase, campaignId);
                 return {
                     status: 200,
                     body: {
                         success: true,
-                        sent,
-                        failed,
+                        sent: progress.sent,
+                        failed: progress.failed,
                         cancelled: true,
                         message: 'Campaign was cancelled'
                     },
                     success: true,
-                    sent,
-                    failed
+                    sent: progress.sent,
+                    failed: progress.failed
                 };
             }
 
-            const batch = recipients.slice(i, i + SEND_BATCH_SIZE);
-            const useAiMessages = campaign.use_ai_message || campaign.is_loop;
+            const batch = await claimCampaignRecipients({
+                supabase,
+                campaignId,
+                batchSize: Math.min(SEND_BATCH_SIZE, MAX_RECIPIENTS - processedThisRun),
+                dueAt,
+                includeUnscheduledRecipients
+            });
+
+            if (batch.length === 0) break;
 
             const batchPromises = batch.map(async (recipient) => {
-                const contactData = recipient.contacts;
-                const contact = Array.isArray(contactData) ? contactData[0] : contactData;
-
-                if (!contact?.psid) {
-                    await supabase
-                        .from('campaign_recipients')
-                        .update({
-                            status: 'failed',
-                            error_message: 'Contact missing PSID'
-                        })
-                        .eq('id', recipient.id);
-                    return { success: false, recipientId: recipient.id, error: 'Contact missing PSID' };
+                if (!recipient.contact_psid) {
+                    return { success: false, contactId: recipient.contact_id, error: 'Contact missing PSID' };
                 }
 
+                let deliveryError: string | undefined;
                 try {
                     let messagesToSend = parseCampaignMessageParts(campaign.message_text);
 
-                    const normalizedContactName = normalizeContactName(contact.name);
+                    const normalizedContactName = normalizeContactName(recipient.contact_name);
                     const placeholderContact = {
                         id: recipient.contact_id,
-                        psid: contact.psid,
+                        psid: recipient.contact_psid,
                         page_id: campaign.page_id,
                         name: normalizedContactName,
                         last_interaction_at: null
@@ -334,7 +187,7 @@ export async function sendCampaignById({
                         try {
                             const conversationId = await getConversationIdForPsid(
                                 page.fb_page_id,
-                                contact.psid,
+                                recipient.contact_psid,
                                 page.access_token
                             );
 
@@ -353,9 +206,9 @@ export async function sendCampaignById({
                             );
                             messagesToSend = [{ text: messageToSend }];
 
-                            console.log(`🤖 AI generated message for ${contact.name || contact.psid}`);
+                            console.log(`AI generated message for ${recipient.contact_name || recipient.contact_psid}`);
                         } catch (aiError) {
-                            console.warn(`⚠️ AI generation failed for ${contact.psid}, using fallback:`, (aiError as Error).message);
+                            console.warn(`AI generation failed for ${recipient.contact_psid}, using fallback:`, (aiError as Error).message);
                             messagesToSend = [{ text: replaceTemplateVariables(campaign.ai_prompt, placeholderContact) }];
                         }
                     } else {
@@ -394,7 +247,7 @@ export async function sendCampaignById({
                                 const sendArgs: Parameters<typeof sendMessage> = [
                                     page.fb_page_id,
                                     page.access_token,
-                                    contact.psid,
+                                    recipient.contact_psid,
                                     messageToSend,
                                     messagingType,
                                     templateName,
@@ -418,7 +271,7 @@ export async function sendCampaignById({
                                 }
 
                                 const retryDelay = SEND_RETRY_DELAY * (attempt + 1);
-                                console.warn(`Retrying send to ${contact.psid} after transient error (${attempt + 1}/${SEND_RETRY_ATTEMPTS}): ${errorMessage}`);
+                                console.warn(`Retrying send to ${recipient.contact_psid} after transient error (${attempt + 1}/${SEND_RETRY_ATTEMPTS}): ${errorMessage}`);
                                 if (retryDelay > 0) {
                                     await new Promise(resolve => setTimeout(resolve, retryDelay));
                                 }
@@ -426,62 +279,55 @@ export async function sendCampaignById({
                         }
                     }
 
-                    await supabase
-                        .from('campaign_recipients')
-                        .update({
-                            status: 'sent',
-                            sent_at: new Date().toISOString()
-                        })
-                        .eq('id', recipient.id);
-
-                    return { success: true, recipientId: recipient.id };
                 } catch (error) {
-                    const errorMessage = (error as Error).message;
-                    console.warn(`Failed to send to ${contact.psid}: ${errorMessage}`);
-
-                    await supabase
-                        .from('campaign_recipients')
-                        .update({
-                            status: 'failed',
-                            error_message: errorMessage
-                        })
-                        .eq('id', recipient.id);
-
-                    return { success: false, recipientId: recipient.id, error: errorMessage };
+                    deliveryError = (error as Error).message;
+                    console.warn(`Failed to send to ${recipient.contact_psid}: ${deliveryError}`);
                 }
+
+                return deliveryError
+                    ? { success: false, contactId: recipient.contact_id, error: deliveryError }
+                    : { success: true, contactId: recipient.contact_id };
             });
 
             const batchResults = await Promise.allSettled(batchPromises);
+            const completionResults = batchResults.map((result, index) => {
+                if (result.status === 'fulfilled') {
+                    return {
+                        contact_id: result.value.contactId,
+                        success: result.value.success,
+                        error_message: result.value.success ? null : result.value.error || 'Unknown delivery error'
+                    };
+                }
+
+                return {
+                    contact_id: batch[index].contact_id,
+                    success: false,
+                    error_message: result.reason instanceof Error ? result.reason.message : 'Unexpected delivery error'
+                };
+            });
+
+            await finishCampaignRecipientBatch({
+                supabase,
+                campaignId,
+                claimToken: batch[0].claim_token,
+                results: completionResults
+            });
 
             for (const result of batchResults) {
                 if (result.status === 'fulfilled') {
                     if (result.value.success) {
-                        sent++;
+                        sentThisRun++;
                     } else {
-                        failed++;
+                        failedThisRun++;
                     }
                 } else {
-                    failed++;
+                    failedThisRun++;
                 }
             }
+            processedThisRun += batch.length;
 
-            await supabase
-                .from('campaigns')
-                .update({
-                    sent_count: startingCounts.sent + sent,
-                    failed_count: startingCounts.failed + failed,
-                    updated_at: new Date().toISOString()
-                })
-                .eq('id', campaignId);
-
-            if (i + SEND_BATCH_SIZE < recipients.length) {
+            if (processedThisRun < MAX_RECIPIENTS) {
                 await new Promise(resolve => setTimeout(resolve, DELAY_BETWEEN_BATCHES));
-            }
-
-            if ((i + SEND_BATCH_SIZE) % 50 === 0 || i + SEND_BATCH_SIZE >= recipients.length) {
-                const progress = Math.min(i + SEND_BATCH_SIZE, recipients.length);
-                const percentage = Math.round((progress / recipients.length) * 100);
-                console.log(`📊 Campaign progress: ${progress}/${recipients.length} (${percentage}%) | Sent: ${sent}, Failed: ${failed}`);
             }
         }
 
@@ -491,67 +337,68 @@ export async function sendCampaignById({
             .eq('id', campaignId)
             .single();
 
+        const progress = await getCampaignDeliveryProgress(supabase, campaignId);
+
         if (finalStatus?.status !== 'cancelled') {
-            const finalCounts = await getRecipientStatusCounts();
             await supabase
                 .from('campaigns')
                 .update({
-                    status: finalCounts.pending > 0 ? (dueAt ? 'scheduled' : 'sending') : 'completed',
-                    sent_count: finalCounts.sent,
-                    failed_count: finalCounts.failed,
+                    status: progress.remaining > 0 ? (dueAt ? 'scheduled' : 'sending') : 'completed',
+                    completed_at: progress.remaining > 0 ? null : new Date().toISOString(),
                     updated_at: new Date().toISOString()
                 })
                 .eq('id', campaignId);
 
-            if (finalCounts.pending > 0) {
+            if (progress.remaining > 0) {
                 return {
                     status: 200,
                     body: {
                         success: true,
                         partial: true,
-                        sent: finalCounts.sent,
-                        failed: finalCounts.failed,
-                        processed: sent + failed,
-                        total: campaign.total_recipients || finalCounts.sent + finalCounts.failed + finalCounts.pending,
-                        remaining: finalCounts.pending,
-                        message: `Processed ${sent + failed} recipients in this slice. ${finalCounts.pending} pending recipients remain.`
+                        sent: progress.sent,
+                        failed: progress.failed,
+                        processed: processedThisRun,
+                        total: campaign.total_recipients || progress.sent + progress.failed + progress.remaining,
+                        remaining: progress.remaining,
+                        message: processedThisRun > 0
+                            ? `Processed ${processedThisRun} recipients in this slice. ${progress.remaining} queued recipients remain.`
+                            : 'No recipients are due yet or another worker currently owns the due batch.'
                     },
                     success: true,
-                    sent: finalCounts.sent,
-                    failed: finalCounts.failed
+                    sent: progress.sent,
+                    failed: progress.failed
                 };
             }
         }
 
-        console.log(`✅ Campaign complete: ${sent} sent, ${failed} failed out of ${recipients.length} recipients`);
-
-        const completedSent = startingCounts.sent + sent;
-        const completedFailed = startingCounts.failed + failed;
+        console.log(`Campaign run finished: ${sentThisRun} sent, ${failedThisRun} failed`);
 
         return {
             status: 200,
             body: {
                 success: true,
-                sent: completedSent,
-                failed: completedFailed
+                sent: progress.sent,
+                failed: progress.failed
             },
             success: true,
-            sent: completedSent,
-            failed: completedFailed
+            sent: progress.sent,
+            failed: progress.failed
         };
     } catch (error) {
         console.error('Error sending campaign:', error);
 
-        // Reset campaign status back to draft so it can be retried
+        // Claims expire automatically. Re-arm the campaign so a later request
+        // can safely resume without resetting or duplicating completed rows.
         try {
             await supabase
                 .from('campaigns')
                 .update({
-                    status: 'draft',
+                    status: allowScheduled ? 'scheduled' : 'draft',
                     updated_at: new Date().toISOString()
                 })
-                .eq('id', campaignId);
-            console.log(`🔄 Campaign ${campaignId} status reset to 'draft' after error`);
+                .eq('id', campaignId)
+                .eq('status', 'sending');
+            console.log(`Campaign ${campaignId} re-armed after sender error`);
         } catch (resetError) {
             console.error(`❌ Failed to reset campaign ${campaignId} status:`, resetError);
         }

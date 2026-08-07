@@ -27,6 +27,7 @@ type CampaignRow = {
     audience_start_date: string | null;
     audience_include_tag_ids: string[];
     audience_exclude_tag_ids: string[];
+    audience_materialized_at: string | null;
     recurrence: 'none' | 'daily';
     recurrence_end_at: string | null;
     scheduled_at: string | null;
@@ -63,6 +64,7 @@ function createCampaign(overrides: Partial<CampaignRow> = {}): CampaignRow {
         audience_start_date: '2026-03-01',
         audience_include_tag_ids: ['tag_a'],
         audience_exclude_tag_ids: ['tag_x'],
+        audience_materialized_at: null,
         recurrence: 'none',
         recurrence_end_at: null,
         scheduled_at: '2026-03-22T10:30:00.000Z',
