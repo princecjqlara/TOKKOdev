@@ -66,16 +66,20 @@ function createSupabaseMock(options: { hasAccess?: boolean; hasPage?: boolean } 
     const pageEq = vi.fn().mockReturnValue({ single: pageSingle });
     const pageSelect = vi.fn().mockReturnValue({ eq: pageEq });
 
-    const contactsIn = vi.fn().mockResolvedValue({
-        data: [
-            {
-                id: 'contact_1',
+    const contactsIn = vi.fn((_column: string, contactIds: string[]) => Promise.resolve({
+        data: contactIds.map((id) => id === 'contact_1'
+            ? {
+                id,
                 psid: 'contact_psid_1',
                 name: 'Jane Contact'
             }
-        ],
+            : {
+                id,
+                psid: `psid_${id}`,
+                name: id
+            }),
         error: null
-    });
+    }));
     const contactsEq = vi.fn().mockReturnValue({ in: contactsIn });
     const contactsSelect = vi.fn().mockReturnValue({ eq: contactsEq });
 
@@ -211,6 +215,24 @@ describe('GET /api/pages/[pageId]/conversations/export', () => {
         );
         expect(body).toContain('"contact_psid_1","Jane Contact","message_1"');
         expect(body).toContain('"message_2","fb_page_1","Study Page","page","Thanks for messaging us"');
+    });
+
+    it('loads large selected exports in URL-safe query batches', async () => {
+        const supabase = createSupabaseMock();
+        mocks.getSupabaseAdmin.mockReturnValue(supabase);
+        const contactIds = Array.from({ length: 205 }, (_, index) => `contact_${index + 1}`);
+
+        const response = await POST(createPostRequest({
+            format: 'csv',
+            contactIds
+        }), {
+            params: Promise.resolve({ pageId: 'page_1' })
+        });
+
+        expect(response.status).toBe(200);
+        expect(supabase.contactsIn).toHaveBeenCalledTimes(3);
+        expect(supabase.contactsIn.mock.calls.map((call) => call[1].length)).toEqual([100, 100, 5]);
+        expect(mocks.getConversationIdForPsid).toHaveBeenCalledTimes(205);
     });
 
     it('returns 403 when the user does not have page access', async () => {

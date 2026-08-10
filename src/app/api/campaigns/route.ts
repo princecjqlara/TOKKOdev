@@ -4,6 +4,7 @@ import { authOptions } from '@/lib/auth';
 import { normalizeCampaignMessageParts, serializeCampaignMessageSequence } from '../../../lib/campaign-message-sequence';
 import { getNextPhilippinesScheduledAtIso, getPhilippinesDatePartsFromDateString, getPhilippinesScheduledAtIso } from '@/lib/philippines-time';
 import { getSupabaseAdmin } from '@/lib/supabase';
+import { SUPABASE_IN_FILTER_BATCH_SIZE } from '@/lib/supabase-pagination';
 import { PaginatedResponse, Campaign } from '@/types';
 import { recordPageActivity } from '@/lib/activity-history';
 
@@ -286,12 +287,17 @@ export async function POST(request: NextRequest) {
             let contactBestTimes: Map<string, number | null> = new Map();
             if (useBestTime) {
                 // Fetch best_contact_hour for all contacts
-                for (let i = 0; i < normalizedContactIds.length; i += 1000) {
-                    const batchIds = normalizedContactIds.slice(i, i + 1000);
-                    const { data: contacts } = await supabase
+                for (let i = 0; i < normalizedContactIds.length; i += SUPABASE_IN_FILTER_BATCH_SIZE) {
+                    const batchIds = normalizedContactIds.slice(i, i + SUPABASE_IN_FILTER_BATCH_SIZE);
+                    const { data: contacts, error: contactsError } = await supabase
                         .from('contacts')
                         .select('id, best_contact_hour')
+                        .eq('page_id', pageId)
                         .in('id', batchIds);
+
+                    if (contactsError) {
+                        throw new Error(`Failed to load contact best times: ${contactsError.message}`);
+                    }
 
                     if (contacts) {
                         for (const contact of contacts) {
@@ -337,7 +343,7 @@ export async function POST(request: NextRequest) {
                     .insert(recipients);
 
                 if (insertError) {
-                    console.error(`❌ Error inserting recipients batch ${Math.floor(i / BATCH_SIZE) + 1}:`, insertError);
+                    throw insertError;
                 } else {
                     console.log(`✅ Inserted batch ${Math.floor(i / BATCH_SIZE) + 1} (${batchIds.length} recipients)`);
                 }

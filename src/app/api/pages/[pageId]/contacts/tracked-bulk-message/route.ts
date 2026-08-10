@@ -6,7 +6,7 @@ import { chunkArray } from '@/lib/chunking';
 import { getMediaTemplateName } from '@/lib/facebook-templates';
 import { getPhilippinesScheduledAtIso, getTomorrowPhilippinesDateParts } from '@/lib/philippines-time';
 import { getSupabaseAdmin } from '@/lib/supabase';
-import { fetchAllSupabaseRows } from '@/lib/supabase-pagination';
+import { fetchAllSupabaseRows, SUPABASE_IN_FILTER_BATCH_SIZE } from '@/lib/supabase-pagination';
 
 export const maxDuration = 300;
 
@@ -341,7 +341,7 @@ async function resolveSpecificContactIds({
 }) {
     const resolved: string[] = [];
 
-    for (const batch of chunkArray(contactIds, 1000)) {
+    for (const batch of chunkArray(contactIds, SUPABASE_IN_FILTER_BATCH_SIZE)) {
         const { data, error } = await supabase
             .from('contacts')
             .select('id')
@@ -515,7 +515,7 @@ export async function POST(
 
         if (deliveryMode === 'best_time_next_day') {
             const contactsById = new Map<string, ContactBestTimeRow>();
-            for (const batch of chunkArray(contactIds, 1000)) {
+            for (const batch of chunkArray(contactIds, SUPABASE_IN_FILTER_BATCH_SIZE)) {
                 const { data, error } = await supabase
                     .from('contacts')
                     .select('id, best_contact_hour, best_contact_hours')

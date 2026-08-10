@@ -10,6 +10,7 @@ import {
 import type { ConversationMessage } from '@/lib/facebook';
 import type { FacebookConversation } from '@/types';
 import { chunkArray } from '@/lib/chunking';
+import { SUPABASE_IN_FILTER_BATCH_SIZE } from '@/lib/supabase-pagination';
 
 export const dynamic = 'force-dynamic';
 export const maxDuration = 300;
@@ -43,6 +44,30 @@ type ExportedMessage = {
     message: string;
     createdTime: string;
 };
+
+const FACEBOOK_EXPORT_CONCURRENCY = 8;
+
+async function mapWithConcurrency<T, R>(
+    items: T[],
+    concurrency: number,
+    mapper: (item: T, index: number) => Promise<R>
+): Promise<R[]> {
+    const results = new Array<R>(items.length);
+    let nextIndex = 0;
+
+    const workers = Array.from(
+        { length: Math.min(Math.max(1, concurrency), items.length) },
+        async () => {
+            while (nextIndex < items.length) {
+                const index = nextIndex++;
+                results[index] = await mapper(items[index], index);
+            }
+        }
+    );
+
+    await Promise.all(workers);
+    return results;
+}
 
 function parseFormat(value: string | null): ExportFormat {
     return value === 'json' ? 'json' : 'csv';
@@ -168,7 +193,7 @@ async function getContactsForExport(
     if (contactIds.length === 0) return [];
 
     const contacts: ContactExportRecord[] = [];
-    for (const batch of chunkArray(contactIds, 500)) {
+    for (const batch of chunkArray(contactIds, SUPABASE_IN_FILTER_BATCH_SIZE)) {
         const { data, error } = await supabase
             .from('contacts')
             .select('id, psid, name')
@@ -193,19 +218,20 @@ async function buildRowsForAllPageConversations(pageId: string, page: PageRecord
         true
     );
 
-    const rows: ExportedMessage[] = [];
-    for (const conversation of conversations) {
-        const contact = getContactParticipant(conversation, page.fb_page_id);
-        const contactPsid = contact?.id || '';
-        const contactName = contact?.name || '';
-        const messages = await getConversationMessages(
-            conversation.id,
-            page.access_token,
-            Number.MAX_SAFE_INTEGER
-        );
+    const conversationRows = await mapWithConcurrency(
+        conversations,
+        FACEBOOK_EXPORT_CONCURRENCY,
+        async (conversation) => {
+            const contact = getContactParticipant(conversation, page.fb_page_id);
+            const contactPsid = contact?.id || '';
+            const contactName = contact?.name || '';
+            const messages = await getConversationMessages(
+                conversation.id,
+                page.access_token,
+                Number.MAX_SAFE_INTEGER
+            );
 
-        for (const message of messages) {
-            rows.push(mapMessageToExportRow({
+            return messages.map((message) => mapMessageToExportRow({
                 pageId,
                 page,
                 conversation,
@@ -214,7 +240,8 @@ async function buildRowsForAllPageConversations(pageId: string, page: PageRecord
                 message
             }));
         }
-    }
+    );
+    const rows = conversationRows.flat();
 
     return {
         rows,
@@ -228,47 +255,51 @@ async function buildRowsForSelectedContacts(
     page: PageRecord,
     contacts: ContactExportRecord[]
 ) {
-    const rows: ExportedMessage[] = [];
-    let conversationCount = 0;
+    const contactResults = await mapWithConcurrency(
+        contacts,
+        FACEBOOK_EXPORT_CONCURRENCY,
+        async (contact) => {
+            if (!contact.psid) return { rows: [] as ExportedMessage[], hasConversation: false };
+            const contactPsid = contact.psid;
 
-    for (const contact of contacts) {
-        if (!contact.psid) continue;
+            const conversationId = await getConversationIdForPsid(
+                page.fb_page_id,
+                contactPsid,
+                page.access_token
+            );
+            if (!conversationId) return { rows: [] as ExportedMessage[], hasConversation: false };
 
-        const conversationId = await getConversationIdForPsid(
-            page.fb_page_id,
-            contact.psid,
-            page.access_token
-        );
-        if (!conversationId) continue;
+            const conversation: FacebookConversation = {
+                id: conversationId,
+                updated_time: '',
+                participants: {
+                    data: [
+                        { id: page.fb_page_id, name: page.name },
+                        { id: contactPsid, name: contact.name || '' }
+                    ]
+                }
+            };
+            const messages = await getConversationMessages(
+                conversationId,
+                page.access_token,
+                Number.MAX_SAFE_INTEGER
+            );
 
-        conversationCount++;
-        const conversation: FacebookConversation = {
-            id: conversationId,
-            updated_time: '',
-            participants: {
-                data: [
-                    { id: page.fb_page_id, name: page.name },
-                    { id: contact.psid, name: contact.name || '' }
-                ]
-            }
-        };
-        const messages = await getConversationMessages(
-            conversationId,
-            page.access_token,
-            Number.MAX_SAFE_INTEGER
-        );
-
-        for (const message of messages) {
-            rows.push(mapMessageToExportRow({
-                pageId,
-                page,
-                conversation,
-                contactPsid: contact.psid,
-                contactName: contact.name || '',
-                message
-            }));
+            return {
+                hasConversation: true,
+                rows: messages.map((message) => mapMessageToExportRow({
+                    pageId,
+                    page,
+                    conversation,
+                    contactPsid,
+                    contactName: contact.name || '',
+                    message
+                }))
+            };
         }
-    }
+    );
+    const rows = contactResults.flatMap((result) => result.rows);
+    const conversationCount = contactResults.filter((result) => result.hasConversation).length;
 
     return {
         rows,

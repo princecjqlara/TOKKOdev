@@ -1,5 +1,9 @@
 export const SUPABASE_PAGE_SIZE = 1000;
 
+// PostgREST serializes `.in(...)` filters into the query string. Keeping UUID
+// batches small avoids exceeding proxy/server URL limits on large selections.
+export const SUPABASE_IN_FILTER_BATCH_SIZE = 100;
+
 type SupabasePagedResult<T> = {
     data: T[] | null;
     error: { message?: string } | null;

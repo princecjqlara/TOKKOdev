@@ -95,6 +95,7 @@ function createSupabaseMock() {
 
     return {
         from,
+        contactsIn,
         campaignsInsert,
         campaignRecipientsInsert
     };
@@ -311,6 +312,31 @@ describe('POST /api/pages/[pageId]/contacts/tracked-bulk-message', () => {
             remaining: 5
         }));
         expect(mocks.sendCampaignById).not.toHaveBeenCalled();
+    });
+
+    it('resolves large contact selections in URL-safe query batches', async () => {
+        const supabase = createSupabaseMock();
+        mocks.getSupabaseAdmin.mockReturnValue(supabase);
+        const contactIds = Array.from({ length: 205 }, (_, index) => `contact_${index + 1}`);
+
+        const response = await POST(createRequest({
+            name: 'Large selection',
+            messagePart1: 'Hello',
+            envelopeWrapper: 'none',
+            selection: {
+                mode: 'specific',
+                contactIds
+            }
+        }), {
+            params: Promise.resolve({ pageId: 'page_1' })
+        });
+
+        const body = await response.json();
+
+        expect(response.status).toBe(200);
+        expect(body.recipients).toBe(205);
+        expect(supabase.contactsIn).toHaveBeenCalledTimes(3);
+        expect(supabase.contactsIn.mock.calls.map((call) => call[1].length)).toEqual([100, 100, 5]);
     });
 
     it('schedules three best-time campaigns for tomorrow PH time without sending immediately', async () => {

@@ -60,7 +60,8 @@ function createSupabaseMock(options: {
         })),
         error: null
     }));
-    const contactsSelect = vi.fn().mockReturnValue({ in: contactsIn });
+    const contactsEqPage = vi.fn().mockReturnValue({ in: contactsIn });
+    const contactsSelect = vi.fn().mockReturnValue({ eq: contactsEqPage });
 
     const from = vi.fn((table: string) => {
         if (table === 'user_pages') {
@@ -218,5 +219,26 @@ describe('POST /api/campaigns', () => {
                 scheduled_at: '2026-07-30T12:00:00.000Z'
             }
         ]);
+    });
+
+    it('loads large best-time selections in URL-safe query batches', async () => {
+        const contactIds = Array.from({ length: 205 }, (_, index) => `contact_${index + 1}`);
+        const supabase = createSupabaseMock({
+            contactBestTimes: Object.fromEntries(contactIds.map((id, index) => [id, index % 24]))
+        });
+        mocks.getSupabaseAdmin.mockReturnValue(supabase);
+
+        const response = await POST(createRequest({
+            pageId: 'page_1',
+            name: 'Large best-time follow-up',
+            messageText: 'Hello there',
+            contactIds,
+            useBestTime: true,
+            scheduledDate: '2026-07-30'
+        }));
+
+        expect(response.status).toBe(200);
+        expect(supabase.contactsIn).toHaveBeenCalledTimes(3);
+        expect(supabase.contactsIn.mock.calls.map((call) => call[1].length)).toEqual([100, 100, 5]);
     });
 });
