@@ -62,6 +62,8 @@ function createSupabaseMock() {
     });
     const campaignSelect = vi.fn().mockReturnValue({ single: campaignSingle });
     const campaignsInsert = vi.fn().mockReturnValue({ select: campaignSelect });
+    const campaignsUpdateEq = vi.fn().mockResolvedValue({ error: null });
+    const campaignsUpdate = vi.fn().mockReturnValue({ eq: campaignsUpdateEq });
 
     const campaignRecipientsInsert = vi.fn().mockResolvedValue({ error: null });
 
@@ -80,7 +82,8 @@ function createSupabaseMock() {
 
         if (table === 'campaigns') {
             return {
-                insert: campaignsInsert
+                insert: campaignsInsert,
+                update: campaignsUpdate
             };
         }
 
@@ -97,6 +100,7 @@ function createSupabaseMock() {
         from,
         contactsIn,
         campaignsInsert,
+        campaignsUpdate,
         campaignRecipientsInsert
     };
 }
@@ -128,6 +132,8 @@ function createBestTimeSupabaseMock() {
     });
 
     const campaignRecipientsInsert = vi.fn().mockResolvedValue({ error: null });
+    const campaignsUpdateEq = vi.fn().mockResolvedValue({ error: null });
+    const campaignsUpdate = vi.fn().mockReturnValue({ eq: campaignsUpdateEq });
 
     const contactsRows = [
         {
@@ -197,6 +203,7 @@ function createBestTimeSupabaseMock() {
         if (table === 'campaigns') {
             return {
                 insert: campaignsInsert,
+                update: campaignsUpdate,
                 select: () => ({
                     eq: () => ({
                         in: () => Promise.resolve({
@@ -231,6 +238,7 @@ function createBestTimeSupabaseMock() {
     return {
         from,
         campaignsInsert,
+        campaignsUpdate,
         campaignRecipientsInsert
     };
 }
@@ -311,6 +319,9 @@ describe('POST /api/pages/[pageId]/contacts/tracked-bulk-message', () => {
             failed: 0,
             remaining: 5
         }));
+        expect(supabase.campaignsUpdate).toHaveBeenCalledWith(expect.objectContaining({
+            audience_materialized_at: expect.any(String)
+        }));
         expect(mocks.sendCampaignById).not.toHaveBeenCalled();
     });
 
@@ -337,6 +348,52 @@ describe('POST /api/pages/[pageId]/contacts/tracked-bulk-message', () => {
         expect(body.recipients).toBe(205);
         expect(supabase.contactsIn).toHaveBeenCalledTimes(3);
         expect(supabase.contactsIn.mock.calls.map((call) => call[1].length)).toEqual([100, 100, 5]);
+    });
+
+    it('materializes very large campaigns in a few large database batches', async () => {
+        const supabase = createSupabaseMock();
+        mocks.getSupabaseAdmin.mockReturnValue(supabase);
+        const contactIds = Array.from({ length: 10001 }, (_, index) => `contact_${index + 1}`);
+
+        const response = await POST(createRequest({
+            name: 'Large tracked campaign',
+            messagePart1: 'Hello',
+            envelopeWrapper: 'none',
+            selection: {
+                mode: 'specific',
+                contactIds
+            }
+        }), {
+            params: Promise.resolve({ pageId: 'page_1' })
+        });
+
+        expect(response.status).toBe(200);
+        expect(supabase.campaignRecipientsInsert).toHaveBeenCalledTimes(3);
+        expect(supabase.campaignRecipientsInsert.mock.calls.map((call) => call[0].length)).toEqual([5000, 5000, 1]);
+    });
+
+    it('splits a materialization batch after a database statement timeout', async () => {
+        const supabase = createSupabaseMock();
+        supabase.campaignRecipientsInsert
+            .mockResolvedValueOnce({ error: { message: 'canceling statement due to statement timeout', code: '57014' } })
+            .mockResolvedValue({ error: null });
+        mocks.getSupabaseAdmin.mockReturnValue(supabase);
+        const contactIds = Array.from({ length: 5000 }, (_, index) => `contact_${index + 1}`);
+
+        const response = await POST(createRequest({
+            name: 'Adaptive tracked campaign',
+            messagePart1: 'Hello',
+            envelopeWrapper: 'none',
+            selection: {
+                mode: 'specific',
+                contactIds
+            }
+        }), {
+            params: Promise.resolve({ pageId: 'page_1' })
+        });
+
+        expect(response.status).toBe(200);
+        expect(supabase.campaignRecipientsInsert.mock.calls.map((call) => call[0].length)).toEqual([5000, 2500, 2500]);
     });
 
     it('schedules three best-time campaigns for tomorrow PH time without sending immediately', async () => {

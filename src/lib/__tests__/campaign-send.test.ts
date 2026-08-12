@@ -19,6 +19,7 @@ function createSupabaseMock(
         messageText?: string;
         recipients?: { id: string; contact_id: string; contacts: { psid: string; name?: string } }[];
         remainingPendingCount?: number;
+        incompleteAudience?: boolean;
     } = {}
 ) {
     const campaignRecord = {
@@ -28,8 +29,14 @@ function createSupabaseMock(
         message_text: options.messageText || 'Hello there',
         use_ai_message: false,
         is_loop: false,
+        recurrence: 'none',
+        audience_mode: 'specific',
+        audience_materialized_at: options.incompleteAudience ? null : '2026-08-12T00:00:00.000Z',
         ai_prompt: null,
-        total_recipients: (options.recipients?.length || 0) + (options.remainingPendingCount || 0),
+        total_recipients:
+            (options.recipients?.length || 0) +
+            (options.remainingPendingCount || 0) +
+            (options.incompleteAudience ? 1 : 0),
         pages: {
             fb_page_id: 'fb_page_1',
             access_token: 'page_token',
@@ -148,6 +155,30 @@ describe('sendCampaignById', () => {
 
         expect(result.status).toBe(400);
         expect(result.body.message).toBe('Campaign has already been completed or cancelled');
+    });
+
+    it('blocks an incompletely materialized campaign before any recipient is sent', async () => {
+        const supabase = createSupabaseMock('draft', {
+            incompleteAudience: true,
+            recipients: [{
+                id: 'recipient_1',
+                contact_id: 'contact_1',
+                contacts: {
+                    psid: 'psid_1',
+                    name: 'Alex'
+                }
+            }]
+        });
+
+        const result = await sendCampaignById({
+            campaignId: 'campaign_1',
+            supabase: supabase as never
+        });
+
+        expect(result.status).toBe(409);
+        expect(result.body.message).toContain('queuing 1 of 2 recipients');
+        expect(sendMessage).not.toHaveBeenCalled();
+        expect(supabase.claimRpc).not.toHaveBeenCalled();
     });
 
     it('allows scheduled campaigns from cron and completes cleanly when no recipients are pending', async () => {

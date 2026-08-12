@@ -97,6 +97,49 @@ export async function sendCampaignById({
             };
         }
 
+        // Campaigns created before audience materialization was tracked can be
+        // resumed only when their durable counters plus queued rows match the
+        // intended audience. This prevents a timed-out, partially inserted
+        // campaign from silently sending to only part of its selection.
+        if (
+            campaign.audience_mode === 'specific' &&
+            !campaign.audience_materialized_at &&
+            !campaign.is_loop &&
+            (campaign.recurrence || 'none') === 'none'
+        ) {
+            const materializationProgress = await getCampaignDeliveryProgress(supabase, campaignId);
+            const materializedRecipientCount =
+                materializationProgress.sent +
+                materializationProgress.failed +
+                materializationProgress.remaining;
+            const expectedRecipientCount = Number(campaign.total_recipients || 0);
+
+            if (materializedRecipientCount !== expectedRecipientCount) {
+                return {
+                    status: 409,
+                    body: {
+                        error: 'Campaign audience incomplete',
+                        message:
+                            `Campaign setup stopped after queuing ${materializedRecipientCount} of ` +
+                            `${expectedRecipientCount} recipients. Delete this campaign and create it again; ` +
+                            'sending it would omit recipients.'
+                    }
+                };
+            }
+
+            const materializedAt = new Date().toISOString();
+            const { error: materializationUpdateError } = await supabase
+                .from('campaigns')
+                .update({
+                    audience_materialized_at: materializedAt,
+                    updated_at: materializedAt
+                })
+                .eq('id', campaignId);
+
+            if (materializationUpdateError) throw materializationUpdateError;
+            campaign.audience_materialized_at = materializedAt;
+        }
+
         await supabase
             .from('campaigns')
             .update({ status: 'sending', updated_at: new Date().toISOString() })

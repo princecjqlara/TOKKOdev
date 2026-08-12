@@ -74,6 +74,7 @@ For large campaigns, deploy the compact delivery queue in this exact order:
 1. Run `database/migration_compact_campaign_delivery_prepare.sql`. It is additive and safe with the older sender.
 2. Deploy the application code that uses atomic recipient claims and batch completion RPCs.
 3. Confirm the new deployment is healthy, then run `database/migration_compact_campaign_delivery_finalize.sql` once. The finalizer preserves campaign totals and failures, removes completed one-time queue rows, and replaces the random recipient UUID with the `(campaign_id, contact_id)` primary key.
+4. Run `database/migration_campaign_delivery_timeout_fix.sql` to make immediate claims and progress checks constant-time for fully materialized one-time campaigns.
 
 Do not run the finalizer before step 2. Older senders calculate progress from terminal queue rows that the finalizer intentionally removes.
 

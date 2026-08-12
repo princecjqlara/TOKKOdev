@@ -1090,6 +1090,8 @@ export default function ContactsPage() {
         setLastSendResults(null);
         resetBestTimeScheduleState();
 
+        let campaignReadyToSend = false;
+
         try {
             const normalizedManualBatchSize = Math.max(1, Math.floor(Number(manualBatchSize) || 5000));
             const normalizedManualBatchNumber = Math.max(1, Math.floor(Number(manualBatchNumber) || 1));
@@ -1189,6 +1191,7 @@ export default function ContactsPage() {
             if (!campaignId) {
                 throw new Error('Tracked campaign was created without an ID.');
             }
+            campaignReadyToSend = true;
 
             if (templateMediaHeader && createData.campaign?.template_name) {
                 window.localStorage.setItem(
@@ -1250,7 +1253,10 @@ export default function ContactsPage() {
             await fetchContacts();
         } catch (error) {
             console.error('Error sending tracked bulk messages:', error);
-            alert(`Tracked bulk send stopped: ${(error as Error).message}\n\nOpen Campaigns and press Send on the created campaign to resume pending recipients without resending completed ones.`);
+            const recoveryMessage = campaignReadyToSend
+                ? 'Open Campaigns and press Send to resume pending recipients without resending completed ones.'
+                : 'Campaign setup did not finish, so do not press Send on an incomplete campaign. Create the campaign again after this error is fixed.';
+            alert(`Tracked bulk send stopped: ${(error as Error).message}\n\n${recoveryMessage}`);
         } finally {
             setActionLoading(false);
         }

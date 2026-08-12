@@ -33,6 +33,70 @@ type ScheduledCampaignSummary = {
     templateName: string | null;
 };
 
+type CampaignRecipientInsert = {
+    campaign_id: string;
+    contact_id: string;
+    status: 'pending';
+    scheduled_at?: string;
+};
+
+// A 500-row batch required hundreds of sequential PostgREST requests for a
+// 100k+ audience and could exhaust the route duration before materialization
+// finished. Larger batches remove that network bottleneck; timeout failures
+// are split automatically so an individual database statement stays bounded.
+const RECIPIENT_MATERIALIZATION_BATCH_SIZE = 5000;
+const MIN_RECIPIENT_MATERIALIZATION_BATCH_SIZE = 250;
+
+function isStatementTimeoutError(error: { message?: string } | null): boolean {
+    const message = error?.message?.toLowerCase() || '';
+    return message.includes('statement timeout') || message.includes('57014');
+}
+
+async function insertRecipientBatch(
+    supabase: ReturnType<typeof getSupabaseAdmin>,
+    recipients: CampaignRecipientInsert[]
+): Promise<void> {
+    const { error } = await supabase
+        .from('campaign_recipients')
+        .insert(recipients);
+
+    if (!error) return;
+
+    if (isStatementTimeoutError(error) && recipients.length > MIN_RECIPIENT_MATERIALIZATION_BATCH_SIZE) {
+        const midpoint = Math.ceil(recipients.length / 2);
+        await insertRecipientBatch(supabase, recipients.slice(0, midpoint));
+        await insertRecipientBatch(supabase, recipients.slice(midpoint));
+        return;
+    }
+
+    throw error;
+}
+
+async function materializeCampaignRecipients(
+    supabase: ReturnType<typeof getSupabaseAdmin>,
+    recipients: CampaignRecipientInsert[]
+): Promise<void> {
+    for (const batch of chunkArray(recipients, RECIPIENT_MATERIALIZATION_BATCH_SIZE)) {
+        await insertRecipientBatch(supabase, batch);
+    }
+}
+
+async function markAudienceMaterialized(
+    supabase: ReturnType<typeof getSupabaseAdmin>,
+    campaignId: string,
+    materializedAt: string
+): Promise<void> {
+    const { error } = await supabase
+        .from('campaigns')
+        .update({
+            audience_materialized_at: materializedAt,
+            updated_at: materializedAt
+        })
+        .eq('id', campaignId);
+
+    if (error) throw error;
+}
+
 const ENVELOPE_TEMPLATE_MAP: Record<string, string> = {
     msg: 'general_msg_v1',
     notice: 'general_notice_v1',
@@ -595,20 +659,17 @@ export async function POST(
                     throw campaignError;
                 }
 
-                for (const batch of chunkArray(recipientSchedules, 500)) {
-                    const { error } = await supabase
-                        .from('campaign_recipients')
-                        .insert(batch.map((recipient) => ({
+                await materializeCampaignRecipients(
+                    supabase,
+                    recipientSchedules.map((recipient) => ({
                             campaign_id: campaign.id,
                             contact_id: recipient.contactId,
                             status: 'pending',
                             scheduled_at: recipient.scheduledAt
-                        })));
+                    }))
+                );
 
-                    if (error) {
-                        throw error;
-                    }
-                }
+                await markAudienceMaterialized(supabase, campaign.id, new Date().toISOString());
 
                 scheduledCampaigns.push({
                     id: campaign.id,
@@ -667,23 +728,24 @@ export async function POST(
             throw campaignError;
         }
 
-        for (const batch of chunkArray(contactIds, 500)) {
-            const { error } = await supabase
-                .from('campaign_recipients')
-                .insert(batch.map((contactId) => ({
+        await materializeCampaignRecipients(
+            supabase,
+            contactIds.map((contactId) => ({
                     campaign_id: campaign.id,
                     contact_id: contactId,
                     status: 'pending'
-                })));
+            }))
+        );
 
-            if (error) {
-                throw error;
-            }
-        }
+        const audienceMaterializedAt = new Date().toISOString();
+        await markAudienceMaterialized(supabase, campaign.id, audienceMaterializedAt);
 
         return NextResponse.json({
             success: true,
-            campaign,
+            campaign: {
+                ...campaign,
+                audience_materialized_at: audienceMaterializedAt
+            },
             recipients: contactIds.length,
             totalMatched,
             selectedRange,
