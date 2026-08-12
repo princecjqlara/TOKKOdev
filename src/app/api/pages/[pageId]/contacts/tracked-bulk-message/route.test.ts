@@ -71,6 +71,15 @@ function createSupabaseMock() {
     const campaignsUpdate = vi.fn().mockReturnValue({ eq: campaignsUpdateEq });
 
     const campaignRecipientsInsert = vi.fn().mockResolvedValue({ error: null });
+    const rpc = vi.fn().mockResolvedValue({
+        data: [{
+            campaign_id: 'campaign_atomic_1',
+            recipient_count: 161522,
+            total_matched: 161522,
+            audience_materialized_at: '2026-08-12T15:30:00.000Z'
+        }],
+        error: null
+    });
     const pageSingle = vi.fn().mockResolvedValue({
         data: { fb_page_id: 'fb_page_1', access_token: 'page_token' },
         error: null
@@ -115,6 +124,7 @@ function createSupabaseMock() {
 
     return {
         from,
+        rpc,
         contactsIn,
         campaignsInsert,
         campaignsUpdate,
@@ -333,6 +343,53 @@ describe('POST /api/pages/[pageId]/contacts/tracked-bulk-message', () => {
         expect(response.status).toBe(409);
         expect(supabase.contactsIn).not.toHaveBeenCalled();
         expect(supabase.campaignsInsert).not.toHaveBeenCalled();
+    });
+
+    it('creates a select-all campaign atomically without fetching or inserting recipients over PostgREST', async () => {
+        const supabase = createSupabaseMock();
+        mocks.getSupabaseAdmin.mockReturnValue(supabase);
+
+        const response = await POST(createRequest({
+            name: 'Atomic audience',
+            messagePart1: 'Hello everyone',
+            envelopeWrapper: 'none',
+            selection: {
+                mode: 'all',
+                excludedContactIds: [],
+                filters: {
+                    search: '',
+                    tagIds: [],
+                    excludeTagIds: [],
+                    dateFrom: '',
+                    dateTo: '',
+                    dateFilterMode: 'include'
+                }
+            }
+        }), {
+            params: Promise.resolve({ pageId: 'page_1' })
+        });
+
+        const body = await response.json();
+
+        expect(response.status).toBe(200);
+        expect(body.campaign).toEqual(expect.objectContaining({
+            id: 'campaign_atomic_1',
+            total_recipients: 161522,
+            audience_materialized_at: '2026-08-12T15:30:00.000Z'
+        }));
+        expect(body.recipients).toBe(161522);
+        expect(supabase.rpc).toHaveBeenCalledWith(
+            'create_filtered_tracked_bulk_campaign',
+            expect.objectContaining({
+                p_page_id: 'page_1',
+                p_created_by: 'user_1',
+                p_slice_offset: 0,
+                p_slice_limit: null
+            })
+        );
+        expect(supabase.contactsIn).not.toHaveBeenCalled();
+        expect(supabase.campaignsInsert).not.toHaveBeenCalled();
+        expect(supabase.campaignRecipientsInsert).not.toHaveBeenCalled();
     });
 
     afterEach(() => {

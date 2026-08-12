@@ -40,6 +40,13 @@ type CampaignRecipientInsert = {
     scheduled_at?: string;
 };
 
+type AtomicTrackedCampaignRow = {
+    campaign_id: string;
+    recipient_count: number;
+    total_matched: number;
+    audience_materialized_at: string;
+};
+
 // A 500-row batch required hundreds of sequential PostgREST requests for a
 // 100k+ audience and could exhaust the route duration before materialization
 // finished. Larger batches remove that network bottleneck; timeout failures
@@ -581,14 +588,108 @@ export async function POST(
             ? body.selection as Record<string, unknown>
             : {};
         const selectionMode = selection.mode === 'all' ? 'all' : 'specific';
+        const selectionFilters = selection.filters && typeof selection.filters === 'object'
+            ? selection.filters as Record<string, unknown>
+            : {};
+        const excludedContactIds = normalizeStringArray(selection.excludedContactIds);
+        const slice = selection.slice && typeof selection.slice === 'object'
+            ? selection.slice as Record<string, unknown>
+            : null;
+        const batchSize = slice ? normalizePositiveInteger(slice.limit) : null;
+        const batchNumber = slice ? normalizePositiveInteger(slice.batchNumber, 1) : null;
+        const offset = batchSize && batchNumber ? (batchNumber - 1) * batchSize : 0;
+
+        if (selectionMode === 'all' && deliveryMode === 'now') {
+            const campaignName = typeof body.name === 'string' && body.name.trim()
+                ? body.name.trim()
+                : `Bulk message ${new Date().toISOString()}`;
+            const { data: atomicCampaignRows, error: atomicCampaignError } = await supabase.rpc(
+                'create_filtered_tracked_bulk_campaign',
+                {
+                    p_page_id: pageId,
+                    p_created_by: session.user.id,
+                    p_name: campaignName,
+                    p_message_text: serializeCampaignMessageSequence([messageText]),
+                    p_template_name: templateName,
+                    p_template_language: templateName ? templateLanguage : null,
+                    p_search: typeof selectionFilters.search === 'string' ? selectionFilters.search.trim() || null : null,
+                    p_include_tag_ids: normalizeStringArray(selectionFilters.tagIds),
+                    p_exclude_tag_ids: normalizeStringArray(selectionFilters.excludeTagIds),
+                    p_excluded_contact_ids: excludedContactIds,
+                    p_date_from: normalizeDateFilter(selectionFilters.dateFrom) || null,
+                    p_date_to: normalizeDateFilter(selectionFilters.dateTo) || null,
+                    p_date_filter_mode: normalizeDateFilterMode(selectionFilters.dateFilterMode),
+                    p_slice_offset: offset,
+                    p_slice_limit: batchSize
+                }
+            );
+
+            if (atomicCampaignError) {
+                if (atomicCampaignError.message?.includes('No sendable contacts matched')) {
+                    return NextResponse.json(
+                        { error: 'Bad Request', message: atomicCampaignError.message },
+                        { status: 400 }
+                    );
+                }
+                throw atomicCampaignError;
+            }
+
+            const atomicCampaign = (Array.isArray(atomicCampaignRows)
+                ? atomicCampaignRows[0]
+                : atomicCampaignRows) as AtomicTrackedCampaignRow | null;
+            if (!atomicCampaign?.campaign_id) {
+                throw new Error('Database did not return the prepared campaign.');
+            }
+
+            const recipientCount = Number(atomicCampaign.recipient_count || 0);
+            const totalMatched = Number(atomicCampaign.total_matched || 0);
+            const selectedRange = batchSize && batchNumber
+                ? {
+                    batchSize,
+                    batchNumber,
+                    start: totalMatched === 0 ? 0 : offset + 1,
+                    end: Math.min(offset + batchSize, totalMatched),
+                    totalMatched
+                }
+                : null;
+
+            return NextResponse.json({
+                success: true,
+                campaign: {
+                    id: atomicCampaign.campaign_id,
+                    page_id: pageId,
+                    name: campaignName,
+                    message_text: serializeCampaignMessageSequence([messageText]),
+                    status: 'draft',
+                    total_recipients: recipientCount,
+                    sent_count: 0,
+                    failed_count: 0,
+                    template_name: templateName,
+                    template_language: templateName ? templateLanguage : null,
+                    audience_materialized_at: atomicCampaign.audience_materialized_at
+                },
+                recipients: recipientCount,
+                totalMatched,
+                selectedRange,
+                send: {
+                    success: true,
+                    partial: true,
+                    sent: 0,
+                    failed: 0,
+                    processed: 0,
+                    total: recipientCount,
+                    remaining: recipientCount,
+                    message: 'Campaign created and ready to send.'
+                }
+            });
+        }
+
         const resolvedContactIds = selectionMode === 'all'
             ? await resolveAllMatchingContactIds({
                 supabase,
                 pageId,
-                filters: selection.filters && typeof selection.filters === 'object'
-                    ? selection.filters as Record<string, unknown>
-                    : {},
-                excludedContactIds: normalizeStringArray(selection.excludedContactIds)
+                filters: selectionFilters,
+                excludedContactIds
             })
             : await resolveSpecificContactIds({
                 supabase,
@@ -596,12 +697,6 @@ export async function POST(
                 contactIds: normalizeStringArray(selection.contactIds)
             });
         const totalMatched = resolvedContactIds.length;
-        const slice = selection.slice && typeof selection.slice === 'object'
-            ? selection.slice as Record<string, unknown>
-            : null;
-        const batchSize = slice ? normalizePositiveInteger(slice.limit) : null;
-        const batchNumber = slice ? normalizePositiveInteger(slice.batchNumber, 1) : null;
-        const offset = batchSize && batchNumber ? (batchNumber - 1) * batchSize : 0;
         const contactIds = batchSize
             ? resolvedContactIds.slice(offset, offset + batchSize)
             : resolvedContactIds;
