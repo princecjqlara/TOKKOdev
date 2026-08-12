@@ -100,6 +100,37 @@ export async function finishCampaignRecipientBatch({
     throw lastError;
 }
 
+export async function releaseCampaignRecipientBatch({
+    supabase,
+    campaignId,
+    claimToken,
+    contactIds
+}: {
+    supabase: SupabaseAdmin;
+    campaignId: string;
+    claimToken: string;
+    contactIds: string[];
+}) {
+    if (contactIds.length === 0) return;
+
+    // Keep recoverable page/template/service failures pending. The claim-token
+    // guard prevents an expired worker from releasing a newer worker's claim.
+    const { error } = await supabase
+        .from('campaign_recipients')
+        .update({
+            status: 'pending',
+            claim_token: null,
+            claimed_at: null,
+            error_message: null
+        })
+        .eq('campaign_id', campaignId)
+        .eq('status', 'processing')
+        .eq('claim_token', claimToken)
+        .in('contact_id', contactIds);
+
+    if (error) throw error;
+}
+
 export async function getCampaignDeliveryProgress(
     supabase: SupabaseAdmin,
     campaignId: string

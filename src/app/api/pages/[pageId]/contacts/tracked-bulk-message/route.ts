@@ -3,7 +3,7 @@ import { getServerSession } from 'next-auth';
 import { authOptions } from '@/lib/auth';
 import { serializeCampaignMessageSequence } from '@/lib/campaign-message-sequence';
 import { chunkArray } from '@/lib/chunking';
-import { getMediaTemplateName } from '@/lib/facebook-templates';
+import { getPageTemplates } from '@/lib/facebook';
 import { getPhilippinesScheduledAtIso, getTomorrowPhilippinesDateParts } from '@/lib/philippines-time';
 import { getSupabaseAdmin } from '@/lib/supabase';
 import { fetchAllSupabaseRows, SUPABASE_IN_FILTER_BATCH_SIZE } from '@/lib/supabase-pagination';
@@ -493,9 +493,10 @@ export async function POST(
                 : envelopeWrapper === 'none'
                     ? null
                     : ENVELOPE_TEMPLATE_MAP[envelopeWrapper] || null;
-        const templateName = templateMediaHeader && baseTemplateName
-            ? getMediaTemplateName(baseTemplateName, 'image')
-            : baseTemplateName;
+        // Media template names are page-defined and do not have to follow the
+        // app's generated `_media_v1` naming convention. Always preserve the
+        // exact approved template selected by the user.
+        const templateName = templateMediaHeader ? requestedTemplateName : baseTemplateName;
 
         if (envelopeWrapper === 'template' && !templateName) {
             return NextResponse.json(
@@ -525,6 +526,55 @@ export async function POST(
                 { error: 'Forbidden', message: 'You do not have access to this page' },
                 { status: 403 }
             );
+        }
+
+        if (templateName) {
+            const { data: page, error: pageError } = await supabase
+                .from('pages')
+                .select('fb_page_id, access_token')
+                .eq('id', pageId)
+                .single();
+
+            if (pageError || !page?.fb_page_id || !page?.access_token) {
+                return NextResponse.json(
+                    { error: 'Bad Request', message: 'Facebook page credentials are unavailable. Reconnect the page before sending.' },
+                    { status: 400 }
+                );
+            }
+
+            const pageTemplates = await getPageTemplates(page.fb_page_id, page.access_token);
+            const approvedTemplate = pageTemplates.find((template) => {
+                const status = typeof template?.status === 'string' ? template.status.toUpperCase() : '';
+                const language = typeof template?.language === 'string'
+                    ? template.language.replace('-', '_')
+                    : null;
+                const components = Array.isArray(template?.components) ? template.components : [];
+                const hasImageHeader = components.some((component: Record<string, unknown>) => (
+                    typeof component?.type === 'string' &&
+                    component.type.toUpperCase() === 'HEADER' &&
+                    typeof component?.format === 'string' &&
+                    component.format.toUpperCase() === 'IMAGE'
+                ));
+
+                return (
+                    template?.name === templateName &&
+                    (status === 'APPROVED' || status === 'ACTIVE') &&
+                    (!language || language === templateLanguage.replace('-', '_')) &&
+                    (templateMediaHeader ? hasImageHeader : !hasImageHeader)
+                );
+            });
+
+            if (!approvedTemplate) {
+                return NextResponse.json(
+                    {
+                        error: 'Template unavailable',
+                        message:
+                            `Template '${templateName}' (${templateLanguage}) is not an approved ` +
+                            `${templateMediaHeader ? 'image-header ' : ''}template on this Facebook page. Refresh templates and select an approved option.`
+                    },
+                    { status: 409 }
+                );
+            }
         }
 
         const selection = body.selection && typeof body.selection === 'object'

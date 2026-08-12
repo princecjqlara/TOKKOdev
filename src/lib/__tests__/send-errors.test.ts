@@ -3,6 +3,7 @@ import {
     categorizeSendError,
     isRetryableSendError,
     mergeSendErrors,
+    shouldPauseCampaignForSendError,
     summarizeSendErrors
 } from '../send-errors';
 
@@ -56,7 +57,8 @@ describe('mergeSendErrors', () => {
             )
         ).toBe('outside_messaging_window');
 
-        expect(categorizeSendError('Network timeout')).toBe('other');
+        expect(categorizeSendError('(#613) Calls to this api have exceeded the rate limit.')).toBe('rate_limited');
+        expect(categorizeSendError('Network timeout')).toBe('transient');
     });
 
     it('marks only unknown category as retryable', () => {
@@ -74,6 +76,13 @@ describe('mergeSendErrors', () => {
                 '(#10) This message is being sent outside the allowed window. Learn more about the new policy here: https://developers.facebook.com/docs/messenger-platform/policy-overview'
             )
         ).toBe(false);
+    });
+
+    it('pauses campaigns for page-wide and recoverable failures', () => {
+        expect(shouldPauseCampaignForSendError('(#100) Template cannot be found.')).toBe(true);
+        expect(shouldPauseCampaignForSendError('(#613) Calls to this api have exceeded the rate limit.')).toBe(true);
+        expect(shouldPauseCampaignForSendError('fetch failed')).toBe(true);
+        expect(shouldPauseCampaignForSendError("(#551) This person isn't available right now.")).toBe(false);
     });
 
     it('summarizes send error categories', () => {
@@ -97,7 +106,10 @@ describe('mergeSendErrors', () => {
             utilityTemplateMissing: 1,
             recipientUnavailable: 1,
             outsideMessagingWindow: 1,
-            other: 1
+            rateLimited: 0,
+            authenticationRequired: 0,
+            transient: 1,
+            other: 0
         });
     });
 });

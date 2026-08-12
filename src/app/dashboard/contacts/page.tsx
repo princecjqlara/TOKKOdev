@@ -1069,7 +1069,7 @@ export default function ContactsPage() {
             return;
         }
 
-        if (envelopeWrapper === 'template' && !selectedTemplateName) {
+        if ((envelopeWrapper === 'template' || mediaTemplateRequiredForBulk) && !selectedApprovedTemplate) {
             alert('Pick an approved template before sending.');
             return;
         }
@@ -1145,8 +1145,8 @@ export default function ContactsPage() {
                         }))
                         : undefined,
                     envelopeWrapper,
-                    templateName: envelopeWrapper === 'template' ? selectedTemplateName : undefined,
-                    templateLanguage: envelopeWrapper === 'template' ? selectedTemplateLanguage : undefined,
+                    templateName: envelopeWrapper === 'template' || mediaTemplateRequiredForBulk ? selectedTemplateName : undefined,
+                    templateLanguage: envelopeWrapper === 'template' || mediaTemplateRequiredForBulk ? selectedTemplateLanguage : undefined,
                     templateMediaHeader,
                     selection
                 })
@@ -1381,7 +1381,7 @@ export default function ContactsPage() {
             return;
         }
 
-        if (envelopeWrapper === 'template' && !selectedTemplateName) {
+        if ((envelopeWrapper === 'template' || mediaTemplateRequiredForBulk) && !selectedApprovedTemplate) {
             alert('Pick an approved template before sending.');
             return;
         }
@@ -1498,8 +1498,8 @@ export default function ContactsPage() {
                             buttonMode: usePart2AsButtonValue ? 'RESPONSE_DYNAMIC' : 'TEMPLATE_STATIC',
                             buttonPlaceholderMode: false,
                             envelopeWrapper,
-                            templateName: envelopeWrapper === 'template' ? selectedTemplateName : undefined,
-                            templateLanguage: envelopeWrapper === 'template' ? selectedTemplateLanguage : undefined,
+                            templateName: envelopeWrapper === 'template' || mediaTemplateRequiredForBulk ? selectedTemplateName : undefined,
+                            templateLanguage: envelopeWrapper === 'template' || mediaTemplateRequiredForBulk ? selectedTemplateLanguage : undefined,
                             templateMediaHeader: mediaTemplateRequiredForBulk
                                 ? { type: 'image' as const, url: bulkMediaUrl.trim() }
                                 : undefined
@@ -1601,8 +1601,11 @@ export default function ContactsPage() {
                                             buttonMode: usePart2AsButtonValue ? 'RESPONSE_DYNAMIC' : 'TEMPLATE_STATIC',
                                             buttonPlaceholderMode: false,
                                             envelopeWrapper,
-                                            templateName: envelopeWrapper === 'template' ? selectedTemplateName : undefined,
-                                            templateLanguage: envelopeWrapper === 'template' ? selectedTemplateLanguage : undefined
+                                            templateName: envelopeWrapper === 'template' || mediaTemplateRequiredForBulk ? selectedTemplateName : undefined,
+                                            templateLanguage: envelopeWrapper === 'template' || mediaTemplateRequiredForBulk ? selectedTemplateLanguage : undefined,
+                                            templateMediaHeader: mediaTemplateRequiredForBulk
+                                                ? { type: 'image' as const, url: bulkMediaUrl.trim() }
+                                                : undefined
                                         })
                                     });
 
@@ -1886,7 +1889,7 @@ export default function ContactsPage() {
             return;
         }
 
-        if (envelopeWrapper === 'template' && !selectedTemplateName) {
+        if ((envelopeWrapper === 'template' || mediaTemplateRequiredForBulk) && !selectedApprovedTemplate) {
             alert('Pick an approved template before sending.');
             return;
         }
@@ -1916,8 +1919,8 @@ export default function ContactsPage() {
                     buttonMode: usePart2AsButtonValue ? 'RESPONSE_DYNAMIC' : 'TEMPLATE_STATIC',
                     buttonPlaceholderMode: false,
                     envelopeWrapper,
-                    templateName: envelopeWrapper === 'template' ? selectedTemplateName : undefined,
-                    templateLanguage: envelopeWrapper === 'template' ? selectedTemplateLanguage : undefined,
+                    templateName: envelopeWrapper === 'template' || mediaTemplateRequiredForBulk ? selectedTemplateName : undefined,
+                    templateLanguage: envelopeWrapper === 'template' || mediaTemplateRequiredForBulk ? selectedTemplateLanguage : undefined,
                     templateMediaHeader: mediaTemplateRequiredForBulk
                         ? { type: 'image' as const, url: bulkMediaUrl.trim() }
                         : undefined
@@ -2887,9 +2890,13 @@ export default function ContactsPage() {
                                 onClick={() => {
                                     setBulkMediaEnabled(true);
                                     updateBulkMediaUrl('');
-                                    setSelectedTemplateName((current) => current ? getMediaTemplateName(current, 'image') : current);
-                                    if (envelopeWrapper === 'none') {
-                                        setEnvelopeWrapper('msg');
+                                    const firstApprovedImageTemplate = availableTemplates.find(
+                                        (template) => isApprovedTemplate(template) && template.mediaHeaderType === 'image'
+                                    );
+                                    setEnvelopeWrapper('template');
+                                    if (firstApprovedImageTemplate) {
+                                        setSelectedTemplateName(firstApprovedImageTemplate.name);
+                                        setSelectedTemplateLanguage(firstApprovedImageTemplate.language || 'en_US');
                                     }
                                 }}
                                 disabled={!mediaAvailableForBulk || actionLoading}
@@ -2992,7 +2999,7 @@ export default function ContactsPage() {
                                         </option>
                                     ))}
                                     {normalizedTemplateSearch && visibleApprovedTemplates.length === 0 && (
-                                        <option disabled>No templates match "{templateSearch.trim()}"</option>
+                                        <option disabled>No templates match &quot;{templateSearch.trim()}&quot;</option>
                                     )}
                                 </>
                             )}
@@ -3098,7 +3105,7 @@ export default function ContactsPage() {
                                                 </option>
                                             ))}
                                             {normalizedTemplateSearch && visibleApprovedTemplates.length === 0 && (
-                                                <option disabled>No templates match "{templateSearch.trim()}"</option>
+                                                <option disabled>No templates match &quot;{templateSearch.trim()}&quot;</option>
                                             )}
                                         </select>
 

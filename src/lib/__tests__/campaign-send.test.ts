@@ -2,9 +2,11 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { sendCampaignById } from '../campaign-send';
 import { serializeCampaignMessageSequence } from '../campaign-message-sequence';
 import { sendMessage } from '../facebook';
+import { getPageTemplates } from '../facebook';
 
 vi.mock('../facebook', () => ({
     sendMessage: vi.fn(),
+    getPageTemplates: vi.fn(),
     getConversationIdForPsid: vi.fn(),
     getConversationMessages: vi.fn()
 }));
@@ -72,6 +74,7 @@ function createSupabaseMock(
 
     let sentCount = 0;
     let failedCount = 0;
+    let releasedCount = 0;
     const pendingRecipients = [...(options.recipients || [])];
     const fixedRemaining = options.remainingPendingCount || 0;
     const claimRpc = vi.fn();
@@ -103,13 +106,26 @@ function createSupabaseMock(
                 data: [{
                     sent_count: sentCount,
                     failed_count: failedCount,
-                    remaining_count: pendingRecipients.length + fixedRemaining
+                    remaining_count: pendingRecipients.length + fixedRemaining + releasedCount
                 }],
                 error: null
             };
         }
 
         throw new Error(`Unexpected RPC: ${name}`);
+    });
+
+    const releaseBatchUpdate = vi.fn();
+    const campaignRecipientsUpdate = vi.fn(() => {
+        const query: any = {
+            eq: vi.fn(() => query),
+            in: vi.fn((_column: string, contactIds: string[]) => {
+                releasedCount += contactIds.length;
+                releaseBatchUpdate(contactIds);
+                return Promise.resolve({ error: null });
+            })
+        };
+        return query;
     });
 
     const from = vi.fn((table: string) => {
@@ -126,6 +142,12 @@ function createSupabaseMock(
             };
         }
 
+        if (table === 'campaign_recipients') {
+            return {
+                update: campaignRecipientsUpdate
+            };
+        }
+
         throw new Error(`Unexpected table: ${table}`);
     });
 
@@ -135,13 +157,20 @@ function createSupabaseMock(
         campaignUpdate,
         campaignUpdateEq,
         claimRpc,
-        finishBatchRpc
+        finishBatchRpc,
+        releaseBatchUpdate
     };
 }
 
 describe('sendCampaignById', () => {
     beforeEach(() => {
         vi.clearAllMocks();
+        vi.mocked(getPageTemplates).mockResolvedValue([
+            { name: 'general_msg_v1', language: 'en_US', status: 'APPROVED' },
+            { name: 'general_notice_v1', language: 'en_US', status: 'APPROVED' },
+            { name: 'general_msg_v1_media_v1', language: 'en_US', status: 'APPROVED' },
+            { name: 'general_notice_v1_media_v1', language: 'en_US', status: 'APPROVED' }
+        ]);
     });
 
     it('blocks scheduled campaigns from the manual send path', async () => {
@@ -383,6 +412,90 @@ describe('sendCampaignById', () => {
         expect(supabase.finishBatchRpc).toHaveBeenCalledWith(expect.objectContaining({
             p_results: [{ contact_id: 'contact_1', success: true, error_message: null }]
         }));
+    });
+
+    it('pauses on a missing template without consuming the remaining audience', async () => {
+        const recipients = Array.from({ length: 3 }, (_, index) => ({
+            id: `recipient_${index + 1}`,
+            contact_id: `contact_${index + 1}`,
+            contacts: {
+                psid: `psid_${index + 1}`,
+                name: `Contact ${index + 1}`
+            }
+        }));
+        const supabase = createSupabaseMock('draft', { recipients });
+        vi.mocked(sendMessage).mockRejectedValue(new Error('(#100) Template cannot be found.'));
+
+        const result = await sendCampaignById({
+            campaignId: 'campaign_1',
+            supabase: supabase as never,
+            sendBatchSize: 3,
+            sendRetryAttempts: 1,
+            sendRetryDelayMs: 0
+        });
+
+        expect(result.status).toBe(503);
+        expect(result.body.paused).toBe(true);
+        expect(result.failed).toBe(0);
+        expect(result.body.remaining).toBe(3);
+        expect(sendMessage).toHaveBeenCalledTimes(3);
+        expect(supabase.finishBatchRpc).not.toHaveBeenCalled();
+        expect(supabase.releaseBatchUpdate).toHaveBeenCalledWith([
+            'contact_1',
+            'contact_2',
+            'contact_3'
+        ]);
+        expect(supabase.campaignUpdate).toHaveBeenLastCalledWith(
+            expect.objectContaining({ status: 'draft' })
+        );
+    });
+
+    it('preflights templates before claiming recipients', async () => {
+        const supabase = createSupabaseMock('draft', {
+            messageText: serializeCampaignMessageSequence([
+                { text: 'Hello', templateName: 'missing_media_template', templateLanguage: 'en_US' }
+            ]),
+            recipients: [{
+                id: 'recipient_1',
+                contact_id: 'contact_1',
+                contacts: { psid: 'psid_1', name: 'Alex' }
+            }]
+        });
+
+        const result = await sendCampaignById({
+            campaignId: 'campaign_1',
+            supabase: supabase as never
+        });
+
+        expect(result.status).toBe(409);
+        expect(result.body.paused).toBe(true);
+        expect(result.body.message).toContain("template 'missing_media_template'");
+        expect(supabase.claimRpc).not.toHaveBeenCalled();
+        expect(sendMessage).not.toHaveBeenCalled();
+    });
+
+    it('pauses after rate-limit retries instead of recording a permanent failure', async () => {
+        const supabase = createSupabaseMock('draft', {
+            recipients: [{
+                id: 'recipient_1',
+                contact_id: 'contact_1',
+                contacts: { psid: 'psid_1', name: 'Alex' }
+            }]
+        });
+        vi.mocked(sendMessage).mockRejectedValue(new Error('(#613) Calls to this api have exceeded the rate limit.'));
+
+        const result = await sendCampaignById({
+            campaignId: 'campaign_1',
+            supabase: supabase as never,
+            sendRetryAttempts: 1,
+            sendRetryDelayMs: 0
+        });
+
+        expect(result.status).toBe(503);
+        expect(result.failed).toBe(0);
+        expect(sendMessage).toHaveBeenCalledTimes(2);
+        expect(supabase.finishBatchRpc).not.toHaveBeenCalled();
+        expect(supabase.releaseBatchUpdate).toHaveBeenCalledWith(['contact_1']);
     });
 
     it('claims every pending recipient in bounded atomic batches without a per-run cap', async () => {

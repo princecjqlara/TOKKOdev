@@ -1,15 +1,16 @@
 import { generatePersonalizedMessage } from './ai';
 import { parseCampaignMessageParts } from './campaign-message-sequence';
-import { getConversationIdForPsid, getConversationMessages, sendMessage, getPageTemplates, createUtilityTemplate, UTILITY_TEMPLATES } from './facebook';
+import { getConversationIdForPsid, getConversationMessages, sendMessage, getPageTemplates } from './facebook';
 import { getBaseTemplateName, UTILITY_TEMPLATES as TEMPLATE_DEFS } from './facebook-templates';
 import { normalizeContactName } from './contact-names';
 import { replaceTemplateVariables } from './placeholders';
-import { isRetryableSendError } from './send-errors';
+import { isRetryableSendError, shouldPauseCampaignForSendError } from './send-errors';
 import { getSupabaseAdmin } from './supabase';
 import {
     claimCampaignRecipients,
     finishCampaignRecipientBatch,
-    getCampaignDeliveryProgress
+    getCampaignDeliveryProgress,
+    releaseCampaignRecipientBatch
 } from './campaign-recipient-queue';
 import type { TemplateMediaType } from './facebook-templates';
 
@@ -39,6 +40,18 @@ type SendCampaignByIdResult = {
     sent?: number;
     failed?: number;
 };
+
+const SENDABLE_TEMPLATE_STATUSES = new Set(['APPROVED', 'ACTIVE']);
+
+function getTemplateLanguage(template: Record<string, unknown>): string | null {
+    if (typeof template.language === 'string') return template.language.replace('-', '_');
+    if (template.language && typeof template.language === 'object') {
+        const language = template.language as Record<string, unknown>;
+        const code = language.code || language.locale || language.name;
+        return typeof code === 'string' ? code.replace('-', '_') : null;
+    }
+    return null;
+}
 
 export async function sendCampaignById({
     campaignId,
@@ -140,11 +153,6 @@ export async function sendCampaignById({
             campaign.audience_materialized_at = materializedAt;
         }
 
-        await supabase
-            .from('campaigns')
-            .update({ status: 'sending', updated_at: new Date().toISOString() })
-            .eq('id', campaignId);
-
         const pagesData = campaign.pages;
         const page = (Array.isArray(pagesData) ? pagesData[0] : pagesData) as { fb_page_id: string; access_token: string } | null;
 
@@ -157,6 +165,65 @@ export async function sendCampaignById({
                 failed: 0
             };
         }
+
+        // Validate every template before claiming even one recipient. This
+        // prevents a typo/stale media variant from turning a page-wide setup
+        // problem into tens of thousands of recipient failures.
+        const configuredTemplates = parseCampaignMessageParts(campaign.message_text)
+            .map(message => ({
+                name: message.templateName || campaign.template_name || null,
+                language: (message.templateLanguage || campaign.template_language || 'en_US').replace('-', '_')
+            }))
+            .filter((template): template is { name: string; language: string } => Boolean(template.name));
+
+        // The creation endpoint also validates new tracked campaigns. Repeat
+        // the check at the first actual delivery so older/resumed campaigns
+        // are protected, without spending two Graph calls on every 500-row
+        // continuation slice of a very large campaign.
+        if (configuredTemplates.length > 0 && Number(campaign.sent_count || 0) === 0) {
+            const pageTemplates = await getPageTemplates(page.fb_page_id, page.access_token);
+            const missingTemplate = configuredTemplates.find(configured => !pageTemplates.some(template => {
+                if (!template || typeof template !== 'object') return false;
+                const candidate = template as Record<string, unknown>;
+                const status = typeof candidate.status === 'string' ? candidate.status.toUpperCase() : '';
+                const language = getTemplateLanguage(candidate);
+                return (
+                    candidate.name === configured.name &&
+                    SENDABLE_TEMPLATE_STATUSES.has(status) &&
+                    (!language || language === configured.language)
+                );
+            }));
+
+            if (missingTemplate) {
+                const pausedStatus = allowScheduled ? 'scheduled' : 'draft';
+                await supabase
+                    .from('campaigns')
+                    .update({ status: pausedStatus, updated_at: new Date().toISOString() })
+                    .eq('id', campaignId);
+
+                return {
+                    status: 409,
+                    body: {
+                        success: false,
+                        paused: true,
+                        retryable: false,
+                        sent: Number(campaign.sent_count || 0),
+                        failed: Number(campaign.failed_count || 0),
+                        message:
+                            `Campaign paused: template '${missingTemplate.name}' (${missingTemplate.language}) ` +
+                            'is not approved and available on this Facebook page. Select an approved template, then resume.'
+                    },
+                    success: false,
+                    sent: Number(campaign.sent_count || 0),
+                    failed: Number(campaign.failed_count || 0)
+                };
+            }
+        }
+
+        await supabase
+            .from('campaigns')
+            .update({ status: 'sending', updated_at: new Date().toISOString() })
+            .eq('id', campaignId);
         let sentThisRun = 0;
         let failedThisRun = 0;
         let processedThisRun = 0;
@@ -210,10 +277,16 @@ export async function sendCampaignById({
 
             const batchPromises = batch.map(async (recipient) => {
                 if (!recipient.contact_psid) {
-                    return { success: false, contactId: recipient.contact_id, error: 'Contact missing PSID' };
+                    return {
+                        success: false,
+                        contactId: recipient.contact_id,
+                        error: 'Contact missing PSID',
+                        pauseCampaign: false
+                    };
                 }
 
                 let deliveryError: string | undefined;
+                let pauseCampaign = false;
                 try {
                     let messagesToSend = parseCampaignMessageParts(campaign.message_text);
 
@@ -307,7 +380,7 @@ export async function sendCampaignById({
                                 break;
                             } catch (sendError) {
                                 const errorMessage = (sendError as Error).message;
-                                const shouldRetry = attempt < SEND_RETRY_ATTEMPTS && isRetryableSendError(errorMessage);
+                                const shouldRetry = attempt < SEND_RETRY_ATTEMPTS && isRetryableSendError(sendError);
 
                                 if (!shouldRetry) {
                                     throw sendError;
@@ -324,50 +397,107 @@ export async function sendCampaignById({
 
                 } catch (error) {
                     deliveryError = (error as Error).message;
+                    pauseCampaign = shouldPauseCampaignForSendError(error);
                     console.warn(`Failed to send to ${recipient.contact_psid}: ${deliveryError}`);
                 }
 
                 return deliveryError
-                    ? { success: false, contactId: recipient.contact_id, error: deliveryError }
-                    : { success: true, contactId: recipient.contact_id };
+                    ? { success: false, contactId: recipient.contact_id, error: deliveryError, pauseCampaign }
+                    : { success: true, contactId: recipient.contact_id, pauseCampaign: false };
             });
 
             const batchResults = await Promise.allSettled(batchPromises);
-            const completionResults = batchResults.map((result, index) => {
+            const completionResults = batchResults.flatMap((result, index) => {
                 if (result.status === 'fulfilled') {
-                    return {
+                    if (result.value.pauseCampaign) return [];
+                    return [{
                         contact_id: result.value.contactId,
                         success: result.value.success,
                         error_message: result.value.success ? null : result.value.error || 'Unknown delivery error'
-                    };
+                    }];
                 }
 
-                return {
-                    contact_id: batch[index].contact_id,
-                    success: false,
-                    error_message: result.reason instanceof Error ? result.reason.message : 'Unexpected delivery error'
-                };
+                if (shouldPauseCampaignForSendError(result.reason)) return [];
+                return [{
+                        contact_id: batch[index].contact_id,
+                        success: false,
+                        error_message: result.reason instanceof Error ? result.reason.message : 'Unexpected delivery error'
+                }];
             });
 
-            await finishCampaignRecipientBatch({
-                supabase,
-                campaignId,
-                claimToken: batch[0].claim_token,
-                results: completionResults
+            const pausedResults = batchResults.flatMap((result, index) => {
+                if (result.status === 'fulfilled') {
+                    return result.value.pauseCampaign
+                        ? [{ contactId: result.value.contactId, error: result.value.error || 'Recoverable send failure' }]
+                        : [];
+                }
+                return shouldPauseCampaignForSendError(result.reason)
+                    ? [{
+                        contactId: batch[index].contact_id,
+                        error: result.reason instanceof Error ? result.reason.message : 'Recoverable send failure'
+                    }]
+                    : [];
             });
+
+            if (completionResults.length > 0) {
+                await finishCampaignRecipientBatch({
+                    supabase,
+                    campaignId,
+                    claimToken: batch[0].claim_token,
+                    results: completionResults
+                });
+            }
+
+            if (pausedResults.length > 0) {
+                await releaseCampaignRecipientBatch({
+                    supabase,
+                    campaignId,
+                    claimToken: batch[0].claim_token,
+                    contactIds: pausedResults.map(result => result.contactId)
+                });
+            }
 
             for (const result of batchResults) {
                 if (result.status === 'fulfilled') {
                     if (result.value.success) {
                         sentThisRun++;
-                    } else {
+                    } else if (!result.value.pauseCampaign) {
                         failedThisRun++;
                     }
-                } else {
+                } else if (!shouldPauseCampaignForSendError(result.reason)) {
                     failedThisRun++;
                 }
             }
-            processedThisRun += batch.length;
+            processedThisRun += completionResults.length;
+
+            if (pausedResults.length > 0) {
+                const progress = await getCampaignDeliveryProgress(supabase, campaignId);
+                const pausedStatus = allowScheduled ? 'scheduled' : 'draft';
+                await supabase
+                    .from('campaigns')
+                    .update({ status: pausedStatus, updated_at: new Date().toISOString() })
+                    .eq('id', campaignId)
+                    .eq('status', 'sending');
+
+                const reason = pausedResults[0].error;
+                return {
+                    status: 503,
+                    body: {
+                        success: false,
+                        paused: true,
+                        retryable: true,
+                        sent: progress.sent,
+                        failed: progress.failed,
+                        remaining: progress.remaining,
+                        message:
+                            `Campaign paused before more recipients were consumed. ${reason} ` +
+                            'Fix the page/template issue or wait for Facebook to recover, then press Send to resume.'
+                    },
+                    success: false,
+                    sent: progress.sent,
+                    failed: progress.failed
+                };
+            }
 
             if (processedThisRun < MAX_RECIPIENTS) {
                 await new Promise(resolve => setTimeout(resolve, DELAY_BETWEEN_BATCHES));

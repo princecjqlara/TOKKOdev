@@ -528,16 +528,16 @@ export async function sendMessage(
     }
 
     if (!response.ok) {
-        const errorData = await response.json().catch(() => ({ error: { message: 'Unknown error' } }));
-        const errorMessage = errorData.error?.message || `HTTP ${response.status}: ${response.statusText}`;
+        const facebookError = await readFacebookError(response, '/me/messages');
         console.error('🔴 Facebook send message error:', {
             pageId,
             recipientPsid,
             status: response.status,
-            error: errorMessage,
-            fullError: errorData
+            error: facebookError.message,
+            code: facebookError.code,
+            subcode: facebookError.subcode
         });
-        throw new Error(errorMessage);
+        throw facebookError;
     }
 
     const result = await response.json();

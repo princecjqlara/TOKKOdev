@@ -4,7 +4,8 @@ import type { NextRequest } from 'next/server';
 const mocks = vi.hoisted(() => ({
     getServerSession: vi.fn(),
     getSupabaseAdmin: vi.fn(),
-    sendCampaignById: vi.fn()
+    sendCampaignById: vi.fn(),
+    getPageTemplates: vi.fn()
 }));
 
 vi.mock('next-auth', () => ({
@@ -21,6 +22,10 @@ vi.mock('@/lib/supabase', () => ({
 
 vi.mock('@/lib/campaign-send', () => ({
     sendCampaignById: mocks.sendCampaignById
+}));
+
+vi.mock('@/lib/facebook', () => ({
+    getPageTemplates: mocks.getPageTemplates
 }));
 
 import { POST } from './route';
@@ -66,6 +71,12 @@ function createSupabaseMock() {
     const campaignsUpdate = vi.fn().mockReturnValue({ eq: campaignsUpdateEq });
 
     const campaignRecipientsInsert = vi.fn().mockResolvedValue({ error: null });
+    const pageSingle = vi.fn().mockResolvedValue({
+        data: { fb_page_id: 'fb_page_1', access_token: 'page_token' },
+        error: null
+    });
+    const pageEq = vi.fn().mockReturnValue({ single: pageSingle });
+    const pageSelect = vi.fn().mockReturnValue({ eq: pageEq });
 
     const from = vi.fn((table: string) => {
         if (table === 'user_pages') {
@@ -90,6 +101,12 @@ function createSupabaseMock() {
         if (table === 'campaign_recipients') {
             return {
                 insert: campaignRecipientsInsert
+            };
+        }
+
+        if (table === 'pages') {
+            return {
+                select: pageSelect
             };
         }
 
@@ -247,6 +264,7 @@ describe('POST /api/pages/[pageId]/contacts/tracked-bulk-message', () => {
     beforeEach(() => {
         vi.clearAllMocks();
         vi.useRealTimers();
+        mocks.getPageTemplates.mockResolvedValue([]);
         mocks.getServerSession.mockResolvedValue({
             user: {
                 id: 'user_1'
@@ -263,6 +281,58 @@ describe('POST /api/pages/[pageId]/contacts/tracked-bulk-message', () => {
             sent: 5,
             failed: 0
         });
+    });
+
+    it('preserves and validates the exact approved image template name', async () => {
+        const supabase = createSupabaseMock();
+        mocks.getSupabaseAdmin.mockReturnValue(supabase);
+        mocks.getPageTemplates.mockResolvedValue([{
+            name: 'idle_salon_image_update_v2',
+            language: 'en_US',
+            status: 'APPROVED',
+            components: [
+                { type: 'HEADER', format: 'IMAGE' },
+                { type: 'BODY', text: 'Appointment update: {{1}}.' }
+            ]
+        }]);
+
+        const response = await POST(createRequest({
+            messagePart1: 'Your appointment is confirmed',
+            envelopeWrapper: 'template',
+            templateName: 'idle_salon_image_update_v2',
+            templateLanguage: 'en_US',
+            templateMediaHeader: { type: 'image', url: 'https://example.com/salon.jpg' },
+            selection: { mode: 'specific', contactIds: ['contact_1'] }
+        }), {
+            params: Promise.resolve({ pageId: 'page_1' })
+        });
+
+        expect(response.status).toBe(200);
+        expect(mocks.getPageTemplates).toHaveBeenCalledWith('fb_page_1', 'page_token');
+        expect(supabase.campaignsInsert).toHaveBeenCalledWith(expect.objectContaining({
+            template_name: 'idle_salon_image_update_v2',
+            template_language: 'en_US'
+        }));
+    });
+
+    it('rejects a missing media template before materializing recipients', async () => {
+        const supabase = createSupabaseMock();
+        mocks.getSupabaseAdmin.mockReturnValue(supabase);
+        mocks.getPageTemplates.mockResolvedValue([]);
+
+        const response = await POST(createRequest({
+            messagePart1: 'Hello',
+            envelopeWrapper: 'template',
+            templateName: 'general_msg_v1_media_v1',
+            templateMediaHeader: { type: 'image', url: 'https://example.com/salon.jpg' },
+            selection: { mode: 'specific', contactIds: ['contact_1'] }
+        }), {
+            params: Promise.resolve({ pageId: 'page_1' })
+        });
+
+        expect(response.status).toBe(409);
+        expect(supabase.contactsIn).not.toHaveBeenCalled();
+        expect(supabase.campaignsInsert).not.toHaveBeenCalled();
     });
 
     afterEach(() => {

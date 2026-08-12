@@ -5,10 +5,49 @@ export type SendErrorCategory =
     | 'utility_template_missing'
     | 'recipient_unavailable'
     | 'outside_messaging_window'
+    | 'rate_limited'
+    | 'authentication_required'
+    | 'transient'
     | 'other';
 
-export function categorizeSendError(error: string): SendErrorCategory {
-    const normalized = error.trim().toLowerCase();
+type StructuredSendError = Error & {
+    status?: number;
+    code?: number;
+    subcode?: number;
+    requiresReauth?: boolean;
+};
+
+function getStructuredSendError(error: unknown): StructuredSendError | null {
+    return error instanceof Error ? error as StructuredSendError : null;
+}
+
+function getSendErrorMessage(error: unknown): string {
+    return error instanceof Error ? error.message : String(error || '');
+}
+
+export function categorizeSendError(error: unknown): SendErrorCategory {
+    const structured = getStructuredSendError(error);
+    const normalized = getSendErrorMessage(error).trim().toLowerCase();
+
+    if (
+        structured?.requiresReauth ||
+        structured?.code === 190 ||
+        normalized.includes('facebook authorization expired') ||
+        normalized.includes('access token has expired') ||
+        normalized.includes('invalid oauth access token')
+    ) {
+        return 'authentication_required';
+    }
+
+    if (
+        structured?.status === 429 ||
+        [4, 17, 32, 341, 613].includes(structured?.code || 0) ||
+        normalized.includes('(#613)') ||
+        normalized.includes('rate limit') ||
+        normalized.includes('too many calls')
+    ) {
+        return 'rate_limited';
+    }
 
     if (
         normalized.includes('pages_utility_messaging') ||
@@ -47,12 +86,43 @@ export function categorizeSendError(error: string): SendErrorCategory {
         return 'outside_messaging_window';
     }
 
+    if (
+        (typeof structured?.status === 'number' && structured.status >= 500) ||
+        [1, 2].includes(structured?.code || 0) ||
+        normalized.includes('fetch failed') ||
+        normalized.includes('network') ||
+        normalized.includes('timed out') ||
+        normalized.includes('timeout') ||
+        normalized.includes('temporarily unavailable') ||
+        normalized.includes('try again') ||
+        normalized.includes('server error') ||
+        normalized.includes('econnreset') ||
+        normalized.includes('socket hang up')
+    ) {
+        return 'transient';
+    }
+
     return 'other';
 }
 
-export function isRetryableSendError(error: string): boolean {
+export function isRetryableSendError(error: unknown): boolean {
     const category = categorizeSendError(error);
-    return category === 'other';
+    return category === 'rate_limited' || category === 'transient';
+}
+
+/**
+ * Errors that apply to the page, template, or Facebook service must pause a
+ * campaign instead of permanently consuming every remaining recipient.
+ */
+export function shouldPauseCampaignForSendError(error: unknown): boolean {
+    const category = categorizeSendError(error);
+    return (
+        category === 'utility_permission_missing' ||
+        category === 'utility_template_missing' ||
+        category === 'rate_limited' ||
+        category === 'authentication_required' ||
+        category === 'transient'
+    );
 }
 
 export function summarizeSendErrors(errors: SendError[]): {
@@ -60,6 +130,9 @@ export function summarizeSendErrors(errors: SendError[]): {
     utilityTemplateMissing: number;
     recipientUnavailable: number;
     outsideMessagingWindow: number;
+    rateLimited: number;
+    authenticationRequired: number;
+    transient: number;
     other: number;
 } {
     const summary = {
@@ -67,6 +140,9 @@ export function summarizeSendErrors(errors: SendError[]): {
         utilityTemplateMissing: 0,
         recipientUnavailable: 0,
         outsideMessagingWindow: 0,
+        rateLimited: 0,
+        authenticationRequired: 0,
+        transient: 0,
         other: 0
     };
 
@@ -80,6 +156,12 @@ export function summarizeSendErrors(errors: SendError[]): {
             summary.recipientUnavailable += 1;
         } else if (category === 'outside_messaging_window') {
             summary.outsideMessagingWindow += 1;
+        } else if (category === 'rate_limited') {
+            summary.rateLimited += 1;
+        } else if (category === 'authentication_required') {
+            summary.authenticationRequired += 1;
+        } else if (category === 'transient') {
+            summary.transient += 1;
         } else {
             summary.other += 1;
         }
