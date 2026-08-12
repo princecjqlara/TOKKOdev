@@ -1,10 +1,11 @@
 import { generatePersonalizedMessage } from './ai';
 import { parseCampaignMessageParts } from './campaign-message-sequence';
-import { getConversationIdForPsid, getConversationMessages, sendMessage, getPageTemplates } from './facebook';
+import { getConversationIdForPsid, getConversationMessages, sendMessage, getPageTemplates, takeThreadControl } from './facebook';
 import { getBaseTemplateName, UTILITY_TEMPLATES as TEMPLATE_DEFS } from './facebook-templates';
 import { normalizeContactName } from './contact-names';
 import { replaceTemplateVariables } from './placeholders';
 import {
+    categorizeSendError,
     getUtilityTemplateParameterValidationError,
     isRetryableSendError,
     shouldPauseCampaignForSendError
@@ -371,6 +372,7 @@ export async function sendCampaignById({
                         throw new Error('No message content available');
                     }
 
+                    let threadControlRecoveryAttempted = false;
                     for (let messageIndex = 0; messageIndex < messagesToSend.length; messageIndex++) {
                         const messagePart = messagesToSend[messageIndex];
                         const messageToSend = messagePart.text;
@@ -391,7 +393,8 @@ export async function sendCampaignById({
                             }
                         }
 
-                        for (let attempt = 0; attempt <= SEND_RETRY_ATTEMPTS; attempt++) {
+                        let retryAttempt = 0;
+                        while (true) {
                             try {
                                 const sendArgs: Parameters<typeof sendMessage> = [
                                     page.fb_page_id,
@@ -413,14 +416,47 @@ export async function sendCampaignById({
                                 break;
                             } catch (sendError) {
                                 const errorMessage = (sendError as Error).message;
-                                const shouldRetry = attempt < SEND_RETRY_ATTEMPTS && isRetryableSendError(sendError);
+                                if (
+                                    categorizeSendError(sendError) === 'thread_controlled_by_another_app' &&
+                                    !threadControlRecoveryAttempted
+                                ) {
+                                    threadControlRecoveryAttempted = true;
+                                    try {
+                                        await takeThreadControl(
+                                            page.access_token,
+                                            recipient.contact_psid,
+                                            `Tokko campaign ${campaignId}`
+                                        );
+                                        console.warn(`Took Messenger thread control for ${recipient.contact_psid}; retrying delivery once.`);
+                                        continue;
+                                    } catch (threadControlError) {
+                                        const takeoverMessage = threadControlError instanceof Error
+                                            ? threadControlError.message
+                                            : String(threadControlError || 'Unknown thread-control error');
+                                        const original = sendError as Error & { status?: number; code?: number; subcode?: number };
+                                        throw Object.assign(
+                                            new Error(
+                                                `${errorMessage} Automatic thread-control recovery failed: ${takeoverMessage}. ` +
+                                                'Configure this Meta app as the Page Primary Receiver, then resume the campaign.'
+                                            ),
+                                            {
+                                                status: original.status,
+                                                code: original.code,
+                                                subcode: original.subcode
+                                            }
+                                        );
+                                    }
+                                }
+
+                                const shouldRetry = retryAttempt < SEND_RETRY_ATTEMPTS && isRetryableSendError(sendError);
 
                                 if (!shouldRetry) {
                                     throw sendError;
                                 }
 
-                                const retryDelay = SEND_RETRY_DELAY * (attempt + 1);
-                                console.warn(`Retrying send to ${recipient.contact_psid} after transient error (${attempt + 1}/${SEND_RETRY_ATTEMPTS}): ${errorMessage}`);
+                                retryAttempt += 1;
+                                const retryDelay = SEND_RETRY_DELAY * retryAttempt;
+                                console.warn(`Retrying send to ${recipient.contact_psid} after transient error (${retryAttempt}/${SEND_RETRY_ATTEMPTS}): ${errorMessage}`);
                                 if (retryDelay > 0) {
                                     await new Promise(resolve => setTimeout(resolve, retryDelay));
                                 }

@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { sendMessage, sendUtilityMessage } from '../facebook';
+import { sendMessage, sendUtilityMessage, takeThreadControl } from '../facebook';
 
 function createJsonResponse(ok: boolean, payload: unknown, status: number = 200, statusText: string = 'OK') {
     return {
@@ -274,6 +274,23 @@ describe('sendMessage', () => {
         expect(payload.message.template).toBeUndefined();
     });
 
+});
+
+describe('takeThreadControl', () => {
+    it('uses the Messenger Handover Protocol endpoint for the recipient', async () => {
+        const fetchMock = vi.fn().mockResolvedValue(createJsonResponse(true, { success: true }));
+        vi.stubGlobal('fetch', fetchMock);
+
+        await takeThreadControl('page_token', 'psid_1', 'campaign recovery');
+
+        expect(fetchMock).toHaveBeenCalledTimes(1);
+        const [requestUrl, requestInit] = fetchMock.mock.calls[0];
+        expect(requestUrl).toBe('https://graph.facebook.com/v21.0/me/take_thread_control?access_token=page_token');
+        expect(JSON.parse((requestInit as RequestInit).body as string)).toEqual({
+            recipient: { id: 'psid_1' },
+            metadata: 'campaign recovery'
+        });
+    });
 });
 
 describe('sendUtilityMessage validation', () => {

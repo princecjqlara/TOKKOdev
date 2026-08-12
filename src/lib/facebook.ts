@@ -368,6 +368,48 @@ const DEFAULT_UTILITY_TEMPLATE = 'account_general_notification';
 const DEFAULT_UTILITY_LANGUAGE = 'en_US';
 const FACEBOOK_SEND_TIMEOUT_MS = 20_000;
 
+export async function takeThreadControl(
+    pageAccessToken: string,
+    recipientPsid: string,
+    metadata: string = 'Tokko campaign delivery'
+): Promise<void> {
+    const endpoint = '/me/take_thread_control';
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), FACEBOOK_SEND_TIMEOUT_MS);
+    let response: Response;
+
+    try {
+        response = await fetch(
+            `${FACEBOOK_GRAPH_URL}${endpoint}?access_token=${pageAccessToken}`,
+            {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    recipient: { id: recipientPsid },
+                    metadata
+                }),
+                signal: controller.signal
+            }
+        );
+    } catch (error) {
+        if (controller.signal.aborted) {
+            throw new Error(`Facebook thread-control request timed out after ${FACEBOOK_SEND_TIMEOUT_MS / 1000} seconds`);
+        }
+        throw error;
+    } finally {
+        clearTimeout(timeoutId);
+    }
+
+    if (!response.ok) {
+        throw await readFacebookError(response, endpoint);
+    }
+
+    const result = await response.json();
+    if (result?.success !== true) {
+        throw new Error('Facebook did not confirm thread control');
+    }
+}
+
 export async function sendMessage(
     pageId: string,
     pageAccessToken: string,

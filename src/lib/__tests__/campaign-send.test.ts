@@ -1,12 +1,12 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { sendCampaignById } from '../campaign-send';
 import { serializeCampaignMessageSequence } from '../campaign-message-sequence';
-import { sendMessage } from '../facebook';
-import { getPageTemplates } from '../facebook';
+import { getPageTemplates, sendMessage, takeThreadControl } from '../facebook';
 
 vi.mock('../facebook', () => ({
     sendMessage: vi.fn(),
     getPageTemplates: vi.fn(),
+    takeThreadControl: vi.fn(),
     getConversationIdForPsid: vi.fn(),
     getConversationMessages: vi.fn()
 }));
@@ -165,6 +165,7 @@ function createSupabaseMock(
 describe('sendCampaignById', () => {
     beforeEach(() => {
         vi.clearAllMocks();
+        vi.mocked(takeThreadControl).mockResolvedValue(undefined);
         vi.mocked(getPageTemplates).mockResolvedValue([
             { name: 'general_msg_v1', language: 'en_US', status: 'APPROVED' },
             { name: 'general_notice_v1', language: 'en_US', status: 'APPROVED' },
@@ -450,7 +451,39 @@ describe('sendCampaignById', () => {
         );
     });
 
-    it('pauses and releases recipients when another app controls the thread', async () => {
+    it('takes thread control and retries when another app controls the thread', async () => {
+        const recipients = [{
+            id: 'recipient_1',
+            contact_id: 'contact_1',
+            contacts: { psid: 'psid_1', name: 'Contact 1' }
+        }];
+        const supabase = createSupabaseMock('draft', { recipients });
+        const threadControlError = Object.assign(
+            new Error('(#10) Message failed to send because another app is controlling this thread now.'),
+            { status: 400, code: 10, subcode: 2018300 }
+        );
+        vi.mocked(sendMessage)
+            .mockRejectedValueOnce(threadControlError)
+            .mockResolvedValueOnce({ message_id: 'mid_after_takeover' });
+
+        const result = await sendCampaignById({
+            campaignId: 'campaign_1',
+            supabase: supabase as never,
+            sendBatchSize: 1,
+            sendRetryAttempts: 0
+        });
+
+        expect(result.status).toBe(200);
+        expect(result.sent).toBe(1);
+        expect(takeThreadControl).toHaveBeenCalledWith(
+            'page_token',
+            'psid_1',
+            'Tokko campaign campaign_1'
+        );
+        expect(sendMessage).toHaveBeenCalledTimes(2);
+    });
+
+    it('pauses and releases recipients when automatic thread takeover fails', async () => {
         const recipients = Array.from({ length: 3 }, (_, index) => ({
             id: `recipient_${index + 1}`,
             contact_id: `contact_${index + 1}`,
@@ -462,6 +495,9 @@ describe('sendCampaignById', () => {
             { status: 400, code: 10, subcode: 2018300 }
         );
         vi.mocked(sendMessage).mockRejectedValue(threadControlError);
+        vi.mocked(takeThreadControl).mockRejectedValue(
+            new Error('This app is not the Primary Receiver')
+        );
 
         const result = await sendCampaignById({
             campaignId: 'campaign_1',
@@ -473,6 +509,7 @@ describe('sendCampaignById', () => {
         expect(result.body.paused).toBe(true);
         expect(result.failed).toBe(0);
         expect(result.body.remaining).toBe(3);
+        expect(takeThreadControl).toHaveBeenCalledTimes(3);
         expect(supabase.finishBatchRpc).not.toHaveBeenCalled();
         expect(supabase.releaseBatchUpdate).toHaveBeenCalledWith([
             'contact_1',
