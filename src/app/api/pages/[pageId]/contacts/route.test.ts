@@ -3,8 +3,7 @@ import type { NextRequest } from 'next/server';
 
 const mocks = vi.hoisted(() => ({
     getServerSession: vi.fn(),
-    getSupabaseAdmin: vi.fn(),
-    buildNotInFilter: vi.fn()
+    getSupabaseAdmin: vi.fn()
 }));
 
 vi.mock('next-auth', () => ({
@@ -17,10 +16,6 @@ vi.mock('@/lib/auth', () => ({
 
 vi.mock('@/lib/supabase', () => ({
     getSupabaseAdmin: mocks.getSupabaseAdmin
-}));
-
-vi.mock('@/lib/tag-filters', () => ({
-    buildNotInFilter: mocks.buildNotInFilter
 }));
 
 import { GET } from './route';
@@ -78,6 +73,7 @@ function createSupabaseMock(options?: {
     const contactsBuilder: any = {
         eq: vi.fn(() => contactsBuilder),
         in: vi.fn(() => contactsBuilder),
+        is: vi.fn(() => contactsBuilder),
         not: vi.fn(() => contactsBuilder),
         or: vi.fn(() => contactsBuilder),
         order: vi.fn(() => contactsBuilder),
@@ -166,7 +162,9 @@ function createSupabaseMock(options?: {
 
     return {
         from,
+        contactsSelect,
         contactsIn: contactsBuilder.in,
+        contactsIs: contactsBuilder.is,
         contactsNot: contactsBuilder.not,
         contactsOr: contactsBuilder.or,
         contactTagsIn,
@@ -177,7 +175,6 @@ function createSupabaseMock(options?: {
 describe('GET /api/pages/[pageId]/contacts', () => {
     beforeEach(() => {
         vi.clearAllMocks();
-        mocks.buildNotInFilter.mockReturnValue(null);
     });
 
     it('includes who added each tag in contact results', async () => {
@@ -207,7 +204,6 @@ describe('GET /api/pages/[pageId]/contacts', () => {
             }
         });
 
-        mocks.buildNotInFilter.mockReturnValue('("contact_2")');
         const supabase = createSupabaseMock({
             includeContactIds: ['contact_1', 'contact_2'],
             excludeContactIds: ['contact_2']
@@ -220,13 +216,13 @@ describe('GET /api/pages/[pageId]/contacts', () => {
         );
 
         expect(response.status).toBe(200);
-        expect(supabase.contactTagsIn).toHaveBeenNthCalledWith(1, 'tag_id', ['tag_a', 'tag_b']);
-        expect(supabase.contactTagsIn).toHaveBeenNthCalledWith(2, 'tag_id', ['tag_x']);
-        expect(supabase.contactTagsEq).toHaveBeenNthCalledWith(1, 'contacts.page_id', 'page_1');
-        expect(supabase.contactTagsEq).toHaveBeenNthCalledWith(2, 'contacts.page_id', 'page_1');
-        expect(supabase.contactsIn).toHaveBeenCalledWith('id', ['contact_1', 'contact_2']);
-        expect(mocks.buildNotInFilter).toHaveBeenCalledWith(['contact_2']);
-        expect(supabase.contactsNot).toHaveBeenCalledWith('id', 'in', '("contact_2")');
+        expect(supabase.contactsSelect).toHaveBeenCalledWith(
+            '*,included_tag_filter:contact_tags!inner(),excluded_tag_filter:contact_tags!left()',
+            { count: 'exact' }
+        );
+        expect(supabase.contactsIn).toHaveBeenNthCalledWith(1, 'included_tag_filter.tag_id', ['tag_a', 'tag_b']);
+        expect(supabase.contactsIn).toHaveBeenNthCalledWith(2, 'excluded_tag_filter.tag_id', ['tag_x']);
+        expect(supabase.contactsIs).toHaveBeenCalledWith('excluded_tag_filter', null);
     });
 
     it('applies exclude mode to date filters', async () => {

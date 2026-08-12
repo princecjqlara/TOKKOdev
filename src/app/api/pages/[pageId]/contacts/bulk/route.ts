@@ -3,8 +3,9 @@ import { getServerSession } from 'next-auth';
 import { authOptions } from '@/lib/auth';
 import { getSupabaseAdmin } from '@/lib/supabase';
 import { recordPageActivity } from '@/lib/activity-history';
+import { SUPABASE_IN_FILTER_BATCH_SIZE } from '@/lib/supabase-pagination';
 
-const CHUNK_SIZE = 200; // avoid PostgREST payload limits
+const CHUNK_SIZE = SUPABASE_IN_FILTER_BATCH_SIZE;
 
 // DELETE /api/pages/[pageId]/contacts/bulk - Bulk delete contacts
 export async function DELETE(

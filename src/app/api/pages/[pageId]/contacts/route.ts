@@ -3,9 +3,7 @@ import { getServerSession } from 'next-auth';
 import { authOptions } from '@/lib/auth';
 import { getSupabaseAdmin } from '@/lib/supabase';
 import { PaginatedResponse, Contact } from '@/types';
-import { buildNotInFilter } from '@/lib/tag-filters';
 import { normalizeContactName } from '../../../../../lib/contact-names';
-import { fetchAllSupabaseRows } from '../../../../../lib/supabase-pagination';
 
 type DateFilterMode = 'include' | 'exclude';
 
@@ -114,9 +112,14 @@ export async function GET(
         // causing failures on large pages (e.g., "Zeus Media") because the
         // joined response could exceed Supabase row/size limits. Tags are
         // fetched separately below for the page of contacts being returned.
+        const tagFilterSelect = [
+            tagIds.length > 0 ? 'included_tag_filter:contact_tags!inner()' : '',
+            excludeTagIds.length > 0 ? 'excluded_tag_filter:contact_tags!left()' : ''
+        ].filter(Boolean).join(',');
+        const contactSelect = (tagFilterSelect ? `*,${tagFilterSelect}` : '*') as '*';
         let query = supabase
             .from('contacts')
-            .select('*', { count: 'exact' })
+            .select(contactSelect, { count: 'exact' })
             .eq('page_id', pageId)
             .order('last_interaction_at', { ascending: false, nullsFirst: false });
 
@@ -161,68 +164,14 @@ export async function GET(
 
         // Apply include tag filter (OR logic — contacts with ANY of the selected tags)
         if (tagIds.length > 0) {
-            const taggedContacts = await fetchAllSupabaseRows<{ contact_id?: string | null }>(
-                supabase
-                    .from('contact_tags')
-                    .select('contact_id, contacts!inner(page_id)')
-                    .in('tag_id', tagIds)
-                    .eq('contacts.page_id', pageId)
-            );
-
-            // Deduplicate contact IDs (a contact may have multiple matching tags)
-            const contactIds = [
-                ...new Set(
-                    taggedContacts
-                        .map((tc) => tc.contact_id)
-                        .filter((contactId): contactId is string => typeof contactId === 'string' && contactId.trim() !== '')
-                )
-            ];
-
-            if (contactIds.length > 0) {
-                query = query.in('id', contactIds);
-                logInfo('Applied include-tag filter', {
-                    includeTagCount: tagIds.length,
-                    matchingContactCount: contactIds.length
-                });
-            } else {
-                // No contacts with any of these tags
-                logInfo('Include-tag filter matched no contacts', {
-                    includeTagCount: tagIds.length
-                });
-                return NextResponse.json({
-                    items: [],
-                    page,
-                    pageSize,
-                    total: 0
-                } as PaginatedResponse<Contact>);
-            }
+            query = query.in('included_tag_filter.tag_id', tagIds);
         }
 
         // Apply exclude tag filter (OR logic — exclude contacts with ANY of the excluded tags)
         if (excludeTagIds.length > 0) {
-            const excludedContacts = await fetchAllSupabaseRows<{ contact_id?: string | null }>(
-                supabase
-                    .from('contact_tags')
-                    .select('contact_id, contacts!inner(page_id)')
-                    .in('tag_id', excludeTagIds)
-                    .eq('contacts.page_id', pageId)
-            );
-
-            const excludedIds = [
-                ...new Set(
-                    excludedContacts
-                        .map((tc) => tc.contact_id)
-                        .filter((contactId): contactId is string => typeof contactId === 'string' && contactId.trim() !== '')
-                )
-            ];
-            const notInFilter = buildNotInFilter(excludedIds);
-            if (notInFilter) {
-                query = query.not('id', 'in', notInFilter);
-                logInfo('Applied exclude-tag filter', {
-                    excludeTagCount: excludeTagIds.length,
-                    excludedContactCount: excludedIds.length
-                });
-            }
+            query = query
+                .in('excluded_tag_filter.tag_id', excludeTagIds)
+                .is('excluded_tag_filter', null);
         }
 
         // Apply pagination

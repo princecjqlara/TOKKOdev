@@ -3,6 +3,15 @@ import { getServerSession } from 'next-auth';
 import { authOptions } from '@/lib/auth';
 import { getSupabaseAdmin } from '@/lib/supabase';
 import { recordPageActivity } from '@/lib/activity-history';
+import { chunkArray } from '@/lib/chunking';
+import { SUPABASE_IN_FILTER_BATCH_SIZE } from '@/lib/supabase-pagination';
+
+function normalizeIds(value: unknown): string[] {
+    if (!Array.isArray(value)) return [];
+    return [...new Set(value
+        .map((item) => (typeof item === 'string' ? item.trim() : ''))
+        .filter(Boolean))];
+}
 
 // POST /api/pages/[pageId]/contacts/bulk-remove-tags - Remove tags from contacts
 export async function POST(
@@ -21,7 +30,8 @@ export async function POST(
 
         const { pageId } = await params;
         const body = await request.json();
-        const { contactIds, tagIds } = body;
+        const contactIds = normalizeIds(body.contactIds);
+        const tagIds = normalizeIds(body.tagIds);
 
         if (!contactIds?.length || !tagIds?.length) {
             return NextResponse.json(
@@ -48,25 +58,35 @@ export async function POST(
         }
 
         // Verify contacts belong to this page before removing tags
-        const { data: validContacts } = await supabase
-            .from('contacts')
-            .select('id')
-            .in('id', contactIds)
-            .eq('page_id', pageId);
+        const validContactIds: string[] = [];
+        for (const contactIdBatch of chunkArray(contactIds, SUPABASE_IN_FILTER_BATCH_SIZE)) {
+            const { data: validContacts, error: validContactsError } = await supabase
+                .from('contacts')
+                .select('id')
+                .in('id', contactIdBatch)
+                .eq('page_id', pageId);
 
-        const validContactIds = (validContacts || []).map(c => c.id);
+            if (validContactsError) throw validContactsError;
+            validContactIds.push(...(validContacts || []).map((contact) => contact.id));
+        }
         if (!validContactIds.length) {
             return NextResponse.json({ success: true, removedCount: 0 });
         }
 
         // Delete contact_tags entries only for verified contacts
-        const { error, count } = await supabase
-            .from('contact_tags')
-            .delete({ count: 'exact' })
-            .in('contact_id', validContactIds)
-            .in('tag_id', tagIds);
+        let removedCount = 0;
+        for (const contactIdBatch of chunkArray(validContactIds, SUPABASE_IN_FILTER_BATCH_SIZE)) {
+            for (const tagIdBatch of chunkArray(tagIds, SUPABASE_IN_FILTER_BATCH_SIZE)) {
+                const { error, count } = await supabase
+                    .from('contact_tags')
+                    .delete({ count: 'exact' })
+                    .in('contact_id', contactIdBatch)
+                    .in('tag_id', tagIdBatch);
 
-        if (error) throw error;
+                if (error) throw error;
+                removedCount += count || 0;
+            }
+        }
 
         await recordPageActivity(supabase, {
             pageId,
@@ -80,7 +100,7 @@ export async function POST(
                 requestedContactCount: contactIds.length,
                 matchedContactCount: validContactIds.length,
                 tagCount: tagIds.length,
-                removedAssignmentCount: count || 0,
+                removedAssignmentCount: removedCount,
                 tagIds: tagIds.slice(0, 100),
                 contactIds: validContactIds.slice(0, 100),
                 tagListTruncated: tagIds.length > 100,
@@ -90,7 +110,7 @@ export async function POST(
 
         return NextResponse.json({
             success: true,
-            removedCount: count || 0
+            removedCount
         });
     } catch (error) {
         console.error('Error removing tags from contacts:', error);

@@ -13,6 +13,7 @@ import { chunkArray } from '@/lib/chunking';
 import { replaceTemplateVariablesForParts, ContactRecord } from '@/lib/placeholders';
 import { stopWorkflowAutomationsFromPageMessage } from '@/lib/workflow-automations';
 import { recordPageActivity } from '@/lib/activity-history';
+import { SUPABASE_IN_FILTER_BATCH_SIZE } from '@/lib/supabase-pagination';
 import {
     applyDynamicButtonValue,
     ButtonMode,
@@ -472,7 +473,7 @@ export async function POST(request: NextRequest) {
         // Note: We trust that contactIds were fetched correctly for this page
         // So we don't need to filter by page_id again - just query by IDs
         let allContacts: { id: string; psid: string; name: string | null; last_interaction_at: string | null }[] = [];
-        const batchSize = 200; // Keep queries small to avoid URL size limits
+        const batchSize = SUPABASE_IN_FILTER_BATCH_SIZE;
 
         console.log(`📤 Processing ${contactIds.length} contact IDs for page ${pageId}`);
         console.log(`📤 Will process in ${Math.ceil(contactIds.length / batchSize)} batches of up to ${batchSize} contacts each`);

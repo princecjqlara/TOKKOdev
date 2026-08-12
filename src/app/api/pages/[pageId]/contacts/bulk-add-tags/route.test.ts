@@ -20,16 +20,16 @@ vi.mock('@/lib/supabase', () => ({
 
 import { POST } from './route';
 
-function createRequest(): NextRequest {
+function createRequest(body: Record<string, unknown> = {
+    contactIds: ['contact_1'],
+    tagIds: ['tag_1']
+}): NextRequest {
     return new Request('http://localhost:3000/api/pages/page_1/contacts/bulk-add-tags', {
         method: 'POST',
         headers: {
             'Content-Type': 'application/json'
         },
-        body: JSON.stringify({
-            contactIds: ['contact_1'],
-            tagIds: ['tag_1']
-        })
+        body: JSON.stringify(body)
     }) as unknown as NextRequest;
 }
 
@@ -39,8 +39,15 @@ function createSupabaseMock() {
     const userPageEqUser = vi.fn().mockReturnValue({ eq: userPageEqPage });
     const userPageSelect = vi.fn().mockReturnValue({ eq: userPageEqUser });
 
-    const contactsEqPage = vi.fn().mockResolvedValue({ data: [{ id: 'contact_1' }], error: null });
-    const contactsIn = vi.fn().mockReturnValue({ eq: contactsEqPage });
+    let pendingContactIds: string[] = [];
+    const contactsEqPage = vi.fn(() => Promise.resolve({
+        data: pendingContactIds.map((id) => ({ id })),
+        error: null
+    }));
+    const contactsIn = vi.fn((_column: string, contactIds: string[]) => {
+        pendingContactIds = contactIds;
+        return { eq: contactsEqPage };
+    });
     const contactsSelect = vi.fn().mockReturnValue({ in: contactsIn });
 
     const upsert = vi.fn().mockResolvedValue({ error: null });
@@ -76,6 +83,7 @@ function createSupabaseMock() {
 
     return {
         from,
+        contactsIn,
         upsert,
         activityInsert
     };
@@ -123,5 +131,28 @@ describe('POST /api/pages/[pageId]/contacts/bulk-add-tags', () => {
                 success_count: 1
             })
         );
+    });
+
+    it('batches large contact validation and tag assignment writes', async () => {
+        mocks.getServerSession.mockResolvedValue({ user: { id: 'user_1' } });
+        const supabase = createSupabaseMock();
+        mocks.getSupabaseAdmin.mockReturnValue(supabase);
+        const contactIds = Array.from({ length: 300 }, (_, index) => `contact_${index + 1}`);
+
+        const response = await POST(createRequest({
+            contactIds,
+            tagIds: ['tag_1', 'tag_2']
+        }), {
+            params: Promise.resolve({ pageId: 'page_1' })
+        });
+
+        const body = await response.json();
+
+        expect(response.status).toBe(200);
+        expect(body.addedCount).toBe(600);
+        expect(supabase.contactsIn).toHaveBeenCalledTimes(3);
+        expect(supabase.contactsIn.mock.calls.map((call) => call[1].length)).toEqual([100, 100, 100]);
+        expect(supabase.upsert).toHaveBeenCalledTimes(2);
+        expect(supabase.upsert.mock.calls.map((call) => call[0].length)).toEqual([500, 100]);
     });
 });

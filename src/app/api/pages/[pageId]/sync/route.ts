@@ -11,6 +11,7 @@ import {
 import { getPhilippinesHour } from '@/lib/philippines-time';
 import { chunkArray } from '../../../../../lib/chunking';
 import { composeContactName, hasUsableContactName, normalizeContactName, pickPreferredContactName } from '../../../../../lib/contact-names';
+import { SUPABASE_IN_FILTER_BATCH_SIZE } from '@/lib/supabase-pagination';
 
 // Increase timeout for sync operations (up to 5 minutes)
 export const maxDuration = 300;
@@ -332,7 +333,7 @@ export async function POST(
         if (conversationPsids.size > 0) {
             try {
                 const existingContacts: Array<{ psid?: string | null; name?: string | null; profile_pic?: string | null }> = [];
-                for (const psidBatch of chunkArray(Array.from(conversationPsids), 500)) {
+                for (const psidBatch of chunkArray(Array.from(conversationPsids), SUPABASE_IN_FILTER_BATCH_SIZE)) {
                     const { data: batchContacts, error: existingContactsError } = await supabase
                         .from('contacts')
                         .select('psid,name,profile_pic')

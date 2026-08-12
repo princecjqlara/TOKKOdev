@@ -3,6 +3,15 @@ import { getServerSession } from 'next-auth';
 import { authOptions } from '@/lib/auth';
 import { getSupabaseAdmin } from '@/lib/supabase';
 import { recordPageActivity } from '@/lib/activity-history';
+import { chunkArray } from '@/lib/chunking';
+import { SUPABASE_IN_FILTER_BATCH_SIZE } from '@/lib/supabase-pagination';
+
+function normalizeIds(value: unknown): string[] {
+    if (!Array.isArray(value)) return [];
+    return [...new Set(value
+        .map((item) => (typeof item === 'string' ? item.trim() : ''))
+        .filter(Boolean))];
+}
 
 // POST /api/pages/[pageId]/contacts/bulk-add-tags - Add tags to contacts
 export async function POST(
@@ -21,7 +30,8 @@ export async function POST(
 
         const { pageId } = await params;
         const body = await request.json();
-        const { contactIds, tagIds } = body;
+        const contactIds = normalizeIds(body.contactIds);
+        const tagIds = normalizeIds(body.tagIds);
 
         if (!contactIds?.length || !tagIds?.length) {
             return NextResponse.json(
@@ -48,13 +58,17 @@ export async function POST(
         }
 
         // Verify contacts belong to this page
-        const { data: validContacts } = await supabase
-            .from('contacts')
-            .select('id')
-            .in('id', contactIds)
-            .eq('page_id', pageId);
+        const validContactIds: string[] = [];
+        for (const contactIdBatch of chunkArray(contactIds, SUPABASE_IN_FILTER_BATCH_SIZE)) {
+            const { data: validContacts, error: validContactsError } = await supabase
+                .from('contacts')
+                .select('id')
+                .in('id', contactIdBatch)
+                .eq('page_id', pageId);
 
-        const validContactIds = validContacts?.map(c => c.id) || [];
+            if (validContactsError) throw validContactsError;
+            validContactIds.push(...(validContacts || []).map((contact) => contact.id));
+        }
 
         // Create contact_tags entries
         const entries = [];
@@ -70,14 +84,16 @@ export async function POST(
 
         if (entries.length > 0) {
             // Use upsert to avoid duplicates
-            const { error } = await supabase
-                .from('contact_tags')
-                .upsert(entries, {
-                    onConflict: 'contact_id,tag_id',
-                    ignoreDuplicates: true
-                });
+            for (const entryBatch of chunkArray(entries, 500)) {
+                const { error } = await supabase
+                    .from('contact_tags')
+                    .upsert(entryBatch, {
+                        onConflict: 'contact_id,tag_id',
+                        ignoreDuplicates: true
+                    });
 
-            if (error) throw error;
+                if (error) throw error;
+            }
         }
 
         await recordPageActivity(supabase, {

@@ -7,12 +7,16 @@ export const dynamic = 'force-dynamic';
 export async function GET(request: NextRequest) {
     try {
         const session = await getSessionFromRequest(request);
+        if (!session?.user?.id) {
+            return NextResponse.json(
+                { error: 'Unauthorized', message: 'Please sign in' },
+                { status: 401 }
+            );
+        }
         
         return NextResponse.json({
             success: true,
-            message: 'Sync API is accessible',
-            hasSession: !!session,
-            userId: session?.user?.id || null
+            message: 'Sync API is accessible'
         });
     } catch (error) {
         return NextResponse.json({

@@ -1,9 +1,20 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { authOptions } from '@/lib/auth';
+import { getSessionFromRequest } from '@/lib/get-session';
+
+export const dynamic = 'force-dynamic';
 
 // GET /api/check-oauth-config - Check OAuth configuration
 export async function GET(request: NextRequest) {
     try {
+        const session = await getSessionFromRequest(request);
+        if (!session?.user?.id) {
+            return NextResponse.json(
+                { error: 'Unauthorized', message: 'Please sign in' },
+                { status: 401 }
+            );
+        }
+
         const provider = authOptions.providers.find(p => p.id === 'facebook');
         
         if (!provider || provider.type !== 'oauth') {

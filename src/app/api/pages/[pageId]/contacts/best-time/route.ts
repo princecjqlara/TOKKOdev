@@ -2,6 +2,8 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getServerSession } from 'next-auth';
 import { authOptions } from '@/lib/auth';
 import { getSupabaseAdmin } from '@/lib/supabase';
+import { chunkArray } from '@/lib/chunking';
+import { SUPABASE_IN_FILTER_BATCH_SIZE } from '@/lib/supabase-pagination';
 
 interface BestTimeResult {
     contact_id: string;
@@ -145,7 +147,6 @@ export async function POST(
     }
 }
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
 async function calculateBestTimeForContact(supabase: any, pageId: string, contactId: string): Promise<BestTimeResult> {
     // Get all interactions for this contact
     const { data: interactions } = await supabase
@@ -224,7 +225,6 @@ function findMostCommonHour(distribution: Record<number, number>): number | null
 }
 
 // Find neighboring contacts (those with interactions within ±2 hours) and infer best time
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
 async function inferFromNeighbors(supabase: any, pageId: string, excludeContactId: string, referenceHour: number): Promise<number | null> {
     // Define the hour range (±2 hours, wrapping around midnight)
     const hourRange: number[] = [];
@@ -252,11 +252,18 @@ async function inferFromNeighbors(supabase: any, pageId: string, excludeContactI
     // Get the full interaction history of neighboring contacts
     const neighborContactIds = [...new Set(neighborInteractions.map((i: { contact_id: string }) => i.contact_id))];
 
-    const { data: allNeighborInteractions } = await supabase
-        .from('contact_interactions')
-        .select('hour_of_day')
-        .in('contact_id', neighborContactIds)
-        .eq('is_from_contact', true);
+    const allNeighborInteractions: Array<{ hour_of_day: number }> = [];
+    for (const contactIdBatch of chunkArray(neighborContactIds, SUPABASE_IN_FILTER_BATCH_SIZE)) {
+        const { data, error } = await supabase
+            .from('contact_interactions')
+            .select('hour_of_day')
+            .eq('page_id', pageId)
+            .in('contact_id', contactIdBatch)
+            .eq('is_from_contact', true);
+
+        if (error) throw error;
+        allNeighborInteractions.push(...(data || []));
+    }
 
     // Aggregate hour distribution from all neighbors
     const neighborDistribution: Record<number, number> = {};
@@ -269,7 +276,6 @@ async function inferFromNeighbors(supabase: any, pageId: string, excludeContactI
 }
 
 // Get the average (most common) hour across all contacts on the page
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
 async function getPageAverageHour(supabase: any, pageId: string): Promise<number | null> {
     const { data: pageInteractions } = await supabase
         .from('contact_interactions')
