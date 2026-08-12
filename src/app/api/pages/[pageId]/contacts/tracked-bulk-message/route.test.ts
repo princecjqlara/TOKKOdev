@@ -345,6 +345,29 @@ describe('POST /api/pages/[pageId]/contacts/tracked-bulk-message', () => {
         expect(supabase.campaignsInsert).not.toHaveBeenCalled();
     });
 
+    it('rejects forbidden utility parameter characters before campaign setup', async () => {
+        const supabase = createSupabaseMock();
+        mocks.getSupabaseAdmin.mockReturnValue(supabase);
+
+        const response = await POST(createRequest({
+            messagePart1: 'Promo #1 💇',
+            envelopeWrapper: 'template',
+            templateName: 'idle_salon_image_update_v2',
+            templateLanguage: 'en_US',
+            templateMediaHeader: { type: 'image', url: 'https://example.com/salon.jpg' },
+            selection: { mode: 'specific', contactIds: ['contact_1'] }
+        }), {
+            params: Promise.resolve({ pageId: 'page_1' })
+        });
+
+        const body = await response.json();
+        expect(response.status).toBe(400);
+        expect(body.message).toContain('Unsupported utility template parameter');
+        expect(mocks.getPageTemplates).not.toHaveBeenCalled();
+        expect(supabase.contactsIn).not.toHaveBeenCalled();
+        expect(supabase.campaignsInsert).not.toHaveBeenCalled();
+    });
+
     it('creates a select-all campaign atomically without fetching or inserting recipients over PostgREST', async () => {
         const supabase = createSupabaseMock();
         mocks.getSupabaseAdmin.mockReturnValue(supabase);

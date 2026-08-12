@@ -2,6 +2,7 @@ import { FacebookPage, FacebookConversation } from '@/types';
 import { FACEBOOK_REAUTH_MESSAGE } from './facebook-permissions';
 import { isFacebookReauthMessage } from './facebook-errors';
 import type { TemplateMediaType } from './facebook-templates';
+import { getUtilityTemplateParameterValidationError } from './send-errors';
 
 // Re-export templates from dedicated file
 export { UTILITY_TEMPLATES } from './facebook-templates';
@@ -414,6 +415,13 @@ export async function sendMessage(
         : [];
 
     if (messagingType === 'UTILITY') {
+        const invalidParameter = (templateBodyParameters || [messageText])
+            .map(getUtilityTemplateParameterValidationError)
+            .find((validationError): validationError is string => Boolean(validationError));
+        if (invalidParameter) {
+            throw new Error(invalidParameter);
+        }
+
         // Utility message with template - no time window restrictions
         const template = templateName || DEFAULT_UTILITY_TEMPLATE;
         const templatePayload: Record<string, unknown> = {
@@ -854,6 +862,12 @@ export async function sendUtilityMessage(
     mediaHeader?: { type: TemplateMediaType; url: string }
 ): Promise<{ message_id: string; recipient_id: string }> {
     const textsArray = Array.isArray(bodyTexts) ? bodyTexts : [bodyTexts];
+    const invalidParameter = textsArray
+        .map(getUtilityTemplateParameterValidationError)
+        .find((validationError): validationError is string => Boolean(validationError));
+    if (invalidParameter) {
+        throw new Error(invalidParameter);
+    }
     const parameters = textsArray.map((text) => ({ type: 'text' as const, text }));
     const components: Array<Record<string, unknown>> = [];
 

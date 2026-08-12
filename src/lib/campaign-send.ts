@@ -4,7 +4,11 @@ import { getConversationIdForPsid, getConversationMessages, sendMessage, getPage
 import { getBaseTemplateName, UTILITY_TEMPLATES as TEMPLATE_DEFS } from './facebook-templates';
 import { normalizeContactName } from './contact-names';
 import { replaceTemplateVariables } from './placeholders';
-import { isRetryableSendError, shouldPauseCampaignForSendError } from './send-errors';
+import {
+    getUtilityTemplateParameterValidationError,
+    isRetryableSendError,
+    shouldPauseCampaignForSendError
+} from './send-errors';
 import { getSupabaseAdmin } from './supabase';
 import {
     claimCampaignRecipients,
@@ -169,12 +173,41 @@ export async function sendCampaignById({
         // Validate every template before claiming even one recipient. This
         // prevents a typo/stale media variant from turning a page-wide setup
         // problem into tens of thousands of recipient failures.
-        const configuredTemplates = parseCampaignMessageParts(campaign.message_text)
+        const campaignMessageParts = parseCampaignMessageParts(campaign.message_text);
+        const configuredTemplates = campaignMessageParts
             .map(message => ({
                 name: message.templateName || campaign.template_name || null,
                 language: (message.templateLanguage || campaign.template_language || 'en_US').replace('-', '_')
             }))
             .filter((template): template is { name: string; language: string } => Boolean(template.name));
+
+        const invalidTemplateParameter = campaignMessageParts.find(message => (
+            Boolean(message.templateName || campaign.template_name) &&
+            Boolean(getUtilityTemplateParameterValidationError(message.text))
+        ));
+        if (invalidTemplateParameter) {
+            const validationError = getUtilityTemplateParameterValidationError(invalidTemplateParameter.text);
+            const pausedStatus = allowScheduled ? 'scheduled' : 'draft';
+            await supabase
+                .from('campaigns')
+                .update({ status: pausedStatus, updated_at: new Date().toISOString() })
+                .eq('id', campaignId);
+
+            return {
+                status: 409,
+                body: {
+                    success: false,
+                    paused: true,
+                    retryable: false,
+                    sent: Number(campaign.sent_count || 0),
+                    failed: Number(campaign.failed_count || 0),
+                    message: `Campaign paused before recipients were claimed. ${validationError}`
+                },
+                success: false,
+                sent: Number(campaign.sent_count || 0),
+                failed: Number(campaign.failed_count || 0)
+            };
+        }
 
         // The creation endpoint also validates new tracked campaigns. Repeat
         // the check at the first actual delivery so older/resumed campaigns
@@ -288,7 +321,7 @@ export async function sendCampaignById({
                 let deliveryError: string | undefined;
                 let pauseCampaign = false;
                 try {
-                    let messagesToSend = parseCampaignMessageParts(campaign.message_text);
+                    let messagesToSend = campaignMessageParts;
 
                     const normalizedContactName = normalizeContactName(recipient.contact_name);
                     const placeholderContact = {

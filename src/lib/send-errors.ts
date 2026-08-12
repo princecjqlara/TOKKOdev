@@ -5,6 +5,8 @@ export type SendErrorCategory =
     | 'utility_template_missing'
     | 'recipient_unavailable'
     | 'outside_messaging_window'
+    | 'thread_controlled_by_another_app'
+    | 'invalid_utility_parameter'
     | 'rate_limited'
     | 'authentication_required'
     | 'transient'
@@ -28,6 +30,22 @@ function getSendErrorMessage(error: unknown): string {
 export function categorizeSendError(error: unknown): SendErrorCategory {
     const structured = getStructuredSendError(error);
     const normalized = getSendErrorMessage(error).trim().toLowerCase();
+
+    if (
+        structured?.subcode === 2018300 ||
+        normalized.includes('another app is controlling this thread') ||
+        normalized.includes('another app controls this thread')
+    ) {
+        return 'thread_controlled_by_another_app';
+    }
+
+    if (
+        structured?.subcode === 1893043 ||
+        (normalized.includes('special characters') && normalized.includes('not allowed in template parameter')) ||
+        normalized.includes('unsupported utility template parameter')
+    ) {
+        return 'invalid_utility_parameter';
+    }
 
     if (
         structured?.requiresReauth ||
@@ -119,10 +137,35 @@ export function shouldPauseCampaignForSendError(error: unknown): boolean {
     return (
         category === 'utility_permission_missing' ||
         category === 'utility_template_missing' ||
+        category === 'thread_controlled_by_another_app' ||
+        category === 'invalid_utility_parameter' ||
         category === 'rate_limited' ||
         category === 'authentication_required' ||
         category === 'transient'
     );
+}
+
+const FORBIDDEN_UTILITY_PARAMETER_LITERAL_PATTERN = /[#%$\uFFFD]/u;
+const UTILITY_PARAMETER_EMOJI_PATTERN = /[\p{Extended_Pictographic}\p{Regional_Indicator}\uFE0F\u200D]/u;
+
+/**
+ * Meta rejects these characters in Messenger utility-template body values.
+ * Validate locally so a bad message cannot consume a campaign audience.
+ */
+export function getUtilityTemplateParameterValidationError(value: unknown): string | null {
+    if (typeof value !== 'string' || value.length === 0) return null;
+
+    const problems: string[] = [];
+    if (FORBIDDEN_UTILITY_PARAMETER_LITERAL_PATTERN.test(value)) {
+        problems.push("the characters #, %, $, or an invalid replacement character");
+    }
+    if (UTILITY_PARAMETER_EMOJI_PATTERN.test(value)) {
+        problems.push('emoji');
+    }
+
+    return problems.length > 0
+        ? `Unsupported utility template parameter: remove ${problems.join(' and ')} before sending.`
+        : null;
 }
 
 export function summarizeSendErrors(errors: SendError[]): {

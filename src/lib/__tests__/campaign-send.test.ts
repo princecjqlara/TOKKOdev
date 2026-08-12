@@ -450,6 +450,37 @@ describe('sendCampaignById', () => {
         );
     });
 
+    it('pauses and releases recipients when another app controls the thread', async () => {
+        const recipients = Array.from({ length: 3 }, (_, index) => ({
+            id: `recipient_${index + 1}`,
+            contact_id: `contact_${index + 1}`,
+            contacts: { psid: `psid_${index + 1}`, name: `Contact ${index + 1}` }
+        }));
+        const supabase = createSupabaseMock('draft', { recipients });
+        const threadControlError = Object.assign(
+            new Error('(#10) Message failed to send because another app is controlling this thread now.'),
+            { status: 400, code: 10, subcode: 2018300 }
+        );
+        vi.mocked(sendMessage).mockRejectedValue(threadControlError);
+
+        const result = await sendCampaignById({
+            campaignId: 'campaign_1',
+            supabase: supabase as never,
+            sendBatchSize: 3
+        });
+
+        expect(result.status).toBe(503);
+        expect(result.body.paused).toBe(true);
+        expect(result.failed).toBe(0);
+        expect(result.body.remaining).toBe(3);
+        expect(supabase.finishBatchRpc).not.toHaveBeenCalled();
+        expect(supabase.releaseBatchUpdate).toHaveBeenCalledWith([
+            'contact_1',
+            'contact_2',
+            'contact_3'
+        ]);
+    });
+
     it('preflights templates before claiming recipients', async () => {
         const supabase = createSupabaseMock('draft', {
             messageText: serializeCampaignMessageSequence([
@@ -470,6 +501,30 @@ describe('sendCampaignById', () => {
         expect(result.status).toBe(409);
         expect(result.body.paused).toBe(true);
         expect(result.body.message).toContain("template 'missing_media_template'");
+        expect(supabase.claimRpc).not.toHaveBeenCalled();
+        expect(sendMessage).not.toHaveBeenCalled();
+    });
+
+    it('preflights utility parameter characters before claiming recipients', async () => {
+        const supabase = createSupabaseMock('draft', {
+            messageText: serializeCampaignMessageSequence([
+                { text: 'Promo #1 💇', templateName: 'general_msg_v1', templateLanguage: 'en_US' }
+            ]),
+            recipients: [{
+                id: 'recipient_1',
+                contact_id: 'contact_1',
+                contacts: { psid: 'psid_1', name: 'Alex' }
+            }]
+        });
+
+        const result = await sendCampaignById({
+            campaignId: 'campaign_1',
+            supabase: supabase as never
+        });
+
+        expect(result.status).toBe(409);
+        expect(result.body.paused).toBe(true);
+        expect(result.body.message).toContain('Unsupported utility template parameter');
         expect(supabase.claimRpc).not.toHaveBeenCalled();
         expect(sendMessage).not.toHaveBeenCalled();
     });

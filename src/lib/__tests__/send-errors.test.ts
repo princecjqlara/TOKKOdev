@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
     categorizeSendError,
+    getUtilityTemplateParameterValidationError,
     isRetryableSendError,
     mergeSendErrors,
     shouldPauseCampaignForSendError,
@@ -59,6 +60,18 @@ describe('mergeSendErrors', () => {
 
         expect(categorizeSendError('(#613) Calls to this api have exceeded the rate limit.')).toBe('rate_limited');
         expect(categorizeSendError('Network timeout')).toBe('transient');
+
+        const threadControlled = Object.assign(
+            new Error('(#10) Message failed to send because another app is controlling this thread now.'),
+            { status: 400, code: 10, subcode: 2018300 }
+        );
+        expect(categorizeSendError(threadControlled)).toBe('thread_controlled_by_another_app');
+
+        const invalidParameter = Object.assign(
+            new Error("Special characters '#','%','$' and emojis not allowed in template parameter"),
+            { status: 400, code: 100, subcode: 1893043 }
+        );
+        expect(categorizeSendError(invalidParameter)).toBe('invalid_utility_parameter');
     });
 
     it('marks only unknown category as retryable', () => {
@@ -82,7 +95,16 @@ describe('mergeSendErrors', () => {
         expect(shouldPauseCampaignForSendError('(#100) Template cannot be found.')).toBe(true);
         expect(shouldPauseCampaignForSendError('(#613) Calls to this api have exceeded the rate limit.')).toBe(true);
         expect(shouldPauseCampaignForSendError('fetch failed')).toBe(true);
+        expect(shouldPauseCampaignForSendError('Another app is controlling this thread now.')).toBe(true);
+        expect(shouldPauseCampaignForSendError("Special characters not allowed in template parameter")).toBe(true);
         expect(shouldPauseCampaignForSendError("(#551) This person isn't available right now.")).toBe(false);
+    });
+
+    it('rejects Meta-forbidden utility parameter characters before sending', () => {
+        expect(getUtilityTemplateParameterValidationError('Promo #1 💇')).toContain('Unsupported utility template parameter');
+        expect(getUtilityTemplateParameterValidationError('Save $500 or 20%')).toContain('Unsupported utility template parameter');
+        expect(getUtilityTemplateParameterValidationError('Broken \uFFFD character')).toContain('Unsupported utility template parameter');
+        expect(getUtilityTemplateParameterValidationError('Rebond – ₱800 • any length')).toBeNull();
     });
 
     it('summarizes send error categories', () => {

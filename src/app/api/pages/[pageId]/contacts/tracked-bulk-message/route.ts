@@ -7,6 +7,7 @@ import { getPageTemplates } from '@/lib/facebook';
 import { getPhilippinesScheduledAtIso, getTomorrowPhilippinesDateParts } from '@/lib/philippines-time';
 import { getSupabaseAdmin } from '@/lib/supabase';
 import { fetchAllSupabaseRows, SUPABASE_IN_FILTER_BATCH_SIZE } from '@/lib/supabase-pagination';
+import { getUtilityTemplateParameterValidationError } from '@/lib/send-errors';
 
 export const maxDuration = 300;
 
@@ -517,6 +518,16 @@ export async function POST(
                 { error: 'Bad Request', message: 'Media sends require an approved media-header utility template.' },
                 { status: 400 }
             );
+        }
+
+        if (deliveryMode === 'now' && templateName) {
+            const parameterValidationError = getUtilityTemplateParameterValidationError(messageText);
+            if (parameterValidationError) {
+                return NextResponse.json(
+                    { error: 'Invalid utility template message', message: parameterValidationError },
+                    { status: 400 }
+                );
+            }
         }
 
         const supabase = getSupabaseAdmin();

@@ -16,6 +16,20 @@ afterEach(() => {
 });
 
 describe('sendMessage', () => {
+    it('rejects invalid utility parameters before calling Facebook', async () => {
+        const fetchMock = vi.fn();
+        vi.stubGlobal('fetch', fetchMock);
+
+        await expect(sendMessage(
+            'page_1',
+            'token_1',
+            'psid_1',
+            'Promo #1 💇',
+            'UTILITY'
+        )).rejects.toThrow('Unsupported utility template parameter');
+        expect(fetchMock).not.toHaveBeenCalled();
+    });
+
     it('uses default utility template with en_US language', async () => {
         const fetchMock = vi
             .fn()
@@ -260,6 +274,23 @@ describe('sendMessage', () => {
         expect(payload.message.template).toBeUndefined();
     });
 
+});
+
+describe('sendUtilityMessage validation', () => {
+    it('rejects invalid body parameters before calling Facebook', async () => {
+        const fetchMock = vi.fn();
+        vi.stubGlobal('fetch', fetchMock);
+
+        await expect(sendUtilityMessage(
+            'page_1',
+            'token_1',
+            'psid_1',
+            'idle_salon_image_update_v2',
+            'en_US',
+            'Promo 20% off'
+        )).rejects.toThrow('Unsupported utility template parameter');
+        expect(fetchMock).not.toHaveBeenCalled();
+    });
 });
 
 describe('sendUtilityMessage', () => {
