@@ -10,9 +10,11 @@ const STALE_SENDING_AFTER_MS = 10 * 60 * 1000;
 // from spending minutes walking several large queues.
 const MAX_CAMPAIGNS_PER_CRON_RUN = 2;
 const MAX_RECIPIENTS_PER_CAMPAIGN_RUN = 25;
-const MAX_IMMEDIATE_RECIPIENTS_PER_CAMPAIGN_RUN = 500;
+const MAX_IMMEDIATE_RECIPIENTS_PER_CAMPAIGN_RUN = 250;
 const MAX_DUE_RECIPIENT_ROWS_TO_SCAN = 500;
-const MAX_CRON_SEND_MS = 45000;
+// cron-jobs.org can stop waiting around the 30-second mark. Leave enough
+// headroom for campaign discovery and the JSON response.
+const MAX_CRON_SEND_MS = 20000;
 
 type ScheduledCampaign = {
     id: string;

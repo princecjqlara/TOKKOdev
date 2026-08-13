@@ -360,7 +360,7 @@ export async function sendCampaignById({
         let processedThisRun = 0;
         const SEND_BATCH_SIZE = Math.max(1, Math.min(sendBatchSize || 10, 25));
         const DELAY_BETWEEN_BATCHES = Math.max(0, delayBetweenBatchesMs || 0);
-        const MAX_PROCESSING_TIME = Math.max(30000, Math.min(maxProcessingTimeMs || 240000, 270000));
+        const MAX_PROCESSING_TIME = Math.max(10000, Math.min(maxProcessingTimeMs || 240000, 270000));
         const SEND_RETRY_ATTEMPTS = Math.max(0, Math.min(sendRetryAttempts || 0, 3));
         const SEND_RETRY_DELAY = Math.max(0, Math.min(sendRetryDelayMs || 0, 5000));
         const MAX_RECIPIENTS =
