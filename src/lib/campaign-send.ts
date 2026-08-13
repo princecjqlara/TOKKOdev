@@ -349,6 +349,7 @@ export async function sendCampaignById({
             .from('campaigns')
             .update({
                 status: 'sending',
+                background_delivery_enabled: !dueAt && !campaign.is_loop,
                 next_attempt_at: null,
                 last_error: null,
                 updated_at: new Date().toISOString()

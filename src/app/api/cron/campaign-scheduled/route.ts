@@ -5,11 +5,14 @@ import { getSupabaseAdmin } from '@/lib/supabase';
 export const dynamic = 'force-dynamic';
 
 const STALE_SENDING_AFTER_MS = 10 * 60 * 1000;
-const MAX_CAMPAIGNS_PER_CRON_RUN = 5;
+// Process one immediate campaign per invocation. This keeps the route within
+// the external scheduler/serverless execution window and prevents one call
+// from spending minutes walking several large queues.
+const MAX_CAMPAIGNS_PER_CRON_RUN = 2;
 const MAX_RECIPIENTS_PER_CAMPAIGN_RUN = 25;
-const MAX_IMMEDIATE_RECIPIENTS_PER_CAMPAIGN_RUN = 250;
+const MAX_IMMEDIATE_RECIPIENTS_PER_CAMPAIGN_RUN = 500;
 const MAX_DUE_RECIPIENT_ROWS_TO_SCAN = 500;
-const MAX_CRON_SEND_MS = 25000;
+const MAX_CRON_SEND_MS = 45000;
 
 type ScheduledCampaign = {
     id: string;
@@ -23,12 +26,13 @@ type ScheduledCampaign = {
     recurrence_end_at: string | null;
     scheduled_at: string | null;
     next_attempt_at: string | null;
+    background_delivery_enabled: boolean;
     status: string;
     updated_at: string | null;
 };
 
 const SCHEDULED_CAMPAIGN_SELECT =
-    'id, page_id, audience_mode, audience_start_date, audience_include_tag_ids, audience_exclude_tag_ids, audience_materialized_at, recurrence, recurrence_end_at, scheduled_at, next_attempt_at, status, updated_at';
+    'id, page_id, audience_mode, audience_start_date, audience_include_tag_ids, audience_exclude_tag_ids, audience_materialized_at, recurrence, recurrence_end_at, scheduled_at, next_attempt_at, background_delivery_enabled, status, updated_at';
 
 async function claimCampaign(
     supabase: ReturnType<typeof getSupabaseAdmin>,
@@ -145,6 +149,7 @@ async function getResumableImmediateCampaigns(
         .eq('status', 'sending')
         .eq('is_loop', false)
         .is('scheduled_at', null)
+        .eq('background_delivery_enabled', true)
         .or(`next_attempt_at.is.null,next_attempt_at.lte.${now}`)
         .order('updated_at', { ascending: true, nullsFirst: true })
         .limit(MAX_CAMPAIGNS_PER_CRON_RUN);
@@ -165,7 +170,10 @@ export async function GET(_request: NextRequest) {
         const immediateCampaigns = await getResumableImmediateCampaigns(supabase, now);
         const dueCampaigns = Array.from(
             new Map(
-                [...campaignLevelCampaigns, ...recipientLevelCampaigns, ...immediateCampaigns]
+                // Always give an explicitly-enabled immediate campaign the
+                // first worker slot. The second slot remains available for a
+                // due scheduled/best-time campaign.
+                [...immediateCampaigns.slice(0, 1), ...campaignLevelCampaigns, ...recipientLevelCampaigns]
                     .filter((campaign) => (
                         !campaign.next_attempt_at || campaign.next_attempt_at <= now
                     ))
@@ -215,7 +223,7 @@ export async function GET(_request: NextRequest) {
                 supabase,
                 allowScheduled: !isImmediateResume,
                 dueAt: isImmediateResume ? undefined : now,
-                sendBatchSize: 10,
+                sendBatchSize: isImmediateResume ? 25 : 10,
                 delayBetweenBatchesMs: 0,
                 maxRecipientsPerRun: isImmediateResume
                     ? MAX_IMMEDIATE_RECIPIENTS_PER_CAMPAIGN_RUN

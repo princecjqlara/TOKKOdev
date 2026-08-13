@@ -27,6 +27,7 @@ type CampaignRow = {
     recurrence_end_at: string | null;
     scheduled_at: string | null;
     next_attempt_at: string | null;
+    background_delivery_enabled: boolean;
     updated_at: string;
 };
 
@@ -67,6 +68,7 @@ function createCampaign(overrides: Partial<CampaignRow> = {}): CampaignRow {
         recurrence_end_at: null,
         scheduled_at: '2026-03-22T10:30:00.000Z',
         next_attempt_at: null,
+        background_delivery_enabled: true,
         updated_at: '2026-03-22T10:00:00.000Z',
         ...overrides
     };
@@ -208,7 +210,7 @@ describe('GET /api/cron/campaign-scheduled', () => {
             sendBatchSize: 10,
             delayBetweenBatchesMs: 0,
             maxRecipientsPerRun: 25,
-            maxProcessingTimeMs: 25000,
+            maxProcessingTimeMs: 45000,
             includeUnscheduledRecipients: true
         });
     });
@@ -244,7 +246,7 @@ describe('GET /api/cron/campaign-scheduled', () => {
             sendBatchSize: 10,
             delayBetweenBatchesMs: 0,
             maxRecipientsPerRun: 25,
-            maxProcessingTimeMs: 25000,
+            maxProcessingTimeMs: 45000,
             includeUnscheduledRecipients: false
         });
     });
@@ -278,10 +280,10 @@ describe('GET /api/cron/campaign-scheduled', () => {
             supabase,
             allowScheduled: false,
             dueAt: undefined,
-            sendBatchSize: 10,
+            sendBatchSize: 25,
             delayBetweenBatchesMs: 0,
-            maxRecipientsPerRun: 250,
-            maxProcessingTimeMs: 25000,
+            maxRecipientsPerRun: 500,
+            maxProcessingTimeMs: 45000,
             includeUnscheduledRecipients: false
         });
     });

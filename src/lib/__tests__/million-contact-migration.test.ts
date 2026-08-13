@@ -33,4 +33,15 @@ describe('million-contact campaign migration', () => {
         expect(sql).toContain("SET statement_timeout = '0'");
         expect(sql).not.toContain('ARRAY_AGG');
     });
+
+    it('limits automatic continuation to explicitly enabled campaigns', () => {
+        const sql = readFileSync(
+            resolve(process.cwd(), 'database/migration_campaign_background_delivery.sql'),
+            'utf8'
+        );
+
+        expect(sql).toContain('background_delivery_enabled BOOLEAN NOT NULL DEFAULT FALSE');
+        expect(sql).toContain('AND background_delivery_enabled');
+        expect(sql).toContain('20260814_012');
+    });
 });
