@@ -15,6 +15,7 @@ import {
     isMediaTemplateName
 } from '@/lib/facebook-templates';
 import type { TemplateMediaType } from '@/lib/facebook-templates';
+import { ensureSendableImageHeaderUrl, uploadImageHeader } from '@/lib/media-upload-client';
 
 // Map freeform wrapper values to template names
 const CAMPAIGN_ENVELOPE_MAP: Record<string, string> = {
@@ -253,6 +254,7 @@ export default function CampaignsPage() {
     const [freeformWrapper, setFreeformWrapper] = useState<string>('msg');
     const [campaignMediaEnabled, setCampaignMediaEnabled] = useState(false);
     const [campaignMediaUrl, setCampaignMediaUrl] = useState('');
+    const [mediaUploading, setMediaUploading] = useState(false);
     const [messageParts, setMessageParts] = useState<string[]>(['']);
     const [messagePartMediaUrls, setMessagePartMediaUrls] = useState<string[]>(['']);
     const [messagePartTemplates, setMessagePartTemplates] = useState<MessagePartTemplateSelection[]>([
@@ -517,7 +519,7 @@ export default function CampaignsPage() {
         }
     };
 
-    const handleCampaignMediaFile = (file: File | null) => {
+    const handleCampaignMediaFile = async (file: File | null) => {
         if (!file) return;
         if (!file.type.startsWith('image/')) {
             alert('Please choose an image file.');
@@ -528,14 +530,15 @@ export default function CampaignsPage() {
             return;
         }
 
-        const reader = new FileReader();
-        reader.onload = () => {
-            if (typeof reader.result === 'string') {
-                updateCampaignMediaUrl(reader.result);
-            }
-        };
-        reader.onerror = () => alert('Could not read that media file.');
-        reader.readAsDataURL(file);
+        if (!selectedPageId) return;
+        setMediaUploading(true);
+        try {
+            updateCampaignMediaUrl(await uploadImageHeader(file, selectedPageId, file.name));
+        } catch (error) {
+            alert((error as Error).message || 'Could not upload that photo.');
+        } finally {
+            setMediaUploading(false);
+        }
     };
 
     const updateMessagePartMediaUrl = (index: number, value: string) => {
@@ -549,7 +552,7 @@ export default function CampaignsPage() {
         });
     };
 
-    const handleMessagePartMediaFile = (index: number, file: File | null) => {
+    const handleMessagePartMediaFile = async (index: number, file: File | null) => {
         if (!file) return;
         if (!file.type.startsWith('image/')) {
             alert('Please choose an image file.');
@@ -560,14 +563,15 @@ export default function CampaignsPage() {
             return;
         }
 
-        const reader = new FileReader();
-        reader.onload = () => {
-            if (typeof reader.result === 'string') {
-                updateMessagePartMediaUrl(index, reader.result);
-            }
-        };
-        reader.onerror = () => alert('Could not read that media file.');
-        reader.readAsDataURL(file);
+        if (!selectedPageId) return;
+        setMediaUploading(true);
+        try {
+            updateMessagePartMediaUrl(index, await uploadImageHeader(file, selectedPageId, file.name));
+        } catch (error) {
+            alert((error as Error).message || 'Could not upload that photo.');
+        } finally {
+            setMediaUploading(false);
+        }
     };
 
     const updateMessagePart = (index: number, value: string) => {
@@ -712,6 +716,8 @@ export default function CampaignsPage() {
     };
 
     const handleCreate = async () => {
+        if (!selectedPageId) return;
+
         const usesDynamicAudience = !isLoop && audienceMode === 'dynamic';
         const hasRecipients = usesDynamicAudience
             ? true
@@ -725,8 +731,8 @@ export default function CampaignsPage() {
             .filter((part) => part.text.length > 0);
         const useCampaignMedia = !isLoop && !useAiMessage && deliveryMode === 'now' && campaignMediaEnabled;
         const useTemplateMedia = useCampaignMedia;
-        const normalizedCampaignMediaUrl = campaignMediaUrl.trim();
-        const resolvedMessagePartMediaHeaders = cleanedMessageParts.map((part) => {
+        let normalizedCampaignMediaUrl = campaignMediaUrl.trim();
+        let resolvedMessagePartMediaHeaders = cleanedMessageParts.map((part) => {
             const url = (messagePartMediaUrls[part.index] || '').trim() || normalizedCampaignMediaUrl;
             return url ? { type: 'image' as const, url } : null;
         });
@@ -759,6 +765,16 @@ export default function CampaignsPage() {
 
         setActionLoading(true);
         try {
+            if (useCampaignMedia) {
+                normalizedCampaignMediaUrl = await ensureSendableImageHeaderUrl(normalizedCampaignMediaUrl, selectedPageId);
+                resolvedMessagePartMediaHeaders = await Promise.all(resolvedMessagePartMediaHeaders.map(async (header) => (
+                    header
+                        ? { ...header, url: await ensureSendableImageHeaderUrl(header.url, selectedPageId) }
+                        : null
+                )));
+                updateCampaignMediaUrl(normalizedCampaignMediaUrl);
+            }
+
             let contactIds = usesDynamicAudience ? [] : Array.from(selectedContactIds);
 
             if (!usesDynamicAudience && isSelectAllMode) {
@@ -907,7 +923,21 @@ export default function CampaignsPage() {
         const campaignId = campaign.id;
         setSendingCampaignId(campaignId);
         try {
-            const storedMedia = readStoredCampaignMedia(campaignId);
+            let storedMedia = readStoredCampaignMedia(campaignId);
+            if (storedMedia) {
+                const url = storedMedia.url
+                    ? await ensureSendableImageHeaderUrl(storedMedia.url, campaign.page_id)
+                    : '';
+                const mediaHeaders = storedMedia.mediaHeaders
+                    ? await Promise.all(storedMedia.mediaHeaders.map(async (header) => (
+                        header?.url
+                            ? { ...header, url: await ensureSendableImageHeaderUrl(header.url, campaign.page_id) }
+                            : null
+                    )))
+                    : undefined;
+                storedMedia = { ...storedMedia, url, mediaHeaders };
+                window.localStorage.setItem(getCampaignMediaStorageKey(campaignId), JSON.stringify(storedMedia));
+            }
             const fallbackMediaHeader = storedMedia?.url
                 ? { type: 'image' as const, url: storedMedia.url }
                 : undefined;
@@ -2238,6 +2268,7 @@ export default function CampaignsPage() {
                         disabled={
                             !campaignName.trim() ||
                             actionLoading ||
+                            mediaUploading ||
                             (isLoop && !aiPrompt.trim()) ||
                             (!isLoop && useAiMessage && !aiPrompt.trim()) ||
                             (!isLoop && !useAiMessage && messageMode === 'template' && !hasTemplateForEveryMessagePart) ||
@@ -2253,7 +2284,9 @@ export default function CampaignsPage() {
                         }
                         className="btn-wireframe bg-black text-white hover:bg-gray-800"
                     >
-                        {actionLoading
+                        {mediaUploading
+                            ? 'Uploading Photo...'
+                            : actionLoading
                             ? 'Creating...'
                             : isLoop
                                 ? 'Create Loop Campaign'

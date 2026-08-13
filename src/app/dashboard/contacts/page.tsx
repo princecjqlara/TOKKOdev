@@ -33,6 +33,7 @@ import { getSupabaseClient } from '@/lib/supabase';
 import { UTILITY_TEMPLATES, getBaseTemplateName, getMediaTemplateName } from '@/lib/facebook-templates';
 import type { TemplateMediaType } from '@/lib/facebook-templates';
 import { runContactSyncToCompletion } from '@/lib/contact-sync-client';
+import { ensureSendableImageHeaderUrl, uploadImageHeader } from '@/lib/media-upload-client';
 
 // Map envelope wrapper values to template names
 const ENVELOPE_TEMPLATE_MAP: Record<string, string> = {
@@ -341,6 +342,7 @@ export default function ContactsPage() {
     const [bulkDeliveryMode, setBulkDeliveryMode] = useState<BulkDeliveryMode>('now');
     const [bulkMediaEnabled, setBulkMediaEnabled] = useState(false);
     const [bulkMediaUrl, setBulkMediaUrl] = useState('');
+    const [mediaUploading, setMediaUploading] = useState(false);
     const [scheduledMessages, setScheduledMessages] = useState(['', '', '']);
     const [scheduledMessageTemplates, setScheduledMessageTemplates] = useState<ScheduledMessageTemplateSelection[]>([
         { templateName: null, templateLanguage: 'en_US' },
@@ -381,6 +383,7 @@ export default function ContactsPage() {
     const scheduledMessagesComplete = scheduledMessages.every((message) => message.trim().length > 0);
     const messageSubmitDisabled =
         actionLoading ||
+        mediaUploading ||
         hasMessageButtonErrors ||
         dynamicModeMissingButton ||
         (bulkMediaEnabled && bulkDeliveryMode !== 'now') ||
@@ -949,7 +952,7 @@ export default function ContactsPage() {
         }
     };
 
-    const handleBulkMediaFile = (file: File | null) => {
+    const handleBulkMediaFile = async (file: File | null) => {
         if (!file) return;
         if (!file.type.startsWith('image/')) {
             alert('Please choose an image file.');
@@ -960,14 +963,15 @@ export default function ContactsPage() {
             return;
         }
 
-        const reader = new FileReader();
-        reader.onload = () => {
-            if (typeof reader.result === 'string') {
-                updateBulkMediaUrl(reader.result);
-            }
-        };
-        reader.onerror = () => alert('Could not read that media file.');
-        reader.readAsDataURL(file);
+        if (!selectedPageId) return;
+        setMediaUploading(true);
+        try {
+            updateBulkMediaUrl(await uploadImageHeader(file, selectedPageId, file.name));
+        } catch (error) {
+            alert((error as Error).message || 'Could not upload that photo.');
+        } finally {
+            setMediaUploading(false);
+        }
     };
 
     const getAvailableTemplateBody = (templateName: string | null): string | null => {
@@ -1074,8 +1078,8 @@ export default function ContactsPage() {
             return;
         }
 
-        const normalizedBulkMediaUrl = bulkMediaUrl.trim();
-        const templateMediaHeader = mediaTemplateRequiredForBulk
+        let normalizedBulkMediaUrl = bulkMediaUrl.trim();
+        let templateMediaHeader = mediaTemplateRequiredForBulk
             ? { type: 'image' as const, url: normalizedBulkMediaUrl }
             : undefined;
 
@@ -1093,6 +1097,12 @@ export default function ContactsPage() {
         let campaignReadyToSend = false;
 
         try {
+            if (templateMediaHeader) {
+                normalizedBulkMediaUrl = await ensureSendableImageHeaderUrl(normalizedBulkMediaUrl, selectedPageId);
+                updateBulkMediaUrl(normalizedBulkMediaUrl);
+                templateMediaHeader = { type: 'image' as const, url: normalizedBulkMediaUrl };
+            }
+
             const normalizedManualBatchSize = Math.max(1, Math.floor(Number(manualBatchSize) || 5000));
             const normalizedManualBatchNumber = Math.max(1, Math.floor(Number(manualBatchNumber) || 1));
             const selection = selectAllMode
@@ -1398,6 +1408,11 @@ export default function ContactsPage() {
 
         setActionLoading(true);
         try {
+            const sendableBulkMediaUrl = mediaTemplateRequiredForBulk
+                ? await ensureSendableImageHeaderUrl(bulkMediaUrl, selectedPageId)
+                : '';
+            if (sendableBulkMediaUrl) updateBulkMediaUrl(sendableBulkMediaUrl);
+
             setFailedContactIds([]);
             setFailedContactErrors([]);
             setLastSendResults(null);
@@ -1501,7 +1516,7 @@ export default function ContactsPage() {
                             templateName: envelopeWrapper === 'template' || mediaTemplateRequiredForBulk ? selectedTemplateName : undefined,
                             templateLanguage: envelopeWrapper === 'template' || mediaTemplateRequiredForBulk ? selectedTemplateLanguage : undefined,
                             templateMediaHeader: mediaTemplateRequiredForBulk
-                                ? { type: 'image' as const, url: bulkMediaUrl.trim() }
+                                ? { type: 'image' as const, url: sendableBulkMediaUrl }
                                 : undefined
                         })
                     });
@@ -1604,7 +1619,7 @@ export default function ContactsPage() {
                                             templateName: envelopeWrapper === 'template' || mediaTemplateRequiredForBulk ? selectedTemplateName : undefined,
                                             templateLanguage: envelopeWrapper === 'template' || mediaTemplateRequiredForBulk ? selectedTemplateLanguage : undefined,
                                             templateMediaHeader: mediaTemplateRequiredForBulk
-                                                ? { type: 'image' as const, url: bulkMediaUrl.trim() }
+                                                ? { type: 'image' as const, url: sendableBulkMediaUrl }
                                                 : undefined
                                         })
                                     });
@@ -1906,6 +1921,11 @@ export default function ContactsPage() {
 
         setActionLoading(true);
         try {
+            const sendableBulkMediaUrl = mediaTemplateRequiredForBulk
+                ? await ensureSendableImageHeaderUrl(bulkMediaUrl, selectedPageId)
+                : '';
+            if (sendableBulkMediaUrl) updateBulkMediaUrl(sendableBulkMediaUrl);
+
             const response = await fetch('/api/facebook/messages/send', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
@@ -1922,7 +1942,7 @@ export default function ContactsPage() {
                     templateName: envelopeWrapper === 'template' || mediaTemplateRequiredForBulk ? selectedTemplateName : undefined,
                     templateLanguage: envelopeWrapper === 'template' || mediaTemplateRequiredForBulk ? selectedTemplateLanguage : undefined,
                     templateMediaHeader: mediaTemplateRequiredForBulk
-                        ? { type: 'image' as const, url: bulkMediaUrl.trim() }
+                        ? { type: 'image' as const, url: sendableBulkMediaUrl }
                         : undefined
                 })
             });
@@ -3513,7 +3533,9 @@ export default function ContactsPage() {
                             disabled={messageSubmitDisabled}
                             className="btn-wireframe bg-black text-white hover:bg-gray-800"
                         >
-                            {actionLoading
+                            {mediaUploading
+                                ? 'Uploading Photo...'
+                                : actionLoading
                                 ? bulkDeliveryMode === 'best_time_next_day'
                                     ? 'Scheduling...'
                                     : 'Sending tracked...'
