@@ -210,7 +210,7 @@ describe('GET /api/cron/campaign-scheduled', () => {
             sendBatchSize: 10,
             delayBetweenBatchesMs: 0,
             maxRecipientsPerRun: 25,
-            maxProcessingTimeMs: 20000,
+            maxProcessingTimeMs: 15000,
             includeUnscheduledRecipients: true
         });
     });
@@ -246,7 +246,7 @@ describe('GET /api/cron/campaign-scheduled', () => {
             sendBatchSize: 10,
             delayBetweenBatchesMs: 0,
             maxRecipientsPerRun: 25,
-            maxProcessingTimeMs: 20000,
+            maxProcessingTimeMs: 15000,
             includeUnscheduledRecipients: false
         });
     });
@@ -283,7 +283,7 @@ describe('GET /api/cron/campaign-scheduled', () => {
             sendBatchSize: 25,
             delayBetweenBatchesMs: 0,
             maxRecipientsPerRun: 250,
-            maxProcessingTimeMs: 20000,
+            maxProcessingTimeMs: 15000,
             includeUnscheduledRecipients: false
         });
     });

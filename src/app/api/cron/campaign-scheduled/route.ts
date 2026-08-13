@@ -14,7 +14,7 @@ const MAX_IMMEDIATE_RECIPIENTS_PER_CAMPAIGN_RUN = 250;
 const MAX_DUE_RECIPIENT_ROWS_TO_SCAN = 500;
 // cron-jobs.org can stop waiting around the 30-second mark. Leave enough
 // headroom for campaign discovery and the JSON response.
-const MAX_CRON_SEND_MS = 20000;
+const MAX_CRON_SEND_MS = 15000;
 
 type ScheduledCampaign = {
     id: string;
