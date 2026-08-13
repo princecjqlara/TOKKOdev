@@ -29,12 +29,6 @@
       "maxDuration": 300
     }
   },
-  "crons": [
-    {
-      "path": "/api/cron/campaign-scheduled",
-      "schedule": "* * * * *"
-    }
-  ],
   "regions": ["iad1"]
 }
 
