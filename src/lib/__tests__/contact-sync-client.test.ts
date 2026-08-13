@@ -29,11 +29,12 @@ describe('runContactSyncToCompletion', () => {
         expect(result.completed).toBe(true);
         expect(result.totalSynced).toBe(16);
         expect(fetchMock).toHaveBeenCalledTimes(2);
-        expect(JSON.parse(fetchMock.mock.calls[1][1].body)).toEqual({
+        expect(JSON.parse(fetchMock.mock.calls[1][1].body)).toEqual(expect.objectContaining({
             forceFullSync: true,
             paged: true,
-            resumePsids: ['psid_2']
-        });
+            resumePsids: ['psid_2'],
+            syncRunId: expect.any(String)
+        }));
     });
 
     it('retries the same remaining psids after a transient timeout', async () => {
@@ -60,16 +61,31 @@ describe('runContactSyncToCompletion', () => {
         expect(result.completed).toBe(true);
         expect(result.totalSynced).toBe(17);
         expect(fetchMock).toHaveBeenCalledTimes(3);
-        expect(JSON.parse(fetchMock.mock.calls[1][1].body)).toEqual({
+        expect(JSON.parse(fetchMock.mock.calls[1][1].body)).toEqual(expect.objectContaining({
             forceFullSync: true,
             paged: true,
-            resumePsids: ['psid_2', 'psid_3']
-        });
-        expect(JSON.parse(fetchMock.mock.calls[2][1].body)).toEqual({
+            resumePsids: ['psid_2', 'psid_3'],
+            syncRunId: expect.any(String)
+        }));
+        expect(JSON.parse(fetchMock.mock.calls[2][1].body)).toEqual(expect.objectContaining({
             forceFullSync: true,
             paged: true,
-            resumePsids: ['psid_2', 'psid_3']
-        });
+            resumePsids: ['psid_2', 'psid_3'],
+            syncRunId: expect.any(String)
+        }));
+    });
+
+    it('does not retry when another sync already owns the page lease', async () => {
+        const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({
+            error: 'Sync already running',
+            message: 'A contact sync is already running for this page.'
+        }), { status: 409 }));
+        vi.stubGlobal('fetch', fetchMock);
+
+        await expect(runContactSyncToCompletion('page_1')).rejects.toThrow(
+            'A contact sync is already running for this page.'
+        );
+        expect(fetchMock).toHaveBeenCalledTimes(1);
     });
 
     it('continues cursor pages past the previous fixed continuation cap', async () => {
@@ -106,12 +122,13 @@ describe('runContactSyncToCompletion', () => {
         expect(result.totalSynced).toBe(10101);
         expect(fetchMock).toHaveBeenCalledTimes(102);
         const fetchCalls = fetchMock.mock.calls as unknown as Array<[string, RequestInit]>;
-        expect(JSON.parse(String(fetchCalls[101][1].body))).toEqual({
+        expect(JSON.parse(String(fetchCalls[101][1].body))).toEqual(expect.objectContaining({
             forceFullSync: true,
             paged: true,
             cursor: 'cursor_101',
-            syncStartedAt: '2026-04-07T01:00:00.000Z'
-        });
+            syncStartedAt: '2026-04-07T01:00:00.000Z',
+            syncRunId: expect.any(String)
+        }));
     });
 
     it('finishes remaining psids before advancing to the next Facebook cursor', async () => {
@@ -148,18 +165,20 @@ describe('runContactSyncToCompletion', () => {
         const result = await runContactSyncToCompletion('page_1');
 
         expect(result.completed).toBe(true);
-        expect(JSON.parse(fetchMock.mock.calls[1][1].body)).toEqual({
+        expect(JSON.parse(fetchMock.mock.calls[1][1].body)).toEqual(expect.objectContaining({
             forceFullSync: true,
             paged: true,
             resumePsids: ['psid_2'],
             cursor: 'current_cursor',
-            syncStartedAt: '2026-04-07T01:00:00.000Z'
-        });
-        expect(JSON.parse(fetchMock.mock.calls[2][1].body)).toEqual({
+            syncStartedAt: '2026-04-07T01:00:00.000Z',
+            syncRunId: expect.any(String)
+        }));
+        expect(JSON.parse(fetchMock.mock.calls[2][1].body)).toEqual(expect.objectContaining({
             forceFullSync: true,
             paged: true,
             cursor: 'next_cursor',
-            syncStartedAt: '2026-04-07T01:00:00.000Z'
-        });
+            syncStartedAt: '2026-04-07T01:00:00.000Z',
+            syncRunId: expect.any(String)
+        }));
     });
 });

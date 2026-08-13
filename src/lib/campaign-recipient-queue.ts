@@ -95,6 +95,9 @@ export async function finishCampaignRecipientBatch({
 
         if (!error && Number(data) === results.length) return;
         lastError = error || new Error('Not every recipient claim was completed');
+        if (attempt < 2) {
+            await new Promise(resolve => setTimeout(resolve, 250 * (attempt + 1)));
+        }
     }
 
     throw lastError;

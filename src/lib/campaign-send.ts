@@ -48,6 +48,45 @@ type SendCampaignByIdResult = {
 
 const SENDABLE_TEMPLATE_STATUSES = new Set(['APPROVED', 'ACTIVE']);
 
+function isRetryableInfrastructureError(error: unknown): boolean {
+    if (isRetryableSendError(error)) return true;
+
+    const record = error && typeof error === 'object'
+        ? error as { code?: string | number; status?: number; message?: string }
+        : {};
+    const code = String(record.code || '').toUpperCase();
+    const message = String(record.message || error || '').toLowerCase();
+
+    return (
+        ['40001', '40P01', '53300', '57014', '57P01', '57P02', '57P03'].includes(code) ||
+        code.startsWith('08') ||
+        record.status === 408 ||
+        record.status === 429 ||
+        (typeof record.status === 'number' && record.status >= 500) ||
+        message.includes('statement timeout') ||
+        message.includes('connection') ||
+        message.includes('fetch failed') ||
+        message.includes('network') ||
+        message.includes('temporarily unavailable') ||
+        message.includes('socket hang up') ||
+        message.includes('econnreset')
+    );
+}
+
+function normalizeStoredMediaHeader(value: unknown): { type: TemplateMediaType; url: string } | undefined {
+    if (!value || typeof value !== 'object') return undefined;
+    const record = value as Record<string, unknown>;
+    if (
+        (record.type === 'image' || record.type === 'video') &&
+        typeof record.url === 'string' &&
+        record.url.trim()
+    ) {
+        return { type: record.type, url: record.url.trim() };
+    }
+
+    return undefined;
+}
+
 function getTemplateLanguage(template: Record<string, unknown>): string | null {
     if (typeof template.language === 'string') return template.language.replace('-', '_');
     if (template.language && typeof template.language === 'object') {
@@ -171,16 +210,24 @@ export async function sendCampaignById({
             };
         }
 
+        const effectiveTemplateMediaHeader =
+            templateMediaHeader || normalizeStoredMediaHeader(campaign.template_media_header);
+        const storedTemplateMediaHeaders = Array.isArray(campaign.template_media_headers)
+            ? campaign.template_media_headers.map(normalizeStoredMediaHeader)
+            : undefined;
+        const effectiveTemplateMediaHeaders = templateMediaHeaders || storedTemplateMediaHeaders;
+
         // Validate every template before claiming even one recipient. This
         // prevents a typo/stale media variant from turning a page-wide setup
         // problem into tens of thousands of recipient failures.
         const campaignMessageParts = parseCampaignMessageParts(campaign.message_text);
         const configuredTemplates = campaignMessageParts
-            .map(message => ({
+            .map((message, messageIndex) => ({
                 name: message.templateName || campaign.template_name || null,
-                language: (message.templateLanguage || campaign.template_language || 'en_US').replace('-', '_')
+                language: (message.templateLanguage || campaign.template_language || 'en_US').replace('-', '_'),
+                messageIndex
             }))
-            .filter((template): template is { name: string; language: string } => Boolean(template.name));
+            .filter((template): template is { name: string; language: string; messageIndex: number } => Boolean(template.name));
 
         const invalidTemplateParameter = campaignMessageParts.find(message => (
             Boolean(message.templateName || campaign.template_name) &&
@@ -188,7 +235,7 @@ export async function sendCampaignById({
         ));
         if (invalidTemplateParameter) {
             const validationError = getUtilityTemplateParameterValidationError(invalidTemplateParameter.text);
-            const pausedStatus = allowScheduled ? 'scheduled' : 'draft';
+            const pausedStatus = 'draft';
             await supabase
                 .from('campaigns')
                 .update({ status: pausedStatus, updated_at: new Date().toISOString() })
@@ -229,7 +276,7 @@ export async function sendCampaignById({
             }));
 
             if (missingTemplate) {
-                const pausedStatus = allowScheduled ? 'scheduled' : 'draft';
+                const pausedStatus = 'draft';
                 await supabase
                     .from('campaigns')
                     .update({ status: pausedStatus, updated_at: new Date().toISOString() })
@@ -252,11 +299,60 @@ export async function sendCampaignById({
                     failed: Number(campaign.failed_count || 0)
                 };
             }
+
+            const missingMediaValue = configuredTemplates.find(configured => {
+                const matchingTemplate = pageTemplates.find(template => {
+                    if (!template || typeof template !== 'object') return false;
+                    const candidate = template as Record<string, unknown>;
+                    const language = getTemplateLanguage(candidate);
+                    return candidate.name === configured.name && (!language || language === configured.language);
+                }) as Record<string, unknown> | undefined;
+                const components = Array.isArray(matchingTemplate?.components)
+                    ? matchingTemplate.components as Array<Record<string, unknown>>
+                    : [];
+                const requiresMedia = components.some(component => (
+                    String(component.type || '').toUpperCase() === 'HEADER' &&
+                    ['IMAGE', 'VIDEO'].includes(String(component.format || '').toUpperCase())
+                ));
+                const suppliedMedia =
+                    effectiveTemplateMediaHeaders?.[configured.messageIndex] || effectiveTemplateMediaHeader;
+                return requiresMedia && !suppliedMedia;
+            });
+
+            if (missingMediaValue) {
+                const pausedStatus = 'draft';
+                await supabase
+                    .from('campaigns')
+                    .update({ status: pausedStatus, updated_at: new Date().toISOString() })
+                    .eq('id', campaignId);
+
+                return {
+                    status: 409,
+                    body: {
+                        success: false,
+                        paused: true,
+                        retryable: false,
+                        sent: Number(campaign.sent_count || 0),
+                        failed: Number(campaign.failed_count || 0),
+                        message:
+                            `Campaign paused: template '${missingMediaValue.name}' requires a media header, ` +
+                            'but the campaign has no durable media URL.'
+                    },
+                    success: false,
+                    sent: Number(campaign.sent_count || 0),
+                    failed: Number(campaign.failed_count || 0)
+                };
+            }
         }
 
         await supabase
             .from('campaigns')
-            .update({ status: 'sending', updated_at: new Date().toISOString() })
+            .update({
+                status: 'sending',
+                next_attempt_at: null,
+                last_error: null,
+                updated_at: new Date().toISOString()
+            })
             .eq('id', campaignId);
         let sentThisRun = 0;
         let failedThisRun = 0;
@@ -407,7 +503,8 @@ export async function sendCampaignById({
                                     bodyParameters
                                 ];
 
-                                const messageMediaHeader = templateMediaHeaders?.[messageIndex] || templateMediaHeader;
+                                const messageMediaHeader =
+                                    effectiveTemplateMediaHeaders?.[messageIndex] || effectiveTemplateMediaHeader;
                                 if (useTemplate && messageMediaHeader) {
                                     sendArgs.push(undefined, messageMediaHeader);
                                 }
@@ -468,11 +565,18 @@ export async function sendCampaignById({
                     deliveryError = (error as Error).message;
                     pauseCampaign = shouldPauseCampaignForSendError(error);
                     console.warn(`Failed to send to ${recipient.contact_psid}: ${deliveryError}`);
+                    return {
+                        success: false,
+                        contactId: recipient.contact_id,
+                        error: deliveryError,
+                        pauseCampaign,
+                        retryable: isRetryableSendError(error)
+                    };
                 }
 
                 return deliveryError
-                    ? { success: false, contactId: recipient.contact_id, error: deliveryError, pauseCampaign }
-                    : { success: true, contactId: recipient.contact_id, pauseCampaign: false };
+                    ? { success: false, contactId: recipient.contact_id, error: deliveryError, pauseCampaign, retryable: false }
+                    : { success: true, contactId: recipient.contact_id, pauseCampaign: false, retryable: false };
             });
 
             const batchResults = await Promise.allSettled(batchPromises);
@@ -497,13 +601,18 @@ export async function sendCampaignById({
             const pausedResults = batchResults.flatMap((result, index) => {
                 if (result.status === 'fulfilled') {
                     return result.value.pauseCampaign
-                        ? [{ contactId: result.value.contactId, error: result.value.error || 'Recoverable send failure' }]
+                        ? [{
+                            contactId: result.value.contactId,
+                            error: result.value.error || 'Recoverable send failure',
+                            retryable: result.value.retryable
+                        }]
                         : [];
                 }
                 return shouldPauseCampaignForSendError(result.reason)
                     ? [{
                         contactId: batch[index].contact_id,
-                        error: result.reason instanceof Error ? result.reason.message : 'Recoverable send failure'
+                        error: result.reason instanceof Error ? result.reason.message : 'Recoverable send failure',
+                        retryable: isRetryableSendError(result.reason)
                     }]
                     : [];
             });
@@ -541,26 +650,39 @@ export async function sendCampaignById({
 
             if (pausedResults.length > 0) {
                 const progress = await getCampaignDeliveryProgress(supabase, campaignId);
-                const pausedStatus = allowScheduled ? 'scheduled' : 'draft';
+                const shouldRetryAutomatically = pausedResults.every(result => result.retryable);
+                const pausedStatus = shouldRetryAutomatically
+                    ? (allowScheduled ? 'scheduled' : 'sending')
+                    : 'draft';
+                const nextAttemptAt = shouldRetryAutomatically
+                    ? new Date(Date.now() + 5 * 60 * 1000).toISOString()
+                    : null;
                 await supabase
                     .from('campaigns')
-                    .update({ status: pausedStatus, updated_at: new Date().toISOString() })
+                    .update({
+                        status: pausedStatus,
+                        next_attempt_at: nextAttemptAt,
+                        last_error: pausedResults[0].error,
+                        updated_at: new Date().toISOString()
+                    })
                     .eq('id', campaignId)
                     .eq('status', 'sending');
 
                 const reason = pausedResults[0].error;
                 return {
-                    status: 503,
+                    status: shouldRetryAutomatically ? 503 : 409,
                     body: {
                         success: false,
                         paused: true,
-                        retryable: true,
+                        retryable: shouldRetryAutomatically,
                         sent: progress.sent,
                         failed: progress.failed,
                         remaining: progress.remaining,
                         message:
                             `Campaign paused before more recipients were consumed. ${reason} ` +
-                            'Fix the page/template issue or wait for Facebook to recover, then press Send to resume.'
+                            (shouldRetryAutomatically
+                                ? 'The background worker will retry automatically after a five-minute backoff.'
+                                : 'Fix the page/template issue, then press Send to resume.')
                     },
                     success: false,
                     sent: progress.sent,
@@ -628,14 +750,26 @@ export async function sendCampaignById({
         };
     } catch (error) {
         console.error('Error sending campaign:', error);
+        const databaseError = error as { code?: string; message?: string };
+        const isStatementTimeout =
+            databaseError.code === '57014' ||
+            databaseError.message?.toLowerCase().includes('statement timeout');
+        const shouldRetryAutomatically = isRetryableInfrastructureError(error);
 
         // Claims expire automatically. Re-arm the campaign so a later request
         // can safely resume without resetting or duplicating completed rows.
         try {
+            const retryAt = shouldRetryAutomatically
+                ? new Date(Date.now() + (isStatementTimeout ? 2 : 5) * 60 * 1000).toISOString()
+                : null;
             await supabase
                 .from('campaigns')
                 .update({
-                    status: allowScheduled ? 'scheduled' : 'draft',
+                    status: shouldRetryAutomatically
+                        ? (allowScheduled ? 'scheduled' : 'sending')
+                        : 'draft',
+                    next_attempt_at: retryAt,
+                    last_error: databaseError.message || String(error),
                     updated_at: new Date().toISOString()
                 })
                 .eq('id', campaignId)
@@ -646,8 +780,14 @@ export async function sendCampaignById({
         }
 
         return {
-            status: 500,
-            body: { error: 'Failed to send campaign', message: (error as Error).message }
+            status: shouldRetryAutomatically ? 503 : 500,
+            body: {
+                error: shouldRetryAutomatically ? 'Delivery temporarily unavailable' : 'Failed to send campaign',
+                message: shouldRetryAutomatically
+                    ? 'Delivery is temporarily unavailable. The campaign remains queued and the background worker will retry automatically.'
+                    : (error as Error).message,
+                retryable: shouldRetryAutomatically
+            }
         };
     }
 }

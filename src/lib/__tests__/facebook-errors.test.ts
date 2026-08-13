@@ -1,6 +1,10 @@
 import { describe, expect, it } from 'vitest';
 import { FACEBOOK_REAUTH_MESSAGE } from '../facebook-permissions';
-import { getFacebookConnectErrorMessage, isFacebookReauthMessage } from '../facebook-errors';
+import {
+    getFacebookConnectErrorMessage,
+    isExpectedFacebookProfileLookupError,
+    isFacebookReauthMessage
+} from '../facebook-errors';
 
 describe('facebook connect errors', () => {
     it('normalizes raw Graph /me missing-permissions errors', () => {
@@ -13,5 +17,15 @@ describe('facebook connect errors', () => {
 
     it('preserves unrelated errors', () => {
         expect(getFacebookConnectErrorMessage('Facebook rate limit reached')).toBe('Facebook rate limit reached');
+    });
+
+    it('recognizes expected per-contact profile lookup failures', () => {
+        expect(isExpectedFacebookProfileLookupError(
+            "Unsupported get request. Object with ID '123' does not exist due to missing permissions."
+        )).toBe(true);
+        expect(isExpectedFacebookProfileLookupError(
+            "This endpoint requires the 'pages_read_engagement' permission."
+        )).toBe(true);
+        expect(isExpectedFacebookProfileLookupError('Facebook rate limit reached')).toBe(false);
     });
 });

@@ -394,6 +394,7 @@ export default function ContactsPage() {
     const realtimeSubscribeTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
     const webhookRefreshAttemptedRef = useRef<Set<string>>(new Set());
     const contactsRequestGateRef = useRef(createRequestGate());
+    const syncingRef = useRef(false);
     const activeDatePreset =
         DATE_PRESETS.find((preset) => {
             const range = getDatePresetRange(preset.value);
@@ -554,6 +555,7 @@ export default function ContactsPage() {
 
     const fetchContacts = useCallback(async ({ silent = false }: { silent?: boolean } = {}) => {
         if (!selectedPageId) return;
+        if (silent && syncingRef.current) return;
 
         const requestToken = contactsRequestGateRef.current.next();
 
@@ -564,6 +566,7 @@ export default function ContactsPage() {
             const params = new URLSearchParams({
                 page: page.toString(),
                 pageSize: pageSize.toString(),
+                includeCount: silent ? 'false' : 'true',
                 ...(search && { search }),
                 ...(selectedTagFilters.size > 0 && { tagIds: [...selectedTagFilters].join(',') }),
                 ...(excludedTagFilters.size > 0 && { excludeTagIds: [...excludedTagFilters].join(',') }),
@@ -573,14 +576,20 @@ export default function ContactsPage() {
             });
 
             const res = await fetch(`/api/pages/${selectedPageId}/contacts?${params}`);
-            const data: PaginatedResponse<Contact> = await res.json();
+            const data = await res.json() as Omit<PaginatedResponse<Contact>, 'total'> & { total?: number | null };
+
+            if (!res.ok) {
+                throw new Error((data as { message?: string }).message || `Failed to fetch contacts (${res.status})`);
+            }
 
             if (!contactsRequestGateRef.current.isLatest(requestToken)) {
                 return;
             }
 
             setContacts(data.items || []);
-            setTotal(data.total || 0);
+            if (typeof data.total === 'number') {
+                setTotal(data.total);
+            }
         } catch (error) {
             if (!contactsRequestGateRef.current.isLatest(requestToken)) {
                 return;
@@ -612,13 +621,13 @@ export default function ContactsPage() {
             void fetchContacts({ silent: true });
             realtimeFallbackIntervalRef.current = setInterval(() => {
                 void fetchContacts({ silent: true });
-            }, 5000);
+            }, 30000);
         };
 
         realtimeSubscribeTimeoutRef.current = setTimeout(() => {
             console.warn('Realtime subscription not ready; enabling contacts refresh fallback.');
             startFallbackPolling();
-        }, 5000);
+        }, 30000);
 
         const channel = supabase
             .channel(`contacts-page-${selectedPageId}`)
@@ -759,6 +768,7 @@ export default function ContactsPage() {
         if (!selectedPageId || syncing) return;
 
         setSyncing(true);
+        syncingRef.current = true;
         try {
             const result = await runContactSyncToCompletion(selectedPageId, {
                 onProgress: ({ attempt, totalSynced, totalFailed, remainingPsids, cursor }) => {
@@ -794,7 +804,9 @@ export default function ContactsPage() {
             await fetchContacts();
         } catch (error) {
             console.error('Error syncing:', error);
+            alert((error as Error).message || 'Contact sync failed.');
         } finally {
+            syncingRef.current = false;
             setSyncing(false);
         }
     };
@@ -878,7 +890,9 @@ export default function ContactsPage() {
         const expectedName = requireMedia ? getMediaTemplateName(templateName, 'image') : getBaseTemplateName(templateName);
         return availableTemplates.find((template) =>
             isApprovedTemplate(template) &&
-            template.name === expectedName &&
+            (requireMedia
+                ? getBaseTemplateName(template.name) === getBaseTemplateName(expectedName)
+                : template.name === expectedName) &&
             (requireMedia ? template.mediaHeaderType === 'image' : !template.hasMediaHeader)
         );
     };
@@ -1225,6 +1239,7 @@ export default function ContactsPage() {
                 : '';
             setBulkSendProgress(`${batchLabel}Campaign ${campaignId.slice(0, 8)}: ${sent} sent, ${failed} failed, ${remaining} pending`);
 
+            const continueInBrowser = Number(createData.recipients || 0) <= 5000;
             while (sendData.partial && remaining > 0) {
                 await new Promise(resolve => setTimeout(resolve, 100));
 
@@ -1248,6 +1263,10 @@ export default function ContactsPage() {
                 failed = Number(sendData.failed || failed);
                 remaining = Number(sendData.remaining || Math.max((createData.recipients || 0) - sent - failed, 0));
                 setBulkSendProgress(`${batchLabel}Campaign ${campaignId.slice(0, 8)}: ${sent} sent, ${failed} failed, ${remaining} pending`);
+
+                if (!continueInBrowser && sendData.partial && remaining > 0) {
+                    break;
+                }
             }
 
             setLastSendResults({ sent, failed });
@@ -1259,7 +1278,10 @@ export default function ContactsPage() {
             resetBestTimeScheduleState();
             clearSelection();
 
-            alert(`Tracked bulk send finished.\n\n${batchLabel}Recipients in this campaign: ${createData.recipients}\nSent: ${sent}\nFailed: ${failed}\nCampaign ID: ${campaignId}`);
+            alert(sendData.partial && remaining > 0
+                ? `Tracked bulk send started in the durable background queue.\n\n${batchLabel}Recipients: ${createData.recipients}\nSent: ${sent}\nFailed: ${failed}\nRemaining: ${remaining}\nCampaign ID: ${campaignId}\n\nThe campaign worker will continue even if this browser closes.`
+                : `Tracked bulk send finished.\n\n${batchLabel}Recipients in this campaign: ${createData.recipients}\nSent: ${sent}\nFailed: ${failed}\nCampaign ID: ${campaignId}`
+            );
             await fetchContacts();
         } catch (error) {
             console.error('Error sending tracked bulk messages:', error);

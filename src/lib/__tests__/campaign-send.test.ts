@@ -22,6 +22,7 @@ function createSupabaseMock(
         recipients?: { id: string; contact_id: string; contacts: { psid: string; name?: string } }[];
         remainingPendingCount?: number;
         incompleteAudience?: boolean;
+        templateMediaHeader?: { type: 'image'; url: string };
     } = {}
 ) {
     const campaignRecord = {
@@ -34,6 +35,7 @@ function createSupabaseMock(
         recurrence: 'none',
         audience_mode: 'specific',
         audience_materialized_at: options.incompleteAudience ? null : '2026-08-12T00:00:00.000Z',
+        template_media_header: options.templateMediaHeader || null,
         ai_prompt: null,
         total_recipients:
             (options.recipients?.length || 0) +
@@ -384,6 +386,76 @@ describe('sendCampaignById', () => {
         );
     });
 
+    it('uses the persisted media header when a background worker resumes delivery', async () => {
+        const supabase = createSupabaseMock('draft', {
+            messageText: serializeCampaignMessageSequence([
+                { text: 'Photo update', templateName: 'general_msg_v1_media_v1', templateLanguage: 'en_US' }
+            ]),
+            templateMediaHeader: { type: 'image', url: 'https://example.com/persisted.jpg' },
+            recipients: [{
+                id: 'recipient_1',
+                contact_id: 'contact_1',
+                contacts: { psid: 'psid_1', name: 'Alex' }
+            }]
+        });
+        vi.mocked(getPageTemplates).mockResolvedValue([{
+            name: 'general_msg_v1_media_v1',
+            language: 'en_US',
+            status: 'APPROVED',
+            components: [{ type: 'HEADER', format: 'IMAGE' }]
+        }]);
+        vi.mocked(sendMessage).mockResolvedValue({ message_id: 'mid_background' });
+
+        const result = await sendCampaignById({
+            campaignId: 'campaign_1',
+            supabase: supabase as never
+        });
+
+        expect(result.status).toBe(200);
+        expect(sendMessage).toHaveBeenCalledWith(
+            'fb_page_1',
+            'page_token',
+            'psid_1',
+            'Photo update',
+            'UTILITY',
+            'general_msg_v1_media_v1',
+            'en_US',
+            ['Photo update'],
+            undefined,
+            { type: 'image', url: 'https://example.com/persisted.jpg' }
+        );
+    });
+
+    it('keeps million-recipient progress bounded to the requested worker slice', async () => {
+        const recipients = Array.from({ length: 25 }, (_, index) => ({
+            id: `recipient_${index + 1}`,
+            contact_id: `contact_${index + 1}`,
+            contacts: { psid: `psid_${index + 1}`, name: `Contact ${index + 1}` }
+        }));
+        const supabase = createSupabaseMock('draft', {
+            recipients,
+            remainingPendingCount: 999_975
+        });
+        vi.mocked(sendMessage).mockResolvedValue({ message_id: 'mid_scale' });
+
+        const result = await sendCampaignById({
+            campaignId: 'campaign_1',
+            supabase: supabase as never,
+            sendBatchSize: 10,
+            maxRecipientsPerRun: 25,
+            maxProcessingTimeMs: 30_000
+        });
+
+        expect(result.status).toBe(200);
+        expect(result.body).toEqual(expect.objectContaining({
+            partial: true,
+            processed: 25,
+            total: 1_000_000,
+            remaining: 999_975
+        }));
+        expect(sendMessage).toHaveBeenCalledTimes(25);
+    });
+
     it('retries transient send failures before marking a recipient failed', async () => {
         const supabase = createSupabaseMock('draft', {
             recipients: [{
@@ -435,8 +507,9 @@ describe('sendCampaignById', () => {
             sendRetryDelayMs: 0
         });
 
-        expect(result.status).toBe(503);
+        expect(result.status).toBe(409);
         expect(result.body.paused).toBe(true);
+        expect(result.body.retryable).toBe(false);
         expect(result.failed).toBe(0);
         expect(result.body.remaining).toBe(3);
         expect(sendMessage).toHaveBeenCalledTimes(3);
@@ -505,8 +578,9 @@ describe('sendCampaignById', () => {
             sendBatchSize: 3
         });
 
-        expect(result.status).toBe(503);
+        expect(result.status).toBe(409);
         expect(result.body.paused).toBe(true);
+        expect(result.body.retryable).toBe(false);
         expect(result.failed).toBe(0);
         expect(result.body.remaining).toBe(3);
         expect(takeThreadControl).toHaveBeenCalledTimes(3);
@@ -584,10 +658,43 @@ describe('sendCampaignById', () => {
         });
 
         expect(result.status).toBe(503);
+        expect(result.body.retryable).toBe(true);
         expect(result.failed).toBe(0);
         expect(sendMessage).toHaveBeenCalledTimes(2);
         expect(supabase.finishBatchRpc).not.toHaveBeenCalled();
         expect(supabase.releaseBatchUpdate).toHaveBeenCalledWith(['contact_1']);
+        expect(supabase.campaignUpdate).toHaveBeenLastCalledWith(expect.objectContaining({
+            status: 'sending',
+            next_attempt_at: expect.any(String),
+            last_error: expect.stringContaining('rate limit')
+        }));
+    });
+
+    it('automatically requeues a transient template preflight outage', async () => {
+        const supabase = createSupabaseMock('draft', {
+            messageText: serializeCampaignMessageSequence([
+                { text: 'Hello', templateName: 'general_msg_v1', templateLanguage: 'en_US' }
+            ]),
+            recipients: [{
+                id: 'recipient_1',
+                contact_id: 'contact_1',
+                contacts: { psid: 'psid_1', name: 'Alex' }
+            }]
+        });
+        vi.mocked(getPageTemplates).mockRejectedValue(new Error('network temporarily unavailable'));
+
+        const result = await sendCampaignById({
+            campaignId: 'campaign_1',
+            supabase: supabase as never
+        });
+
+        expect(result.status).toBe(503);
+        expect(result.body.retryable).toBe(true);
+        expect(supabase.claimRpc).not.toHaveBeenCalled();
+        expect(supabase.campaignUpdate).toHaveBeenLastCalledWith(expect.objectContaining({
+            status: 'sending',
+            next_attempt_at: expect.any(String)
+        }));
     });
 
     it('claims every pending recipient in bounded atomic batches without a per-run cap', async () => {

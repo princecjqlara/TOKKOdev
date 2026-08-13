@@ -26,35 +26,38 @@ const MEDIA_TEMPLATE_SUFFIXES: Record<TemplateMediaType, string> = {
     video: VIDEO_MEDIA_TEMPLATE_SUFFIX
 };
 
+const MEDIA_TEMPLATE_NAME_PATTERN = /_(media|video)_v(\d+)$/;
+
 export function isMediaTemplateName(templateName: string | null | undefined): boolean {
-    return typeof templateName === 'string' && (
-        templateName.endsWith(MEDIA_TEMPLATE_SUFFIX) ||
-        templateName.endsWith(VIDEO_MEDIA_TEMPLATE_SUFFIX)
-    );
+    return typeof templateName === 'string' && MEDIA_TEMPLATE_NAME_PATTERN.test(templateName);
 }
 
 export function getBaseTemplateName(templateName: string): string {
-    if (templateName.endsWith(MEDIA_TEMPLATE_SUFFIX)) {
-        return templateName.slice(0, -MEDIA_TEMPLATE_SUFFIX.length);
-    }
-
-    if (templateName.endsWith(VIDEO_MEDIA_TEMPLATE_SUFFIX)) {
-        return templateName.slice(0, -VIDEO_MEDIA_TEMPLATE_SUFFIX.length);
-    }
-
-    return templateName;
+    return templateName.replace(MEDIA_TEMPLATE_NAME_PATTERN, '');
 }
 
 export function getTemplateMediaTypeFromName(templateName: string | null | undefined): TemplateMediaType | null {
     if (typeof templateName !== 'string') return null;
-    if (templateName.endsWith(VIDEO_MEDIA_TEMPLATE_SUFFIX)) return 'video';
-    if (templateName.endsWith(MEDIA_TEMPLATE_SUFFIX)) return 'image';
-    return null;
+    const match = templateName.match(MEDIA_TEMPLATE_NAME_PATTERN);
+    if (!match) return null;
+    return match[1] === 'video' ? 'video' : 'image';
 }
 
-export function getMediaTemplateName(templateName: string, mediaType: TemplateMediaType = 'image'): string {
+export function getMediaTemplateName(
+    templateName: string,
+    mediaType: TemplateMediaType = 'image',
+    version: number = 1
+): string {
+    if (getTemplateMediaTypeFromName(templateName) === mediaType) {
+        return templateName;
+    }
+
     const baseName = getBaseTemplateName(templateName);
-    return `${baseName}${MEDIA_TEMPLATE_SUFFIXES[mediaType]}`;
+    const normalizedVersion = Math.max(1, Math.floor(version));
+    const suffix = normalizedVersion === 1
+        ? MEDIA_TEMPLATE_SUFFIXES[mediaType]
+        : `_${mediaType === 'video' ? 'video' : 'media'}_v${normalizedVersion}`;
+    return `${baseName}${suffix}`;
 }
 
 export function buildMediaTemplateVariant(
@@ -72,7 +75,6 @@ export function buildMediaTemplateVariant(
             {
                 type: 'HEADER',
                 format: headerFormat,
-                text: 'Message Update',
                 example: {
                     header_handle: [sampleMediaHandle]
                 }

@@ -33,6 +33,14 @@ function normalizeScheduledAt(value: unknown): string | null {
     return parsed.toISOString();
 }
 
+function normalizeTemplateMediaHeader(value: unknown): { type: 'image'; url: string } | null {
+    if (!value || typeof value !== 'object') return null;
+    const record = value as Record<string, unknown>;
+    return record.type === 'image' && typeof record.url === 'string' && record.url.trim()
+        ? { type: 'image', url: record.url.trim() }
+        : null;
+}
+
 // GET /api/campaigns - Get campaigns with pagination
 export async function GET(request: NextRequest) {
     try {
@@ -146,8 +154,16 @@ export async function POST(request: NextRequest) {
             templateLanguage: rawTemplateLanguage,
             messageParts: rawMessageParts,
             recurrence: rawRecurrence,
-            recurrenceEndAt: rawRecurrenceEndAt
+            recurrenceEndAt: rawRecurrenceEndAt,
+            templateMediaHeader: rawTemplateMediaHeader,
+            templateMediaHeaders: rawTemplateMediaHeaders,
+            selectAll: rawSelectAll,
+            selectedTagId: rawSelectedTagId
         } = body;
+        const templateMediaHeader = normalizeTemplateMediaHeader(rawTemplateMediaHeader);
+        const templateMediaHeaders = Array.isArray(rawTemplateMediaHeaders)
+            ? rawTemplateMediaHeaders.map(normalizeTemplateMediaHeader)
+            : null;
         const templateName = typeof rawTemplateName === 'string' && rawTemplateName.trim() ? rawTemplateName.trim() : null;
         const templateLanguage = typeof rawTemplateLanguage === 'string' && rawTemplateLanguage.trim() ? rawTemplateLanguage.trim() : null;
         const scheduledAt = normalizeScheduledAt(rawScheduledAt);
@@ -245,6 +261,71 @@ export async function POST(request: NextRequest) {
         const shouldMaterializeRecipientsNow = audienceMode !== 'dynamic' || !scheduledAt;
         const normalizedContactIds = Array.isArray(contactIds) ? contactIds : [];
 
+        if (
+            rawSelectAll === true &&
+            campaignStatus === 'draft' &&
+            audienceMode === 'specific' &&
+            !isLoop &&
+            !useAiMessage
+        ) {
+            const selectedTagId = typeof rawSelectedTagId === 'string' && rawSelectedTagId.trim()
+                ? rawSelectedTagId.trim()
+                : null;
+            const { data: rows, error: atomicError } = await supabase.rpc(
+                'create_filtered_tracked_bulk_campaign',
+                {
+                    p_page_id: pageId,
+                    p_created_by: session.user.id,
+                    p_name: name,
+                    p_message_text: campaignMessageText,
+                    p_template_name: templateName,
+                    p_template_language: templateName ? (templateLanguage || 'en_US') : null,
+                    p_search: null,
+                    p_include_tag_ids: selectedTagId ? [selectedTagId] : [],
+                    p_exclude_tag_ids: [],
+                    p_excluded_contact_ids: [],
+                    p_date_from: null,
+                    p_date_to: null,
+                    p_date_filter_mode: 'include',
+                    p_slice_offset: 0,
+                    p_slice_limit: null
+                }
+            );
+
+            if (atomicError) throw atomicError;
+            const prepared = Array.isArray(rows) ? rows[0] : rows;
+            if (!prepared?.campaign_id) {
+                throw new Error('Database did not return the prepared select-all campaign.');
+            }
+
+            if (templateMediaHeader || templateMediaHeaders?.some(Boolean)) {
+                const { error: mediaError } = await supabase
+                    .from('campaigns')
+                    .update({
+                        template_media_header: templateMediaHeader,
+                        template_media_headers: templateMediaHeaders?.some(Boolean) ? templateMediaHeaders : null
+                    })
+                    .eq('id', prepared.campaign_id);
+                if (mediaError) throw mediaError;
+            }
+
+            return NextResponse.json({
+                campaign: {
+                    id: prepared.campaign_id,
+                    page_id: pageId,
+                    name,
+                    message_text: campaignMessageText,
+                    status: 'draft',
+                    total_recipients: Number(prepared.recipient_count || 0),
+                    sent_count: 0,
+                    failed_count: 0,
+                    template_name: templateName,
+                    template_language: templateName ? (templateLanguage || 'en_US') : null,
+                    audience_materialized_at: prepared.audience_materialized_at
+                }
+            });
+        }
+
         // Create campaign
         const { data: campaign, error: campaignError } = await supabase
             .from('campaigns')
@@ -270,6 +351,10 @@ export async function POST(request: NextRequest) {
                 use_ai_message: useAiMessage || false,
                 template_name: (!isLoop && !useAiMessage) ? templateName : null,
                 template_language: (!isLoop && !useAiMessage && templateName) ? (templateLanguage || 'en_US') : null,
+                template_media_header: (!isLoop && !useAiMessage) ? templateMediaHeader : null,
+                template_media_headers: (!isLoop && !useAiMessage && templateMediaHeaders?.some(Boolean))
+                    ? templateMediaHeaders
+                    : null,
                 recurrence: !isLoop && scheduledAt ? recurrence : 'none',
                 recurrence_end_at: !isLoop && scheduledAt && recurrence === 'daily' ? recurrenceEndAt : null
             })

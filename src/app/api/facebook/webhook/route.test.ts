@@ -113,7 +113,7 @@ function createSupabaseMock(options?: {
         },
         error: null
     });
-    const welcomeEq = vi.fn().mockReturnValue({ single: welcomeSingle });
+    const welcomeEq = vi.fn().mockReturnValue({ single: welcomeSingle, maybeSingle: welcomeSingle });
     const welcomeSelect = vi.fn().mockReturnValue({ eq: welcomeEq });
 
     const interactionsInsert = vi.fn().mockResolvedValue({ error: null });
@@ -214,7 +214,7 @@ function createSupabaseMockWithFirstInteractionColumnFailure() {
         },
         error: null
     });
-    const welcomeEq = vi.fn().mockReturnValue({ single: welcomeSingle });
+    const welcomeEq = vi.fn().mockReturnValue({ single: welcomeSingle, maybeSingle: welcomeSingle });
     const welcomeSelect = vi.fn().mockReturnValue({ eq: welcomeEq });
 
     const interactionsInsert = vi.fn().mockResolvedValue({ error: null });
@@ -327,6 +327,14 @@ function createSupabaseMockWithGenericUpsertFailure() {
                 select: vi.fn().mockReturnValue({
                     eq: vi.fn().mockReturnValue({
                         single: vi.fn().mockResolvedValue({
+                            data: {
+                                enabled: false,
+                                message_text: '',
+                                buttons: []
+                            },
+                            error: null
+                        }),
+                        maybeSingle: vi.fn().mockResolvedValue({
                             data: {
                                 enabled: false,
                                 message_text: '',

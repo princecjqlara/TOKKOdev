@@ -3,16 +3,11 @@ import type { NextRequest } from 'next/server';
 
 const mocks = vi.hoisted(() => ({
     getSupabaseAdmin: vi.fn(),
-    resolveCampaignAudienceContactIds: vi.fn(),
     sendCampaignById: vi.fn()
 }));
 
 vi.mock('@/lib/supabase', () => ({
     getSupabaseAdmin: mocks.getSupabaseAdmin
-}));
-
-vi.mock('@/lib/campaign-audience', () => ({
-    resolveCampaignAudienceContactIds: mocks.resolveCampaignAudienceContactIds
 }));
 
 vi.mock('@/lib/campaign-send', () => ({
@@ -31,6 +26,7 @@ type CampaignRow = {
     recurrence: 'none' | 'daily';
     recurrence_end_at: string | null;
     scheduled_at: string | null;
+    next_attempt_at: string | null;
     updated_at: string;
 };
 
@@ -43,9 +39,11 @@ function createRequest(): NextRequest {
 function createThenableQuery<T>(resultFactory: () => Promise<T>) {
     const query: any = {
         eq: vi.fn(() => query),
+        is: vi.fn(() => query),
         lte: vi.fn(() => query),
         in: vi.fn(() => query),
         order: vi.fn(() => query),
+        or: vi.fn(() => query),
         limit: vi.fn(() => query),
         select: vi.fn(() => query),
         then: (resolve: (value: T) => unknown, reject: (error: unknown) => unknown) =>
@@ -68,6 +66,7 @@ function createCampaign(overrides: Partial<CampaignRow> = {}): CampaignRow {
         recurrence: 'none',
         recurrence_end_at: null,
         scheduled_at: '2026-03-22T10:30:00.000Z',
+        next_attempt_at: null,
         updated_at: '2026-03-22T10:00:00.000Z',
         ...overrides
     };
@@ -77,18 +76,24 @@ function createSupabaseMock(options: {
     campaignLevelCampaigns?: CampaignRow[];
     staleSendingCampaigns?: CampaignRow[];
     dueRecipientCampaigns?: CampaignRow[];
+    immediateCampaigns?: CampaignRow[];
     claimSucceeds?: boolean;
 } = {}) {
     const campaignLevelCampaigns = options.campaignLevelCampaigns ?? [createCampaign()];
     const staleSendingCampaigns = options.staleSendingCampaigns ?? [];
     const dueRecipientCampaigns = options.dueRecipientCampaigns ?? [];
+    const immediateCampaigns = options.immediateCampaigns ?? [];
     const claimSucceeds = options.claimSucceeds ?? true;
 
     let campaignSelectCount = 0;
     const campaignsSelect = vi.fn(() => {
         campaignSelectCount += 1;
         return createThenableQuery(async () => ({
-            data: campaignSelectCount === 1 ? campaignLevelCampaigns : staleSendingCampaigns,
+            data: campaignSelectCount === 1
+                ? campaignLevelCampaigns
+                : campaignSelectCount === 2
+                    ? staleSendingCampaigns
+                    : immediateCampaigns,
             error: null
         }));
     });
@@ -142,8 +147,24 @@ function createSupabaseMock(options: {
         throw new Error(`Unexpected table: ${table}`);
     });
 
+    const materializeAudienceRpc = vi.fn().mockResolvedValue({
+        data: [{
+            recipient_count: 2,
+            audience_materialized_at: '2026-03-22T10:30:00.000Z'
+        }],
+        error: null
+    });
+    const rpc = vi.fn((name: string, args: Record<string, unknown>) => {
+        if (name !== 'materialize_dynamic_campaign_audience') {
+            throw new Error(`Unexpected RPC: ${name}`);
+        }
+        return materializeAudienceRpc(args);
+    });
+
     return {
         from,
+        rpc,
+        materializeAudienceRpc,
         campaignsSelect,
         campaignsUpdate,
         campaignsUpdateSelect,
@@ -166,7 +187,6 @@ describe('GET /api/cron/campaign-scheduled', () => {
         const { GET } = await loadRoute();
         const supabase = createSupabaseMock();
         mocks.getSupabaseAdmin.mockReturnValue(supabase);
-        mocks.resolveCampaignAudienceContactIds.mockResolvedValue(['contact_1', 'contact_2']);
         mocks.sendCampaignById.mockResolvedValue({
             success: true,
             sent: 2,
@@ -177,30 +197,9 @@ describe('GET /api/cron/campaign-scheduled', () => {
         const response = await GET(createRequest());
 
         expect(response.status).toBe(200);
-        expect(mocks.resolveCampaignAudienceContactIds).toHaveBeenCalledWith({
-            supabase,
-            pageId: 'page_1',
-            rules: {
-                startDate: '2026-03-01',
-                includeTagIds: ['tag_a'],
-                excludeTagIds: ['tag_x']
-            }
+        expect(supabase.materializeAudienceRpc).toHaveBeenCalledWith({
+            p_campaign_id: 'campaign_1'
         });
-        expect(supabase.campaignRecipientsUpsert).toHaveBeenCalledWith(
-            [
-                {
-                    campaign_id: 'campaign_1',
-                    contact_id: 'contact_1',
-                    status: 'pending'
-                },
-                {
-                    campaign_id: 'campaign_1',
-                    contact_id: 'contact_2',
-                    status: 'pending'
-                }
-            ],
-            { onConflict: 'campaign_id,contact_id', ignoreDuplicates: false }
-        );
         expect(mocks.sendCampaignById).toHaveBeenCalledWith({
             campaignId: 'campaign_1',
             supabase,
@@ -236,7 +235,7 @@ describe('GET /api/cron/campaign-scheduled', () => {
         const response = await GET(createRequest());
 
         expect(response.status).toBe(200);
-        expect(mocks.resolveCampaignAudienceContactIds).not.toHaveBeenCalled();
+        expect(supabase.materializeAudienceRpc).not.toHaveBeenCalled();
         expect(mocks.sendCampaignById).toHaveBeenCalledWith({
             campaignId: 'campaign_best_time',
             supabase,
@@ -250,26 +249,89 @@ describe('GET /api/cron/campaign-scheduled', () => {
         });
     });
 
-    it('upserts large dynamic audiences in batches', async () => {
+    it('resumes an immediate million-recipient campaign without a browser worker', async () => {
         const { GET } = await loadRoute();
-        const supabase = createSupabaseMock();
-        const contactIds = Array.from({ length: 1001 }, (_, index) => `contact_${index + 1}`);
+        const immediateCampaign = createCampaign({
+            id: 'campaign_million',
+            status: 'sending',
+            audience_mode: 'specific',
+            audience_materialized_at: '2026-08-13T00:00:00.000Z',
+            scheduled_at: null
+        });
+        const supabase = createSupabaseMock({
+            campaignLevelCampaigns: [],
+            immediateCampaigns: [immediateCampaign]
+        });
         mocks.getSupabaseAdmin.mockReturnValue(supabase);
-        mocks.resolveCampaignAudienceContactIds.mockResolvedValue(contactIds);
         mocks.sendCampaignById.mockResolvedValue({
             success: true,
-            sent: 1001,
+            sent: 250,
             failed: 0,
-            body: { success: true, sent: 1001, failed: 0 }
+            body: { success: true, partial: true, sent: 250, failed: 0 }
         });
 
         const response = await GET(createRequest());
 
         expect(response.status).toBe(200);
-        expect(supabase.campaignRecipientsUpsert).toHaveBeenCalledTimes(3);
-        expect(supabase.campaignRecipientsUpsert.mock.calls[0][0]).toHaveLength(500);
-        expect(supabase.campaignRecipientsUpsert.mock.calls[1][0]).toHaveLength(500);
-        expect(supabase.campaignRecipientsUpsert.mock.calls[2][0]).toHaveLength(1);
+        expect(mocks.sendCampaignById).toHaveBeenCalledWith({
+            campaignId: 'campaign_million',
+            supabase,
+            allowScheduled: false,
+            dueAt: undefined,
+            sendBatchSize: 10,
+            delayBetweenBatchesMs: 0,
+            maxRecipientsPerRun: 250,
+            maxProcessingTimeMs: 25000,
+            includeUnscheduledRecipients: false
+        });
+    });
+
+    it('materializes large dynamic audiences in one database-side operation', async () => {
+        const { GET } = await loadRoute();
+        const supabase = createSupabaseMock();
+        mocks.getSupabaseAdmin.mockReturnValue(supabase);
+        mocks.sendCampaignById.mockResolvedValue({
+            success: true,
+            sent: 25,
+            failed: 0,
+            body: { success: true, partial: true, sent: 25, failed: 0 }
+        });
+
+        const response = await GET(createRequest());
+
+        expect(response.status).toBe(200);
+        expect(supabase.materializeAudienceRpc).toHaveBeenCalledTimes(1);
+        expect(supabase.campaignRecipientsUpsert).not.toHaveBeenCalled();
+    });
+
+    it('keeps processing later campaigns when one campaign worker throws', async () => {
+        const { GET } = await loadRoute();
+        const first = createCampaign({ id: 'campaign_bad', audience_mode: 'specific' });
+        const second = createCampaign({ id: 'campaign_good', audience_mode: 'specific' });
+        const supabase = createSupabaseMock({ campaignLevelCampaigns: [first, second] });
+        mocks.getSupabaseAdmin.mockReturnValue(supabase);
+        mocks.sendCampaignById
+            .mockRejectedValueOnce(new Error('temporary worker disconnect'))
+            .mockResolvedValueOnce({
+                success: true,
+                sent: 1,
+                failed: 0,
+                body: { success: true, sent: 1, failed: 0 }
+            });
+
+        const response = await GET(createRequest());
+        const body = await response.json();
+
+        expect(response.status).toBe(200);
+        expect(mocks.sendCampaignById).toHaveBeenCalledTimes(2);
+        expect(body.results[0]).toEqual(expect.objectContaining({
+            campaignId: 'campaign_bad',
+            retryable: true
+        }));
+        expect(body.results[1]).toEqual(expect.objectContaining({
+            campaignId: 'campaign_good',
+            success: true
+        }));
     });
 
     it('skips campaigns that another cron invocation already claimed', async () => {

@@ -39,6 +39,7 @@ function createRequest(body: Record<string, unknown> = {}): NextRequest {
 
 function createSupabaseMock(options?: {
     existingContacts?: Array<{ psid: string; name: string | null; profile_pic: string | null }>;
+    leaseAcquired?: boolean;
 }) {
     const userPageSingle = vi.fn().mockResolvedValue({
         data: { page_id: 'page_1' },
@@ -98,9 +99,14 @@ function createSupabaseMock(options?: {
 
         throw new Error(`Unexpected table: ${table}`);
     });
+    const rpc = vi.fn((functionName: string) => Promise.resolve({
+        data: functionName === 'acquire_page_sync_lease' ? options?.leaseAcquired ?? true : true,
+        error: null
+    }));
 
     return {
         from,
+        rpc,
         contactsUpsert,
         pageUpdateEq
     };
@@ -307,5 +313,19 @@ describe('POST /api/pages/[pageId]/sync', () => {
             syncStartedAt: '2026-04-07T01:00:00.000Z'
         }));
         expect(supabase.pageUpdateEq).not.toHaveBeenCalled();
+    });
+
+    it('rejects an overlapping sync before fetching Facebook conversations', async () => {
+        const { POST } = await loadRoute();
+        const supabase = createSupabaseMock({ leaseAcquired: false });
+        mocks.getSupabaseAdmin.mockReturnValue(supabase);
+
+        const response = await POST(
+            createRequest({ syncRunId: 'second-run' }),
+            { params: Promise.resolve({ pageId: 'page_1' }) }
+        );
+
+        expect(response.status).toBe(409);
+        expect(mocks.getPageConversationsBatch).not.toHaveBeenCalled();
     });
 });

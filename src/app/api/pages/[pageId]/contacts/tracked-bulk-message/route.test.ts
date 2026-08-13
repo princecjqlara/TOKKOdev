@@ -321,7 +321,8 @@ describe('POST /api/pages/[pageId]/contacts/tracked-bulk-message', () => {
         expect(mocks.getPageTemplates).toHaveBeenCalledWith('fb_page_1', 'page_token');
         expect(supabase.campaignsInsert).toHaveBeenCalledWith(expect.objectContaining({
             template_name: 'idle_salon_image_update_v2',
-            template_language: 'en_US'
+            template_language: 'en_US',
+            template_media_header: { type: 'image', url: 'https://example.com/salon.jpg' }
         }));
     });
 

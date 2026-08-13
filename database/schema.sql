@@ -119,6 +119,10 @@
         audience_include_tag_ids JSONB DEFAULT '[]',
         audience_exclude_tag_ids JSONB DEFAULT '[]',
         audience_materialized_at TIMESTAMPTZ,
+        template_media_header JSONB,
+        template_media_headers JSONB,
+        next_attempt_at TIMESTAMPTZ,
+        last_error TEXT,
         started_at TIMESTAMPTZ,
         completed_at TIMESTAMPTZ,
         recipient_history_purged_at TIMESTAMPTZ,
@@ -248,6 +252,8 @@
     CREATE INDEX IF NOT EXISTS idx_campaigns_page_id ON campaigns(page_id);
     CREATE INDEX IF NOT EXISTS idx_campaigns_status ON campaigns(status);
     CREATE INDEX IF NOT EXISTS idx_campaigns_scheduled_at ON campaigns(scheduled_at);
+    CREATE INDEX IF NOT EXISTS idx_campaigns_immediate_sending ON campaigns(next_attempt_at, updated_at, id)
+        WHERE status = 'sending' AND scheduled_at IS NULL AND NOT COALESCE(is_loop, FALSE);
     -- UNIQUE (campaign_id, contact_id) already indexes campaign_id.
     CREATE INDEX IF NOT EXISTS idx_campaign_recipients_contact_id ON campaign_recipients(contact_id);
     CREATE INDEX IF NOT EXISTS idx_campaign_delivery_failures_campaign_failed ON campaign_delivery_failures(campaign_id, failed_at DESC);

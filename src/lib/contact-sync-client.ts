@@ -10,6 +10,7 @@ export type ContactSyncResponse = {
     cursor?: string | null;
     nextCursor?: string | null;
     syncStartedAt?: string;
+    syncRunId?: string;
     restored?: number;
     incremental?: boolean;
     message?: string;
@@ -34,6 +35,21 @@ export type ContactSyncResult = {
 const MAX_TIMEOUT_RETRIES_PER_STEP = 3;
 const RETRY_DELAY_MS = 1500;
 
+class ContactSyncRequestError extends Error {
+    constructor(message: string, readonly status: number) {
+        super(message);
+        this.name = 'ContactSyncRequestError';
+    }
+}
+
+function createSyncRunId() {
+    if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+        return crypto.randomUUID();
+    }
+
+    return `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+}
+
 function wait(ms: number) {
     return new Promise(resolve => setTimeout(resolve, ms));
 }
@@ -51,7 +67,10 @@ async function parseSyncResponse(response: Response): Promise<ContactSyncRespons
     }
 
     if (!response.ok || !data.success) {
-        throw new Error(data.message || `Sync failed with status ${response.status}`);
+        throw new ContactSyncRequestError(
+            data.message || `Sync failed with status ${response.status}`,
+            response.status
+        );
     }
 
     return data;
@@ -63,6 +82,7 @@ async function postSync(
         resumePsids: string[];
         cursor: string | null;
         syncStartedAt: string | null;
+        syncRunId: string;
     }
 ): Promise<ContactSyncResponse> {
     const response = await fetch(`/api/pages/${pageId}/sync`, {
@@ -74,7 +94,8 @@ async function postSync(
             paged: true,
             ...(options.resumePsids.length > 0 ? { resumePsids: options.resumePsids } : {}),
             ...(options.cursor ? { cursor: options.cursor } : {}),
-            ...(options.syncStartedAt ? { syncStartedAt: options.syncStartedAt } : {})
+            ...(options.syncStartedAt ? { syncStartedAt: options.syncStartedAt } : {}),
+            syncRunId: options.syncRunId
         })
     });
 
@@ -93,6 +114,7 @@ export async function runContactSyncToCompletion(
     let lastData: ContactSyncResponse = {};
     let cursor: string | null = null;
     let syncStartedAt: string | null = null;
+    const syncRunId = createSyncRunId();
     const seenContinuationKeys = new Set<string>();
 
     for (let attempt = 1; ; attempt++) {
@@ -100,9 +122,13 @@ export async function runContactSyncToCompletion(
 
         for (let retry = 1; retry <= MAX_TIMEOUT_RETRIES_PER_STEP; retry++) {
             try {
-                data = await postSync(pageId, { resumePsids, cursor, syncStartedAt });
+                data = await postSync(pageId, { resumePsids, cursor, syncStartedAt, syncRunId });
                 break;
             } catch (error) {
+                if (error instanceof ContactSyncRequestError && error.status >= 400 && error.status < 500) {
+                    throw error;
+                }
+
                 if (retry >= MAX_TIMEOUT_RETRIES_PER_STEP) {
                     throw error;
                 }

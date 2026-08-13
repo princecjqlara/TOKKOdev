@@ -652,6 +652,15 @@ export async function POST(
                 throw new Error('Database did not return the prepared campaign.');
             }
 
+            if (templateMediaHeader) {
+                const { error: mediaPersistenceError } = await supabase
+                    .from('campaigns')
+                    .update({ template_media_header: templateMediaHeader })
+                    .eq('id', atomicCampaign.campaign_id);
+
+                if (mediaPersistenceError) throw mediaPersistenceError;
+            }
+
             const recipientCount = Number(atomicCampaign.recipient_count || 0);
             const totalMatched = Number(atomicCampaign.total_matched || 0);
             const selectedRange = batchSize && batchNumber
@@ -875,6 +884,7 @@ export async function POST(
                 use_ai_message: false,
                 template_name: templateName,
                 template_language: templateName ? templateLanguage : null,
+                template_media_header: templateMediaHeader,
                 recurrence: 'none'
             })
             .select()

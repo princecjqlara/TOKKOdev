@@ -5,6 +5,7 @@ import { RefreshCw, CheckCircle, XCircle, Clock, FileText, AlertTriangle, Image 
 import {
     DEFAULT_MEDIA_TEMPLATE_SAMPLE_URL,
     UTILITY_TEMPLATES,
+    getBaseTemplateName,
     getMediaTemplateName,
     isMediaTemplateName
 } from '@/lib/facebook-templates';
@@ -28,8 +29,11 @@ type TemplateStatus = {
 };
 
 const SYSTEM_TEMPLATE_NAMES = new Set(UTILITY_TEMPLATES.map((template) => template.name));
-const MEDIA_SYSTEM_TEMPLATE_NAMES = new Set(UTILITY_TEMPLATES.map((template) => getMediaTemplateName(template.name)));
 const MEDIA_SAMPLE_STORAGE_KEY = 'tokko:template-media-sample-url';
+
+function isSystemTemplateName(templateName: string) {
+    return SYSTEM_TEMPLATE_NAMES.has(getBaseTemplateName(templateName));
+}
 
 async function readApiResponse(response: Response) {
     const contentType = response.headers.get('content-type') || '';
@@ -228,14 +232,14 @@ export default function TemplatesPage() {
 
     // Filter templates
     const filteredTemplates = templates.filter(t => {
-        if (filter === 'system') return SYSTEM_TEMPLATE_NAMES.has(t.name) || MEDIA_SYSTEM_TEMPLATE_NAMES.has(t.name);
+        if (filter === 'system') return isSystemTemplateName(t.name);
         if (filter === 'approved') return t.status === 'APPROVED' || t.status === 'ACTIVE';
         if (filter === 'rejected') return t.status === 'REJECTED';
         return true; // 'all'
     });
 
     // Count stats
-    const systemTemplates = templates.filter(t => SYSTEM_TEMPLATE_NAMES.has(t.name) || MEDIA_SYSTEM_TEMPLATE_NAMES.has(t.name));
+    const systemTemplates = templates.filter(t => isSystemTemplateName(t.name));
     const approvedCount = systemTemplates.filter(t => t.status === 'APPROVED' || t.status === 'ACTIVE').length;
     const rejectedCount = systemTemplates.filter(t => t.status === 'REJECTED').length;
     const pendingCount = systemTemplates.filter(t => t.status === 'PENDING').length;
@@ -430,7 +434,7 @@ export default function TemplatesPage() {
                         </thead>
                         <tbody>
                             {filteredTemplates.map((t, idx) => {
-                                const isSystem = SYSTEM_TEMPLATE_NAMES.has(t.name) || MEDIA_SYSTEM_TEMPLATE_NAMES.has(t.name);
+                                const isSystem = isSystemTemplateName(t.name);
                                 return (
                                     <tr
                                         key={t.id || t.name + idx}

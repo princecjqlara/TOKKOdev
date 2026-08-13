@@ -6,6 +6,7 @@ import {
     DEFAULT_MEDIA_TEMPLATE_SAMPLE_URL,
     DEFAULT_VIDEO_TEMPLATE_SAMPLE_URL,
     buildMediaTemplateVariant,
+    getBaseTemplateName,
     getMediaTemplateName
 } from '@/lib/facebook-templates';
 import type { TemplateMediaType } from '@/lib/facebook-templates';
@@ -200,6 +201,48 @@ function getMediaHeaderType(template: UtilityTemplate | Omit<UtilityTemplate, 'l
     return null;
 }
 
+function getStoredMediaHeaderType(template: Record<string, unknown>): TemplateMediaType | null {
+    const components = Array.isArray(template.components)
+        ? template.components as Array<Record<string, unknown>>
+        : [];
+    const header = components.find((component) => (
+        String(component.type || '').toUpperCase() === 'HEADER' &&
+        ['IMAGE', 'VIDEO'].includes(String(component.format || '').toUpperCase())
+    ));
+    const format = String(header?.format || '').toUpperCase();
+    return format === 'VIDEO' ? 'video' : format === 'IMAGE' ? 'image' : null;
+}
+
+function resolveMediaVariantName(
+    baseTemplateName: string,
+    mediaType: TemplateMediaType,
+    existingTemplates: Record<string, unknown>[]
+): string {
+    const matchingMediaTemplate = existingTemplates.find((template) => (
+        typeof template.name === 'string' &&
+        getBaseTemplateName(template.name) === baseTemplateName &&
+        getStoredMediaHeaderType(template) === mediaType &&
+        String(template.status || '').toUpperCase() !== 'REJECTED'
+    ));
+
+    if (typeof matchingMediaTemplate?.name === 'string') {
+        return matchingMediaTemplate.name;
+    }
+
+    const existingNames = new Set(
+        existingTemplates
+            .map((template) => typeof template.name === 'string' ? template.name : null)
+            .filter((name): name is string => Boolean(name))
+    );
+    let version = 1;
+    let candidateName = getMediaTemplateName(baseTemplateName, mediaType, version);
+    while (existingNames.has(candidateName)) {
+        version += 1;
+        candidateName = getMediaTemplateName(baseTemplateName, mediaType, version);
+    }
+    return candidateName;
+}
+
 // POST /api/facebook/templates/submit-all
 // Submits all predefined UTILITY_TEMPLATES to a Facebook page for approval.
 // Body: { pageId: string, limit?: number, templateNames?: string[] }
@@ -324,7 +367,10 @@ export async function POST(request: NextRequest) {
             ? await createResumableUploadHandle(page.access_token, mediaSample)
             : null;
         const candidateTemplates = mediaVariant
-            ? sourceTemplates.map((template) => buildMediaTemplateVariant(template, mediaSampleHandle || mediaSample, mediaType))
+            ? sourceTemplates.map((template) => ({
+                ...buildMediaTemplateVariant(template, mediaSampleHandle || mediaSample, mediaType),
+                name: resolveMediaVariantName(template.name, mediaType, existingTemplates)
+            }))
             : sourceTemplates;
 
         const results: {
@@ -359,8 +405,8 @@ export async function POST(request: NextRequest) {
                 status: existingStatus,
                 action: 'already_exists',
                 hasButtons: hasTemplateButtons(template),
-                hasMediaHeader: hasMediaHeader(template),
-                mediaHeaderType: getMediaHeaderType(template)
+                hasMediaHeader: existing ? getStoredMediaHeaderType(existing) !== null : false,
+                mediaHeaderType: existing ? getStoredMediaHeaderType(existing) : null
             });
         }
 

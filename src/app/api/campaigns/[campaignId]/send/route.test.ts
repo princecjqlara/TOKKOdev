@@ -56,4 +56,53 @@ describe('POST /api/campaigns/[campaignId]/send', () => {
             sendRetryAttempts: 1
         }));
     });
+
+    it('retries one database-busy response using the durable recipient queue', async () => {
+        mocks.sendCampaignById
+            .mockResolvedValueOnce({
+                status: 503,
+                body: { retryable: true, message: 'Database temporarily busy' }
+            })
+            .mockResolvedValueOnce({
+                status: 200,
+                body: { success: true, sent: 1, failed: 0 }
+            });
+
+        const request = new Request('http://localhost/api/campaigns/campaign_1/send', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({})
+        }) as NextRequest;
+
+        const response = await POST(request, {
+            params: Promise.resolve({ campaignId: 'campaign_1' })
+        });
+
+        expect(response.status).toBe(200);
+        expect(mocks.sendCampaignById).toHaveBeenCalledTimes(2);
+    });
+
+    it('passes video template headers through the send endpoint', async () => {
+        const request = new Request('http://localhost/api/campaigns/campaign_1/send', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                templateMediaHeader: {
+                    type: 'video',
+                    url: 'https://example.com/header.mp4'
+                }
+            })
+        }) as NextRequest;
+
+        await POST(request, {
+            params: Promise.resolve({ campaignId: 'campaign_1' })
+        });
+
+        expect(mocks.sendCampaignById).toHaveBeenCalledWith(expect.objectContaining({
+            templateMediaHeader: {
+                type: 'video',
+                url: 'https://example.com/header.mp4'
+            }
+        }));
+    });
 });

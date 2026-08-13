@@ -51,6 +51,17 @@ function createSupabaseMock(options: {
     });
     const campaignSelect = vi.fn().mockReturnValue({ single: campaignSingle });
     const campaignsInsert = vi.fn().mockReturnValue({ select: campaignSelect });
+    const campaignsUpdateEq = vi.fn().mockResolvedValue({ error: null });
+    const campaignsUpdate = vi.fn().mockReturnValue({ eq: campaignsUpdateEq });
+    const rpc = vi.fn().mockResolvedValue({
+        data: [{
+            campaign_id: 'campaign_million',
+            recipient_count: 1_000_000,
+            total_matched: 1_000_000,
+            audience_materialized_at: '2026-08-13T00:00:00.000Z'
+        }],
+        error: null
+    });
 
     const campaignRecipientsInsert = vi.fn().mockResolvedValue({ error: null });
     const contactsIn = vi.fn((_column: string, contactIds: string[]) => Promise.resolve({
@@ -72,7 +83,8 @@ function createSupabaseMock(options: {
 
         if (table === 'campaigns') {
             return {
-                insert: campaignsInsert
+                insert: campaignsInsert,
+                update: campaignsUpdate
             };
         }
 
@@ -93,7 +105,9 @@ function createSupabaseMock(options: {
 
     return {
         from,
+        rpc,
         campaignsInsert,
+        campaignsUpdate,
         campaignRecipientsInsert,
         contactsIn
     };
@@ -184,6 +198,56 @@ describe('POST /api/campaigns', () => {
             { text: 'Then this', templateName: 'general_notice_v1', templateLanguage: 'en_US' }
         ]);
         expect(inserted.template_name).toBe('general_msg_v1');
+    });
+
+    it('persists media headers so background workers do not depend on browser storage', async () => {
+        const supabase = createSupabaseMock();
+        mocks.getSupabaseAdmin.mockReturnValue(supabase);
+
+        const response = await POST(createRequest({
+            pageId: 'page_1',
+            name: 'Durable photo campaign',
+            messageText: 'Photo update',
+            contactIds: ['contact_1'],
+            templateName: 'general_msg_v1_media_v2',
+            templateLanguage: 'en_US',
+            templateMediaHeader: { type: 'image', url: 'https://example.com/photo.jpg' },
+            templateMediaHeaders: [{ type: 'image', url: 'https://example.com/photo.jpg' }]
+        }));
+
+        expect(response.status).toBe(200);
+        expect(supabase.campaignsInsert).toHaveBeenCalledWith(expect.objectContaining({
+            template_media_header: { type: 'image', url: 'https://example.com/photo.jpg' },
+            template_media_headers: [{ type: 'image', url: 'https://example.com/photo.jpg' }]
+        }));
+    });
+
+    it('creates a million-contact select-all campaign inside PostgreSQL', async () => {
+        const supabase = createSupabaseMock();
+        mocks.getSupabaseAdmin.mockReturnValue(supabase);
+
+        const response = await POST(createRequest({
+            pageId: 'page_1',
+            name: 'Million audience',
+            messageText: 'Hello everyone',
+            selectAll: true,
+            selectedTagId: 'tag_1',
+            contactIds: []
+        }));
+        const body = await response.json();
+
+        expect(response.status).toBe(200);
+        expect(body.campaign.total_recipients).toBe(1_000_000);
+        expect(supabase.rpc).toHaveBeenCalledWith(
+            'create_filtered_tracked_bulk_campaign',
+            expect.objectContaining({
+                p_page_id: 'page_1',
+                p_include_tag_ids: ['tag_1'],
+                p_slice_limit: null
+            })
+        );
+        expect(supabase.campaignsInsert).not.toHaveBeenCalled();
+        expect(supabase.campaignRecipientsInsert).not.toHaveBeenCalled();
     });
 
     it('schedules best-time recipients on the selected Philippine calendar date', async () => {

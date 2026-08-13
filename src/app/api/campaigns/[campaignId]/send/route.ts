@@ -12,14 +12,15 @@ export const maxDuration = 300;
 // makes every subsequent invocation resume from pending recipients only.
 const MAX_RECIPIENTS_PER_INVOCATION = 500;
 const MAX_PROCESSING_TIME_MS = 45_000;
+const DATABASE_BUSY_RETRY_DELAY_MS = 750;
 
 function normalizeTemplateMediaHeader(value: unknown): { type: TemplateMediaType; url: string } | undefined {
     if (!value || typeof value !== 'object') return undefined;
     const record = value as Record<string, unknown>;
-    return record.type === 'image' &&
+    return (record.type === 'image' || record.type === 'video') &&
         typeof record.url === 'string' &&
         record.url.trim()
-        ? { type: 'image' as const, url: record.url.trim() }
+        ? { type: record.type, url: record.url.trim() }
         : undefined;
 }
 
@@ -46,7 +47,7 @@ export async function POST(
     const delayBetweenBatchesMs = typeof body.delayBetweenBatchesMs === 'number'
         ? Math.max(0, Math.min(body.delayBetweenBatchesMs, 250))
         : undefined;
-    const result = await sendCampaignById({
+    const sendOptions = {
         campaignId,
         userId: session.user.id,
         sendBatchSize: typeof body.sendBatchSize === 'number' ? body.sendBatchSize : undefined,
@@ -56,7 +57,13 @@ export async function POST(
         sendRetryAttempts: 1,
         templateMediaHeader,
         templateMediaHeaders
-    });
+    };
+
+    let result = await sendCampaignById(sendOptions);
+    if (result.status === 503 && result.body.retryable === true) {
+        await new Promise(resolve => setTimeout(resolve, DATABASE_BUSY_RETRY_DELAY_MS));
+        result = await sendCampaignById(sendOptions);
+    }
 
     return NextResponse.json(result.body, { status: result.status });
 }

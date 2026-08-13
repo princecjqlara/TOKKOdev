@@ -42,6 +42,7 @@ const CAMPAIGN_ENVELOPE_MAP: Record<string, string> = {
 const CAMPAIGN_MEDIA_STORAGE_PREFIX = 'tokko:campaign-media:';
 const PAGE_MEDIA_DRAFT_STORAGE_PREFIX = 'tokko:page-media-draft:';
 const MAX_LOCAL_MEDIA_BYTES = 3 * 1024 * 1024;
+const BACKGROUND_DELIVERY_THRESHOLD = 5000;
 
 type StoredCampaignMedia = {
     url: string;
@@ -493,7 +494,11 @@ export default function CampaignsPage() {
         const expectedName = requireMedia ? getMediaTemplateName(templateName, 'image') : getBaseTemplateName(templateName);
         return availableTemplates.find((template) => {
             if (!isTemplateApproved(template)) return false;
-            if (template.name !== expectedName) return false;
+            if (requireMedia) {
+                if (getBaseTemplateName(template.name) !== getBaseTemplateName(expectedName)) return false;
+            } else if (template.name !== expectedName) {
+                return false;
+            }
             return requireMedia ? template.mediaHeaderType === 'image' : !template.hasMediaHeader;
         });
     };
@@ -776,8 +781,15 @@ export default function CampaignsPage() {
             }
 
             let contactIds = usesDynamicAudience ? [] : Array.from(selectedContactIds);
+            const useDatabaseSelectAll =
+                !usesDynamicAudience &&
+                isSelectAllMode &&
+                !isLoop &&
+                !useAiMessage &&
+                !usesBestTimeTomorrow &&
+                !resolvedScheduledAt;
 
-            if (!usesDynamicAudience && isSelectAllMode) {
+            if (!usesDynamicAudience && isSelectAllMode && !useDatabaseSelectAll) {
                 // Supabase caps a single query at 1000 rows, so paginate through
                 // every page of contacts to gather all IDs when "Select All" is used.
                 const PAGE_SIZE = 1000;
@@ -867,6 +879,8 @@ export default function CampaignsPage() {
                     messageText: (isLoop || useAiMessage) ? null : cleanedMessageParts[0]?.text,
                     messageParts: (isLoop || useAiMessage) ? undefined : payloadMessageParts,
                     contactIds,
+                    selectAll: useDatabaseSelectAll,
+                    selectedTagId: useDatabaseSelectAll && selectedTagFilter ? selectedTagFilter : undefined,
                     scheduledAt: resolvedScheduledAt,
                     useBestTime: usesBestTimeTomorrow,
                     scheduledDate: scheduledBestTimeDate,
@@ -881,6 +895,12 @@ export default function CampaignsPage() {
                     aiPrompt: (isLoop || useAiMessage) ? aiPrompt.trim() : null,
                     templateName: payloadTemplateName,
                     templateLanguage: payloadTemplateLanguage,
+                    templateMediaHeader: useCampaignMedia && normalizedCampaignMediaUrl
+                        ? { type: 'image', url: normalizedCampaignMediaUrl }
+                        : undefined,
+                    templateMediaHeaders: useCampaignMedia
+                        ? resolvedMessagePartMediaHeaders
+                        : undefined,
                     recurrence: !isLoop && deliveryMode === 'schedule' && !usesBestTimeTomorrow ? recurrence : 'none',
                     recurrenceEndAt:
                         !isLoop && deliveryMode === 'schedule' && !usesBestTimeTomorrow && recurrence === 'daily' && recurrenceEndAt
@@ -944,12 +964,6 @@ export default function CampaignsPage() {
             const messageMediaHeaders = storedMedia?.mediaHeaders?.map((header) => (
                 header?.url ? { type: 'image' as const, url: header.url } : undefined
             ));
-            const hasStoredMedia = Boolean(fallbackMediaHeader) || Boolean(messageMediaHeaders?.some(Boolean));
-            if (isMediaTemplateName(campaign.template_name) && !hasStoredMedia) {
-                alert('This campaign uses a media template, but the media is not available in this browser local storage.');
-                return;
-            }
-
             const sendPayload = {
                 sendBatchSize: 20,
                 delayBetweenBatchesMs: 50,
@@ -971,7 +985,8 @@ export default function CampaignsPage() {
                 alert(`Failed to send campaign: ${errorMessage}`);
             } else {
                 let remaining = Number((data as any).remaining || 0);
-                while ((data as any).partial && remaining > 0) {
+                const continueInBrowser = Number(campaign.total_recipients || 0) <= BACKGROUND_DELIVERY_THRESHOLD;
+                while (continueInBrowser && (data as any).partial && remaining > 0) {
                     await new Promise(resolve => setTimeout(resolve, 100));
 
                     response = await fetch(`/api/campaigns/${campaignId}/send`, {
@@ -993,7 +1008,13 @@ export default function CampaignsPage() {
 
                 const sent = (data as any).sent ?? 0;
                 const failed = (data as any).failed ?? 0;
-                if (failed > 0) {
+                if ((data as any).partial && remaining > 0) {
+                    alert(
+                        `Campaign started in the durable background queue.\n\n` +
+                        `Sent: ${sent}\nFailed: ${failed}\nRemaining: ${remaining}\n\n` +
+                        'The campaign worker will continue it even if this browser closes.'
+                    );
+                } else if (failed > 0) {
                     alert(`Campaign sent with issues.\n\n✅ Sent: ${sent}\n❌ Failed: ${failed}`);
                 } else if (sent > 0) {
                     alert(`✅ Campaign sent successfully! ${sent} messages delivered.`);

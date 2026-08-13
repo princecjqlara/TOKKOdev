@@ -66,6 +66,7 @@ export async function GET(
         const tagIds = tagIdsRaw ? tagIdsRaw.split(',').filter(Boolean) : [];
         const excludeTagIds = excludeTagIdsRaw ? excludeTagIdsRaw.split(',').filter(Boolean) : [];
         const sendableOnly = searchParams.get('sendable') === 'true'; // Only return contacts with valid PSIDs
+        const includeCount = searchParams.get('includeCount') !== 'false';
         const dateFrom = searchParams.get('dateFrom') || '';
         const dateTo = searchParams.get('dateTo') || '';
         const dateFilterMode: DateFilterMode = searchParams.get('dateFilterMode') === 'exclude'
@@ -82,6 +83,7 @@ export async function GET(
             includeTagCount: tagIds.length,
             excludeTagCount: excludeTagIds.length,
             sendableOnly,
+            includeCount,
             dateFrom: dateFrom || null,
             dateTo: dateTo || null,
             dateFilterMode
@@ -117,9 +119,11 @@ export async function GET(
             excludeTagIds.length > 0 ? 'excluded_tag_filter:contact_tags!left()' : ''
         ].filter(Boolean).join(',');
         const contactSelect = (tagFilterSelect ? `*,${tagFilterSelect}` : '*') as '*';
-        let query = supabase
-            .from('contacts')
-            .select(contactSelect, { count: 'exact' })
+        const contactsTable = supabase.from('contacts');
+        let query = includeCount
+            ? contactsTable.select(contactSelect, { count: 'exact' })
+            : contactsTable.select(contactSelect);
+        query = query
             .eq('page_id', pageId)
             .order('last_interaction_at', { ascending: false, nullsFirst: false });
 
@@ -289,7 +293,7 @@ export async function GET(
             items: transformedContacts,
             page,
             pageSize,
-            total: count || 0
+            total: includeCount ? count || 0 : null
         } as PaginatedResponse<Contact>);
     } catch (error) {
         logError('Error fetching contacts', {

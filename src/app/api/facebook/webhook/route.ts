@@ -1,10 +1,36 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getSupabaseAdmin } from '@/lib/supabase';
 import { verifyWebhookSignature, generateVerifyToken, sendMessage, getUserProfile } from '@/lib/facebook';
+import { isExpectedFacebookProfileLookupError } from '@/lib/facebook-errors';
 import { getPhilippinesDayOfWeek, getPhilippinesHour } from '@/lib/philippines-time';
 import { replaceTemplateVariables } from '@/lib/placeholders';
 import { handleFollowUpWorkflowContactReply, stopWorkflowAutomationsFromPageMessage } from '@/lib/workflow-automations';
 import { composeContactName, hasUsableContactName, normalizeContactName, pickPreferredContactName } from '../../../../lib/contact-names';
+
+const PROFILE_LOOKUP_FAILURE_TTL_MS = 60 * 60 * 1000;
+const profileLookupSuppressedUntil = new Map<string, number>();
+
+function isProfileLookupSuppressed(pageId: string, senderId: string) {
+    const key = `${pageId}:${senderId}`;
+    const suppressedUntil = profileLookupSuppressedUntil.get(key) || 0;
+    if (suppressedUntil <= Date.now()) {
+        profileLookupSuppressedUntil.delete(key);
+        return false;
+    }
+
+    return true;
+}
+
+function suppressProfileLookup(pageId: string, senderId: string) {
+    if (profileLookupSuppressedUntil.size >= 5000) {
+        const now = Date.now();
+        for (const [key, suppressedUntil] of profileLookupSuppressedUntil) {
+            if (suppressedUntil <= now) profileLookupSuppressedUntil.delete(key);
+        }
+    }
+
+    profileLookupSuppressedUntil.set(`${pageId}:${senderId}`, Date.now() + PROFILE_LOOKUP_FAILURE_TTL_MS);
+}
 
 // GET /api/facebook/webhook - Verify webhook
 export async function GET(request: NextRequest) {
@@ -308,11 +334,13 @@ export async function POST(request: NextRequest) {
 
                         const isNewContact = !existingContact;
                         const missingName = !hasUsableContactName(existingContact?.name);
-                        const shouldRefreshProfile = isNewContact || missingName;
+                        const eventSenderName = normalizeContactName(event.sender?.name);
+                        const shouldRefreshProfile =
+                            (isNewContact || missingName) &&
+                            !isProfileLookupSuppressed(page.id, senderId);
 
                         let profileName: string | null = null;
                         let profilePic: string | null = null;
-                        const eventSenderName = normalizeContactName(event.sender?.name);
 
                         if (shouldRefreshProfile) {
                             try {
@@ -326,13 +354,18 @@ export async function POST(request: NextRequest) {
 
                                 profilePic = typeof profile.profile_pic === 'string' ? profile.profile_pic.trim() || null : null;
                             } catch (profileError) {
-                                logWarn('Failed to fetch profile for contact enrichment', {
-                                    pageId,
-                                    senderId,
-                                    isNewContact,
-                                    missingName,
-                                    error: (profileError as Error).message
-                                });
+                                const profileErrorMessage = (profileError as Error).message || String(profileError);
+                                if (isExpectedFacebookProfileLookupError(profileErrorMessage)) {
+                                    suppressProfileLookup(page.id, senderId);
+                                } else {
+                                    logWarn('Failed to fetch profile for contact enrichment', {
+                                        pageId,
+                                        senderId,
+                                        isNewContact,
+                                        missingName,
+                                        error: profileErrorMessage
+                                    });
+                                }
                             }
                         }
 
@@ -422,7 +455,7 @@ export async function POST(request: NextRequest) {
                                     .from('welcome_messages')
                                     .select('enabled, message_text, buttons')
                                     .eq('page_id', page.id)
-                                    .single();
+                                    .maybeSingle();
 
                                 if (welcomeConfigError) {
                                     logWarn('Failed to fetch welcome message config', {

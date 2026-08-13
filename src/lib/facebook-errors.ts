@@ -26,3 +26,16 @@ export function getFacebookConnectErrorMessage(message: string | null | undefine
 
     return isFacebookReauthMessage(message) ? FACEBOOK_REAUTH_MESSAGE : message;
 }
+
+export function isExpectedFacebookProfileLookupError(message: string) {
+    const normalized = message.toLowerCase();
+    return (
+        normalized.includes('profile fetch timeout') ||
+        normalized.includes('unsupported get request') ||
+        normalized.includes('does not exist') ||
+        normalized.includes('missing permissions') ||
+        normalized.includes('does not support this operation') ||
+        normalized.includes('pages_read_engagement') ||
+        normalized.includes('page public metadata access')
+    );
+}

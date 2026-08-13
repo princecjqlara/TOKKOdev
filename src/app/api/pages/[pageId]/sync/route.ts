@@ -12,9 +12,52 @@ import { getPhilippinesHour } from '@/lib/philippines-time';
 import { chunkArray } from '../../../../../lib/chunking';
 import { composeContactName, hasUsableContactName, normalizeContactName, pickPreferredContactName } from '../../../../../lib/contact-names';
 import { SUPABASE_IN_FILTER_BATCH_SIZE } from '@/lib/supabase-pagination';
+import { isExpectedFacebookProfileLookupError } from '@/lib/facebook-errors';
 
 // Increase timeout for sync operations (up to 5 minutes)
 export const maxDuration = 300;
+
+type SyncLease = {
+    supabase: ReturnType<typeof getSupabaseAdmin>;
+    pageId: string;
+    owner: string;
+};
+
+async function acquireSyncLease(
+    supabase: ReturnType<typeof getSupabaseAdmin>,
+    pageId: string,
+    owner: string
+): Promise<boolean | null> {
+    const { data, error } = await supabase.rpc('acquire_page_sync_lease', {
+        p_page_id: pageId,
+        p_owner: owner,
+        p_lease_seconds: 360
+    });
+
+    if (error) {
+        // Allow a rolling deployment before the migration reaches Supabase.
+        if (error.code === 'PGRST202' || error.message?.includes('acquire_page_sync_lease')) {
+            return null;
+        }
+        throw error;
+    }
+
+    return data === true;
+}
+
+async function releaseSyncLease(lease: SyncLease) {
+    const { error } = await lease.supabase.rpc('release_page_sync_lease', {
+        p_page_id: lease.pageId,
+        p_owner: lease.owner
+    });
+
+    if (error && error.code !== 'PGRST202' && !error.message?.includes('release_page_sync_lease')) {
+        console.warn('[CONTACT_SYNC] Failed to release sync lease', {
+            pageId: lease.pageId,
+            error: error.message
+        });
+    }
+}
 
 // POST /api/pages/[pageId]/sync - Manual sync contacts
 export async function POST(
@@ -46,6 +89,9 @@ export async function POST(
         }
         console.error(`${logPrefix} ${message}`);
     };
+
+    let syncLease: SyncLease | null = null;
+    let keepSyncLease = false;
 
     try {
         const session = await getSessionFromRequest(request);
@@ -79,6 +125,7 @@ export async function POST(
         let usePagedSync = true;
         let cursor: string | null = null;
         let requestedSyncStartedAt: string | null = null;
+        let requestedSyncRunId: string | null = null;
         try {
             const body = await request.json();
             forceFullSync = (body as { forceFullSync?: boolean })?.forceFullSync === true;
@@ -88,6 +135,9 @@ export async function POST(
                 : null;
             requestedSyncStartedAt = typeof (body as { syncStartedAt?: unknown }).syncStartedAt === 'string'
                 ? ((body as { syncStartedAt?: string }).syncStartedAt || '').trim() || null
+                : null;
+            requestedSyncRunId = typeof (body as { syncRunId?: unknown }).syncRunId === 'string'
+                ? ((body as { syncRunId?: string }).syncRunId || '').trim() || null
                 : null;
             resumePsids = Array.isArray((body as { resumePsids?: unknown }).resumePsids)
                 ? [
@@ -149,6 +199,36 @@ export async function POST(
             );
         }
 
+        // Determine if this is a full sync or incremental sync
+        const isIncremental = !forceFullSync && !!page.last_synced_at;
+        const parsedRequestedSyncStart = requestedSyncStartedAt ? new Date(requestedSyncStartedAt) : null;
+        const syncStartTime =
+            parsedRequestedSyncStart && !Number.isNaN(parsedRequestedSyncStart.getTime())
+                ? parsedRequestedSyncStart.toISOString()
+                : new Date().toISOString();
+        const syncRunId = requestedSyncRunId || (
+            typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
+                ? crypto.randomUUID()
+                : `${Date.now()}-${Math.random().toString(36).slice(2)}`
+        );
+        const syncLeaseOwner = `${userId}:${syncRunId}`;
+        const leaseAcquired = await acquireSyncLease(supabase, pageId, syncLeaseOwner);
+        if (leaseAcquired === false) {
+            logWarn('Rejected overlapping contact sync', { pageId, userId, syncRunId });
+            return NextResponse.json(
+                {
+                    error: 'Sync already running',
+                    message: 'A contact sync is already running for this page. Wait for it to finish before starting another one.'
+                },
+                { status: 409 }
+            );
+        }
+        if (leaseAcquired === true) {
+            syncLease = { supabase, pageId, owner: syncLeaseOwner };
+        } else {
+            logWarn('Sync lease migration is not installed; continuing without the server-side lease');
+        }
+
         try {
             await subscribePageToAppWebhook(page.fb_page_id, page.access_token, ['messages', 'messaging_postbacks']);
             logInfo('Verified page webhook subscription before sync', {
@@ -162,14 +242,6 @@ export async function POST(
                 error: (subscriptionError as Error).message
             });
         }
-
-        // Determine if this is a full sync or incremental sync
-        const isIncremental = !forceFullSync && !!page.last_synced_at;
-        const parsedRequestedSyncStart = requestedSyncStartedAt ? new Date(requestedSyncStartedAt) : null;
-        const syncStartTime =
-            parsedRequestedSyncStart && !Number.isNaN(parsedRequestedSyncStart.getTime())
-                ? parsedRequestedSyncStart.toISOString()
-                : new Date().toISOString();
 
         logInfo('Starting sync run', {
             syncMode: isIncremental ? 'incremental' : 'full',
@@ -417,6 +489,7 @@ export async function POST(
                     failed,
                     elapsedMs: elapsed
                 });
+                keepSyncLease = true;
                 return NextResponse.json({
                     success: true,
                     partial: true,
@@ -430,6 +503,7 @@ export async function POST(
                     cursor,
                     nextCursor,
                     syncStartedAt: syncStartTime,
+                    syncRunId,
                     errors: errors.slice(0, 10)
                 });
             }
@@ -499,11 +573,7 @@ export async function POST(
                             // These are common for users with privacy settings or invalid PSIDs
                             // Only log if it's not a timeout or permission issue (reduce noise)
                             const errorMsg = (profileError as Error).message || String(profileError);
-                            const isExpectedError =
-                                errorMsg.includes('timeout') ||
-                                errorMsg.includes('does not exist') ||
-                                errorMsg.includes('missing permissions') ||
-                                errorMsg.includes('does not support this operation');
+                            const isExpectedError = isExpectedFacebookProfileLookupError(errorMsg);
 
                             if (!isExpectedError) {
                                 logWarn('Unexpected profile fetch error', {
@@ -716,6 +786,7 @@ export async function POST(
         });
 
         if (usePagedSync && nextCursor) {
+            keepSyncLease = true;
             const responsePayload = {
                 success: true,
                 partial: true,
@@ -731,6 +802,7 @@ export async function POST(
                 cursor: nextCursor,
                 nextCursor,
                 syncStartedAt: syncStartTime,
+                syncRunId,
                 errors: errors.slice(0, 10)
             };
 
@@ -785,6 +857,7 @@ export async function POST(
             cursor: null,
             nextCursor: null,
             syncStartedAt: syncStartTime,
+            syncRunId,
             errors: errors.slice(0, 10) // Return first 10 errors
         };
 
@@ -802,5 +875,9 @@ export async function POST(
             { error: 'Failed to sync contacts', message: (error as Error).message },
             { status: 500 }
         );
+    } finally {
+        if (syncLease && !keepSyncLease) {
+            await releaseSyncLease(syncLease);
+        }
     }
 }
