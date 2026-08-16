@@ -29,6 +29,6 @@
       "maxDuration": 300
     }
   },
-  "regions": ["iad1"]
+  "regions": ["syd1"]
 }
 

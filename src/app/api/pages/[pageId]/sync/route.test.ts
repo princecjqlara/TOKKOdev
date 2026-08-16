@@ -40,6 +40,7 @@ function createRequest(body: Record<string, unknown> = {}): NextRequest {
 function createSupabaseMock(options?: {
     existingContacts?: Array<{ psid: string; name: string | null; profile_pic: string | null }>;
     leaseAcquired?: boolean;
+    leaseError?: { code?: string; message: string };
 }) {
     const userPageSingle = vi.fn().mockResolvedValue({
         data: { page_id: 'page_1' },
@@ -101,7 +102,7 @@ function createSupabaseMock(options?: {
     });
     const rpc = vi.fn((functionName: string) => Promise.resolve({
         data: functionName === 'acquire_page_sync_lease' ? options?.leaseAcquired ?? true : true,
-        error: null
+        error: functionName === 'acquire_page_sync_lease' ? options?.leaseError ?? null : null
     }));
 
     return {
@@ -326,6 +327,28 @@ describe('POST /api/pages/[pageId]/sync', () => {
         );
 
         expect(response.status).toBe(409);
+        expect(mocks.getPageConversationsBatch).not.toHaveBeenCalled();
+    });
+
+    it('fails closed when the sync lease migration is not installed', async () => {
+        const { POST } = await loadRoute();
+        const supabase = createSupabaseMock({
+            leaseError: {
+                code: 'PGRST202',
+                message: 'Could not find the function public.acquire_page_sync_lease'
+            }
+        });
+        mocks.getSupabaseAdmin.mockReturnValue(supabase);
+
+        const response = await POST(
+            createRequest({ syncRunId: 'migration-missing-run' }),
+            { params: Promise.resolve({ pageId: 'page_1' }) }
+        );
+
+        expect(response.status).toBe(503);
+        expect(await response.json()).toEqual(expect.objectContaining({
+            error: 'Sync safety migration required'
+        }));
         expect(mocks.getPageConversationsBatch).not.toHaveBeenCalled();
     });
 });

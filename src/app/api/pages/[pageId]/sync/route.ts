@@ -226,7 +226,18 @@ export async function POST(
         if (leaseAcquired === true) {
             syncLease = { supabase, pageId, owner: syncLeaseOwner };
         } else {
-            logWarn('Sync lease migration is not installed; continuing without the server-side lease');
+            logError('Sync lease migration is not installed; refusing an unprotected contact sync', {
+                pageId,
+                userId,
+                syncRunId
+            });
+            return NextResponse.json(
+                {
+                    error: 'Sync safety migration required',
+                    message: 'Contact sync is temporarily unavailable while the database safety migration is being installed. Please try again shortly.'
+                },
+                { status: 503 }
+            );
         }
 
         try {
