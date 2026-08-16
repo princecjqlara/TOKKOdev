@@ -67,15 +67,40 @@ export async function POST(
             );
         }
 
-        // Atomically pause the campaign while preserving pending and in-flight
-        // rows. In-flight workers observe the draft status before claiming a
-        // new batch, so Continue Unsent can safely resume the same queue.
-        const { data: remainingRecipients, error: pauseError } = await supabase.rpc(
-            'pause_campaign_delivery',
-            { p_campaign_id: campaignId }
-        );
+        // Pause without deleting recipient rows. This intentionally uses only
+        // existing campaign columns so the deployed route remains safe while
+        // the compatibility migration is rolling out.
+        const stoppedAt = new Date().toISOString();
+        const { data: pausedCampaign, error: pauseError } = await supabase
+            .from('campaigns')
+            .update({
+                status: 'draft',
+                background_delivery_enabled: false,
+                next_attempt_at: null,
+                completed_at: null,
+                last_error: 'Stopped manually. Unsent recipients remain queued.',
+                updated_at: stoppedAt
+            })
+            .eq('id', campaignId)
+            .eq('status', 'sending')
+            .select('id')
+            .maybeSingle();
 
         if (pauseError) throw pauseError;
+        if (!pausedCampaign) {
+            return NextResponse.json(
+                { error: 'Conflict', message: 'Campaign stopped or changed before this request completed' },
+                { status: 409 }
+            );
+        }
+
+        const { count: remainingRecipients, error: countError } = await supabase
+            .from('campaign_recipients')
+            .select('contact_id', { count: 'exact', head: true })
+            .eq('campaign_id', campaignId)
+            .in('status', ['pending', 'processing']);
+
+        if (countError) throw countError;
 
         return NextResponse.json({
             success: true,
