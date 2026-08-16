@@ -44,4 +44,17 @@ describe('million-contact campaign migration', () => {
         expect(sql).toContain('AND background_delivery_enabled');
         expect(sql).toContain('20260814_012');
     });
+
+    it('preserves unsent recipients when a campaign is manually stopped', () => {
+        const sql = readFileSync(
+            resolve(process.cwd(), 'database/migration_resumable_campaign_pause.sql'),
+            'utf8'
+        );
+
+        expect(sql).toContain('pause_campaign_delivery');
+        expect(sql).toContain("SET status = 'draft'");
+        expect(sql).toContain("recipient.status IN ('pending', 'processing')");
+        expect(sql).not.toMatch(/DELETE\s+FROM\s+public\.campaign_recipients/i);
+        expect(sql).toContain('20260816_013');
+    });
 });

@@ -95,7 +95,7 @@ describe('mergeSendErrors', () => {
         expect(shouldPauseCampaignForSendError('(#100) Template cannot be found.')).toBe(true);
         expect(shouldPauseCampaignForSendError('(#613) Calls to this api have exceeded the rate limit.')).toBe(true);
         expect(shouldPauseCampaignForSendError('fetch failed')).toBe(true);
-        expect(shouldPauseCampaignForSendError('Another app is controlling this thread now.')).toBe(true);
+        expect(shouldPauseCampaignForSendError('Another app is controlling this thread now.')).toBe(false);
         expect(shouldPauseCampaignForSendError("Special characters not allowed in template parameter")).toBe(true);
         expect(shouldPauseCampaignForSendError("(#551) This person isn't available right now.")).toBe(false);
     });

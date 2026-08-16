@@ -1048,17 +1048,22 @@ export default function CampaignsPage() {
             const data = await response.json().catch(() => ({} as Record<string, unknown>));
 
             if (!response.ok) {
-                const errorMessage = (data as any).message || `Failed to cancel campaign (HTTP ${response.status})`;
-                console.error('Error cancelling campaign:', errorMessage, data);
-                alert(`Failed to cancel campaign: ${errorMessage}`);
+                const errorMessage = (data as any).message || `Failed to stop campaign (HTTP ${response.status})`;
+                console.error('Error stopping campaign:', errorMessage, data);
+                alert(`Failed to stop campaign: ${errorMessage}`);
             } else {
-                alert('Campaign cancelled successfully.');
+                const remainingRecipients = Number((data as any).remainingRecipients || 0);
+                alert(
+                    `Campaign stopped.\n\n` +
+                    `${remainingRecipients.toLocaleString()} unsent recipients are saved. ` +
+                    'Press Continue Unsent whenever you are ready.'
+                );
             }
 
             await fetchCampaigns();
         } catch (error) {
-            console.error('Error cancelling campaign:', error);
-            alert(`Error cancelling campaign: ${(error as Error).message}`);
+            console.error('Error stopping campaign:', error);
+            alert(`Error stopping campaign: ${(error as Error).message}`);
         } finally {
             setCancellingCampaignId(null);
         }
@@ -1301,13 +1306,13 @@ export default function CampaignsPage() {
                                             <Users className="w-4 h-4" />
                                             {campaign.total_recipients} Recip.
                                         </span>
-                                        {campaign.status !== 'draft' && (
+                                        {campaign.sent_count > 0 && (
                                             <span className="flex items-center gap-1 text-black">
                                                 <CheckCircle className="w-4 h-4" />
                                                 {campaign.sent_count} Sent
                                             </span>
                                         )}
-                                        {campaign.status !== 'draft' && campaign.failed_count > 0 && (
+                                        {campaign.failed_count > 0 && (
                                             <span className="flex items-center gap-1 text-red-600">
                                                 <XCircle className="w-4 h-4" />
                                                 {campaign.failed_count} Failed
@@ -1342,6 +1347,11 @@ export default function CampaignsPage() {
                                             Exclude tags: {campaign.audience_exclude_tag_ids?.length || 0}
                                         </p>
                                     )}
+                                    {campaign.status === 'draft' && campaign.last_error && (
+                                        <p className="text-xs font-mono text-amber-700 border-l-2 border-amber-400 pl-3">
+                                            Paused: {campaign.last_error}
+                                        </p>
+                                    )}
                                 </div>
 
                                 <div className="flex items-center gap-2 w-full md:w-auto mt-2 md:mt-0">
@@ -1356,7 +1366,12 @@ export default function CampaignsPage() {
                                             ) : (
                                                 <>
                                                     <Send className="w-4 h-4 mr-2" />
-                                                    Send Now
+                                                    {campaign.sent_count + campaign.failed_count > 0
+                                                        ? `Continue Unsent (${Math.max(
+                                                            campaign.total_recipients - campaign.sent_count - campaign.failed_count,
+                                                            0
+                                                        ).toLocaleString()})`
+                                                        : 'Send Now'}
                                                 </>
                                             )}
                                         </button>
@@ -1372,7 +1387,7 @@ export default function CampaignsPage() {
                                             ) : (
                                                 <>
                                                     <StopCircle className="w-4 h-4 mr-2" />
-                                                    Cancel
+                                                    Stop
                                                 </>
                                             )}
                                         </button>

@@ -23,6 +23,7 @@ function createSupabaseMock(
         remainingPendingCount?: number;
         incompleteAudience?: boolean;
         templateMediaHeader?: { type: 'image'; url: string };
+        stopAfterFirstBatch?: boolean;
     } = {}
 ) {
     const campaignRecord = {
@@ -100,6 +101,7 @@ function createSupabaseMock(
                 if (result.success) sentCount += 1;
                 else failedCount += 1;
             }
+            if (options.stopAfterFirstBatch) campaignRecord.status = 'draft';
             return { data: args.p_results.length, error: null };
         }
 
@@ -556,7 +558,7 @@ describe('sendCampaignById', () => {
         expect(sendMessage).toHaveBeenCalledTimes(2);
     });
 
-    it('pauses and releases recipients when automatic thread takeover fails', async () => {
+    it('fails only controlled threads and continues when automatic takeover fails', async () => {
         const recipients = Array.from({ length: 3 }, (_, index) => ({
             id: `recipient_${index + 1}`,
             contact_id: `contact_${index + 1}`,
@@ -578,18 +580,44 @@ describe('sendCampaignById', () => {
             sendBatchSize: 3
         });
 
-        expect(result.status).toBe(409);
-        expect(result.body.paused).toBe(true);
-        expect(result.body.retryable).toBe(false);
-        expect(result.failed).toBe(0);
-        expect(result.body.remaining).toBe(3);
+        expect(result.status).toBe(200);
+        expect(result.body.paused).toBeUndefined();
+        expect(result.failed).toBe(3);
         expect(takeThreadControl).toHaveBeenCalledTimes(3);
-        expect(supabase.finishBatchRpc).not.toHaveBeenCalled();
-        expect(supabase.releaseBatchUpdate).toHaveBeenCalledWith([
-            'contact_1',
-            'contact_2',
-            'contact_3'
-        ]);
+        expect(supabase.finishBatchRpc).toHaveBeenCalledWith(expect.objectContaining({
+            p_results: expect.arrayContaining([
+                expect.objectContaining({ contact_id: 'contact_1', success: false }),
+                expect.objectContaining({ contact_id: 'contact_2', success: false }),
+                expect.objectContaining({ contact_id: 'contact_3', success: false })
+            ])
+        }));
+        expect(supabase.releaseBatchUpdate).not.toHaveBeenCalled();
+    });
+
+    it('stops before claiming another batch and preserves unsent recipients', async () => {
+        const recipients = Array.from({ length: 2 }, (_, index) => ({
+            id: `recipient_${index + 1}`,
+            contact_id: `contact_${index + 1}`,
+            contacts: { psid: `psid_${index + 1}`, name: `Contact ${index + 1}` }
+        }));
+        const supabase = createSupabaseMock('draft', {
+            recipients,
+            stopAfterFirstBatch: true
+        });
+        vi.mocked(sendMessage).mockResolvedValue({ message_id: 'mid_sent' });
+
+        const result = await sendCampaignById({
+            campaignId: 'campaign_1',
+            supabase: supabase as never,
+            sendBatchSize: 1
+        });
+
+        expect(result.status).toBe(200);
+        expect(result.body.paused).toBe(true);
+        expect(result.body.remaining).toBe(1);
+        expect(result.sent).toBe(1);
+        expect(sendMessage).toHaveBeenCalledTimes(1);
+        expect(supabase.claimRpc).toHaveBeenCalledTimes(1);
     });
 
     it('preflights templates before claiming recipients', async () => {

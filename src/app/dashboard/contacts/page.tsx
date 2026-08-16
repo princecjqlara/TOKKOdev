@@ -1286,7 +1286,7 @@ export default function ContactsPage() {
         } catch (error) {
             console.error('Error sending tracked bulk messages:', error);
             const recoveryMessage = campaignReadyToSend
-                ? 'Open Campaigns and press Send to resume pending recipients without resending completed ones.'
+                ? 'Open Campaigns and press Continue Unsent to resume pending recipients without resending completed ones.'
                 : 'Campaign setup did not finish, so do not press Send on an incomplete campaign. Create the campaign again after this error is fixed.';
             alert(`Tracked bulk send stopped: ${(error as Error).message}\n\n${recoveryMessage}`);
         } finally {

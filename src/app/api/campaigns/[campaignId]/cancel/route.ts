@@ -10,7 +10,7 @@ type CampaignWithPage = {
     pages?: { id: string } | { id: string }[];
 };
 
-// POST /api/campaigns/[campaignId]/cancel - Cancel a sending campaign
+// POST /api/campaigns/[campaignId]/cancel - Stop a campaign without losing its unsent queue
 export async function POST(
     request: NextRequest,
     { params }: { params: Promise<{ campaignId: string }> }
@@ -67,25 +67,26 @@ export async function POST(
             );
         }
 
-        // Atomically stop the campaign and discard unsent queue rows. In-flight
-        // claimed rows are allowed to finish; no cancelled target is recorded
-        // as a delivery failure.
-        const { data: discardedRecipients, error: cancelError } = await supabase.rpc(
-            'cancel_campaign_delivery',
+        // Atomically pause the campaign while preserving pending and in-flight
+        // rows. In-flight workers observe the draft status before claiming a
+        // new batch, so Continue Unsent can safely resume the same queue.
+        const { data: remainingRecipients, error: pauseError } = await supabase.rpc(
+            'pause_campaign_delivery',
             { p_campaign_id: campaignId }
         );
 
-        if (cancelError) throw cancelError;
+        if (pauseError) throw pauseError;
 
         return NextResponse.json({
             success: true,
-            message: 'Campaign cancelled successfully',
-            discardedRecipients: Number(discardedRecipients || 0)
+            message: 'Campaign stopped. Unsent recipients were preserved.',
+            remainingRecipients: Number(remainingRecipients || 0),
+            resumable: true
         });
     } catch (error) {
-        console.error('Error cancelling campaign:', error);
+        console.error('Error stopping campaign:', error);
         return NextResponse.json(
-            { error: 'Failed to cancel campaign', message: (error as Error).message },
+            { error: 'Failed to stop campaign', message: (error as Error).message },
             { status: 500 }
         );
     }

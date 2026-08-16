@@ -106,6 +106,8 @@ export interface Campaign {
   template_language?: string | null;
   recurrence?: 'none' | 'daily';
   recurrence_end_at?: string | null;
+  last_error?: string | null;
+  background_delivery_enabled?: boolean;
 }
 
 export interface CampaignRecipient {

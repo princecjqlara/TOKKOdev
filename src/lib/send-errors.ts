@@ -131,13 +131,15 @@ export function isRetryableSendError(error: unknown): boolean {
 /**
  * Errors that apply to the page, template, or Facebook service must pause a
  * campaign instead of permanently consuming every remaining recipient.
+ * Thread ownership is conversation-specific: after automatic takeover fails,
+ * only that recipient should fail so one externally controlled thread cannot
+ * stop a bulk send for every other contact.
  */
 export function shouldPauseCampaignForSendError(error: unknown): boolean {
     const category = categorizeSendError(error);
     return (
         category === 'utility_permission_missing' ||
         category === 'utility_template_missing' ||
-        category === 'thread_controlled_by_another_app' ||
         category === 'invalid_utility_parameter' ||
         category === 'rate_limited' ||
         category === 'authentication_required' ||

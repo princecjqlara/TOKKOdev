@@ -373,22 +373,29 @@ export async function sendCampaignById({
         console.log(`Starting campaign ${campaignId} with atomic batches of ${SEND_BATCH_SIZE}`);
 
         while (processedThisRun < MAX_RECIPIENTS && Date.now() - startTime <= MAX_PROCESSING_TIME) {
-            const { data: currentCampaign } = await supabase
+            const { data: currentCampaign, error: currentCampaignError } = await supabase
                 .from('campaigns')
                 .select('status')
                 .eq('id', campaignId)
                 .single();
 
-            if (currentCampaign?.status === 'cancelled') {
+            if (currentCampaignError) throw currentCampaignError;
+
+            if (currentCampaign?.status !== 'sending') {
                 const progress = await getCampaignDeliveryProgress(supabase, campaignId);
                 return {
                     status: 200,
                     body: {
                         success: true,
+                        partial: progress.remaining > 0,
                         sent: progress.sent,
                         failed: progress.failed,
-                        cancelled: true,
-                        message: 'Campaign was cancelled'
+                        remaining: progress.remaining,
+                        paused: currentCampaign?.status === 'draft',
+                        cancelled: currentCampaign?.status === 'cancelled',
+                        message: currentCampaign?.status === 'draft'
+                            ? 'Campaign stopped. Unsent recipients remain queued and can be continued later.'
+                            : 'Campaign was cancelled'
                     },
                     success: true,
                     sent: progress.sent,
@@ -662,6 +669,9 @@ export async function sendCampaignById({
                     .from('campaigns')
                     .update({
                         status: pausedStatus,
+                        background_delivery_enabled: shouldRetryAutomatically
+                            ? !dueAt && !campaign.is_loop
+                            : false,
                         next_attempt_at: nextAttemptAt,
                         last_error: pausedResults[0].error,
                         updated_at: new Date().toISOString()
@@ -704,7 +714,7 @@ export async function sendCampaignById({
 
         const progress = await getCampaignDeliveryProgress(supabase, campaignId);
 
-        if (finalStatus?.status !== 'cancelled') {
+        if (finalStatus?.status === 'sending') {
             await supabase
                 .from('campaigns')
                 .update({
@@ -734,6 +744,22 @@ export async function sendCampaignById({
                     failed: progress.failed
                 };
             }
+        } else if (finalStatus?.status === 'draft') {
+            return {
+                status: 200,
+                body: {
+                    success: true,
+                    partial: progress.remaining > 0,
+                    paused: true,
+                    sent: progress.sent,
+                    failed: progress.failed,
+                    remaining: progress.remaining,
+                    message: 'Campaign stopped. Unsent recipients remain queued and can be continued later.'
+                },
+                success: true,
+                sent: progress.sent,
+                failed: progress.failed
+            };
         }
 
         console.log(`Campaign run finished: ${sentThisRun} sent, ${failedThisRun} failed`);
@@ -769,6 +795,9 @@ export async function sendCampaignById({
                     status: shouldRetryAutomatically
                         ? (allowScheduled ? 'scheduled' : 'sending')
                         : 'draft',
+                    background_delivery_enabled: shouldRetryAutomatically
+                        ? !dueAt
+                        : false,
                     next_attempt_at: retryAt,
                     last_error: databaseError.message || String(error),
                     updated_at: new Date().toISOString()
