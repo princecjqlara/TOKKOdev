@@ -119,6 +119,8 @@ type ScheduledMessageTemplateSelection = {
 const CONTACT_MEDIA_DRAFT_STORAGE_PREFIX = 'tokko:contact-bulk-media-draft:';
 const CAMPAIGN_MEDIA_STORAGE_PREFIX = 'tokko:campaign-media:';
 const MAX_LOCAL_MEDIA_BYTES = 3 * 1024 * 1024;
+const CONVERSATION_EXPORT_BATCH_SIZE = 25;
+const CONVERSATION_EXPORT_RETRY_ATTEMPTS = 3;
 
 type StoredCampaignMedia = {
     url: string;
@@ -179,6 +181,36 @@ async function readApiResponse(response: Response) {
     return {
         message: text || `Request failed with status ${response.status}`
     };
+}
+
+async function fetchConversationExportBatch(
+    input: RequestInfo | URL,
+    init?: RequestInit
+): Promise<Response> {
+    let lastError: unknown;
+
+    for (let attempt = 0; attempt < CONVERSATION_EXPORT_RETRY_ATTEMPTS; attempt++) {
+        try {
+            const response = await fetch(input, init);
+            if (response.ok || response.status < 500 || attempt === CONVERSATION_EXPORT_RETRY_ATTEMPTS - 1) {
+                return response;
+            }
+
+            lastError = new Error(`Export service returned HTTP ${response.status}`);
+        } catch (error) {
+            lastError = error;
+            if (attempt === CONVERSATION_EXPORT_RETRY_ATTEMPTS - 1) throw error;
+        }
+
+        await new Promise(resolve => setTimeout(resolve, 500 * (attempt + 1)));
+    }
+
+    throw lastError instanceof Error ? lastError : new Error('Failed to export conversations');
+}
+
+function removeCsvHeader(csv: string): string {
+    const newlineIndex = csv.indexOf('\n');
+    return newlineIndex === -1 ? '' : csv.slice(newlineIndex + 1);
 }
 
 type MessageButton = {
@@ -1239,7 +1271,7 @@ export default function ContactsPage() {
                 : '';
             setBulkSendProgress(`${batchLabel}Campaign ${campaignId.slice(0, 8)}: ${sent} sent, ${failed} failed, ${remaining} pending`);
 
-            const continueInBrowser = Number(createData.recipients || 0) <= 5000;
+            let deliveryQueuedForRetry = false;
             while (sendData.partial && remaining > 0) {
                 await new Promise(resolve => setTimeout(resolve, 100));
 
@@ -1247,8 +1279,8 @@ export default function ContactsPage() {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({
-                        sendBatchSize: 20,
-                        delayBetweenBatchesMs: 50,
+                        sendBatchSize: 10,
+                        delayBetweenBatchesMs: 250,
                         maxProcessingTimeMs: 45000,
                         templateMediaHeader
                     })
@@ -1256,6 +1288,17 @@ export default function ContactsPage() {
 
                 sendData = await readApiResponse(response);
                 if (!response.ok) {
+                    if (sendData.retryable === true) {
+                        sent = Number(sendData.sent || sent);
+                        failed = Number(sendData.failed || failed);
+                        remaining = Number(sendData.remaining || remaining);
+                        deliveryQueuedForRetry = true;
+                        setBulkSendProgress(
+                            `${batchLabel}Campaign ${campaignId.slice(0, 8)} is safely queued for automatic retry: ` +
+                            `${sent} sent, ${failed} failed, ${remaining} pending`
+                        );
+                        break;
+                    }
                     throw new Error(sendData.message || `Failed to continue tracked send (HTTP ${response.status})`);
                 }
 
@@ -1263,10 +1306,6 @@ export default function ContactsPage() {
                 failed = Number(sendData.failed || failed);
                 remaining = Number(sendData.remaining || Math.max((createData.recipients || 0) - sent - failed, 0));
                 setBulkSendProgress(`${batchLabel}Campaign ${campaignId.slice(0, 8)}: ${sent} sent, ${failed} failed, ${remaining} pending`);
-
-                if (!continueInBrowser && sendData.partial && remaining > 0) {
-                    break;
-                }
             }
 
             setLastSendResults({ sent, failed });
@@ -1278,7 +1317,9 @@ export default function ContactsPage() {
             resetBestTimeScheduleState();
             clearSelection();
 
-            alert(sendData.partial && remaining > 0
+            alert(deliveryQueuedForRetry
+                ? `Tracked bulk send is safely queued for automatic retry.\n\n${batchLabel}Recipients: ${createData.recipients}\nSent: ${sent}\nFailed: ${failed}\nRemaining: ${remaining}\nCampaign ID: ${campaignId}\n\nFacebook or the delivery service asked for a temporary pause. The background worker will resume without resending completed recipients.`
+                : sendData.partial && remaining > 0
                 ? `Tracked bulk send started in the durable background queue.\n\n${batchLabel}Recipients: ${createData.recipients}\nSent: ${sent}\nFailed: ${failed}\nRemaining: ${remaining}\nCampaign ID: ${campaignId}\n\nThe campaign worker will continue even if this browser closes.`
                 : `Tracked bulk send finished.\n\n${batchLabel}Recipients in this campaign: ${createData.recipients}\nSent: ${sent}\nFailed: ${failed}\nCampaign ID: ${campaignId}`
             );
@@ -1303,24 +1344,82 @@ export default function ContactsPage() {
             const selectedContactIdsForExport = selectionCount > 0
                 ? await getSelectedContactIds()
                 : [];
-            const response = selectedContactIdsForExport.length > 0
-                ? await fetch(`/api/pages/${selectedPageId}/conversations/export`, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({
-                        format: 'csv',
-                        contactIds: selectedContactIdsForExport
-                    })
-                })
-                : await fetch(`/api/pages/${selectedPageId}/conversations/export?format=csv`);
+            if (selectionCount > 0 && selectedContactIdsForExport.length === 0) {
+                throw new Error('Could not resolve the selected contacts. No conversations were exported; please retry.');
+            }
+            const csvParts: string[] = [];
+            let contentDisposition = '';
+            let completedBatches = 0;
 
-            if (!response.ok) {
-                const data = await readApiResponse(response);
-                throw new Error(data.message || 'Failed to export conversations');
+            const appendResponse = async (response: Response) => {
+                if (!response.ok) {
+                    const data = await readApiResponse(response);
+                    throw new Error(data.message || 'Failed to export conversations');
+                }
+
+                if (!contentDisposition) {
+                    contentDisposition = response.headers.get('content-disposition') || '';
+                }
+                const csv = await response.text();
+                if (csvParts.length === 0) {
+                    csvParts.push(csv);
+                } else {
+                    const rows = removeCsvHeader(csv);
+                    if (rows) csvParts.push('\n', rows);
+                }
+                completedBatches++;
+            };
+
+            if (selectedContactIdsForExport.length > 0) {
+                const totalBatches = Math.ceil(selectedContactIdsForExport.length / CONVERSATION_EXPORT_BATCH_SIZE);
+                for (let offset = 0; offset < selectedContactIdsForExport.length; offset += CONVERSATION_EXPORT_BATCH_SIZE) {
+                    const contactIds = selectedContactIdsForExport.slice(
+                        offset,
+                        offset + CONVERSATION_EXPORT_BATCH_SIZE
+                    );
+                    const response = await fetchConversationExportBatch(
+                        `/api/pages/${selectedPageId}/conversations/export`,
+                        {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({
+                                format: 'csv',
+                                batched: true,
+                                contactIds
+                            })
+                        }
+                    );
+                    await appendResponse(response);
+                    console.log(`Conversation export batch ${completedBatches}/${totalBatches} completed.`);
+                }
+            } else {
+                let cursor: string | null = null;
+                const seenCursors = new Set<string>();
+
+                do {
+                    const params = new URLSearchParams({
+                        format: 'csv',
+                        batched: 'true',
+                        batchSize: String(CONVERSATION_EXPORT_BATCH_SIZE)
+                    });
+                    if (cursor) params.set('cursor', cursor);
+
+                    const response = await fetchConversationExportBatch(
+                        `/api/pages/${selectedPageId}/conversations/export?${params.toString()}`
+                    );
+                    await appendResponse(response);
+
+                    const nextCursor = response.headers.get('x-export-next-cursor');
+                    if (nextCursor && seenCursors.has(nextCursor)) {
+                        throw new Error('Facebook returned a repeated export cursor. Please retry the export.');
+                    }
+                    if (nextCursor) seenCursors.add(nextCursor);
+                    cursor = nextCursor;
+                    console.log(`Conversation export batch ${completedBatches} completed${cursor ? '; continuing.' : '.'}`);
+                } while (cursor);
             }
 
-            const blob = await response.blob();
-            const contentDisposition = response.headers.get('content-disposition') || '';
+            const blob = new Blob(csvParts, { type: 'text/csv; charset=utf-8' });
             const filenameMatch = contentDisposition.match(/filename="([^"]+)"/);
             const filename = filenameMatch?.[1] || 'facebook-conversations.csv';
             const downloadUrl = window.URL.createObjectURL(blob);

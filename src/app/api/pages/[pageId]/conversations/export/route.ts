@@ -5,6 +5,7 @@ import {
     getConversationIdForPsid,
     getConversationMessages,
     getPageConversations,
+    getPageConversationsBatch,
     isFacebookReauthRequired
 } from '@/lib/facebook';
 import type { ConversationMessage } from '@/lib/facebook';
@@ -46,6 +47,15 @@ type ExportedMessage = {
 };
 
 const FACEBOOK_EXPORT_CONCURRENCY = 8;
+const DEFAULT_EXPORT_CONVERSATION_BATCH_SIZE = 25;
+const MAX_EXPORT_CONVERSATION_BATCH_SIZE = 50;
+const MAX_SELECTED_CONTACTS_PER_BATCHED_REQUEST = 100;
+const MAX_SELECTED_CONTACTS_PER_LEGACY_REQUEST = 10000;
+
+type ExportBatchMetadata = {
+    nextCursor?: string | null;
+    batchComplete?: boolean;
+};
 
 async function mapWithConcurrency<T, R>(
     items: T[],
@@ -73,6 +83,16 @@ function parseFormat(value: string | null): ExportFormat {
     return value === 'json' ? 'json' : 'csv';
 }
 
+function parseBoolean(value: unknown): boolean {
+    return value === true || value === 'true' || value === '1';
+}
+
+function parseBatchSize(value: unknown): number {
+    const parsed = typeof value === 'number' ? value : Number(value);
+    if (!Number.isFinite(parsed)) return DEFAULT_EXPORT_CONVERSATION_BATCH_SIZE;
+    return Math.max(1, Math.min(Math.floor(parsed), MAX_EXPORT_CONVERSATION_BATCH_SIZE));
+}
+
 function normalizeContactIds(value: unknown): string[] {
     const values = Array.isArray(value)
         ? value
@@ -82,8 +102,7 @@ function normalizeContactIds(value: unknown): string[] {
 
     return [...new Set(values
         .map((item) => (typeof item === 'string' ? item.trim() : ''))
-        .filter(Boolean))]
-        .slice(0, 10000);
+        .filter(Boolean))];
 }
 
 function csvCell(value: unknown) {
@@ -228,7 +247,8 @@ async function buildRowsForAllPageConversations(pageId: string, page: PageRecord
             const messages = await getConversationMessages(
                 conversation.id,
                 page.access_token,
-                Number.MAX_SAFE_INTEGER
+                Number.MAX_SAFE_INTEGER,
+                { throwOnError: true }
             );
 
             return messages.map((message) => mapMessageToExportRow({
@@ -250,6 +270,51 @@ async function buildRowsForAllPageConversations(pageId: string, page: PageRecord
     };
 }
 
+async function buildRowsForPageConversationBatch(
+    pageId: string,
+    page: PageRecord,
+    cursor: string | null,
+    batchSize: number
+) {
+    const batch = await getPageConversationsBatch(
+        page.fb_page_id,
+        page.access_token,
+        { limit: batchSize, after: cursor }
+    );
+    const conversationRows = await mapWithConcurrency(
+        batch.conversations,
+        FACEBOOK_EXPORT_CONCURRENCY,
+        async (conversation) => {
+            const contact = getContactParticipant(conversation, page.fb_page_id);
+            const contactPsid = contact?.id || '';
+            const contactName = contact?.name || '';
+            const messages = await getConversationMessages(
+                conversation.id,
+                page.access_token,
+                Number.MAX_SAFE_INTEGER,
+                { throwOnError: true }
+            );
+
+            return messages.map((message) => mapMessageToExportRow({
+                pageId,
+                page,
+                conversation,
+                contactPsid,
+                contactName,
+                message
+            }));
+        }
+    );
+
+    return {
+        rows: conversationRows.flat(),
+        conversationCount: batch.conversations.length,
+        selectedContactCount: null as number | null,
+        nextCursor: batch.nextCursor,
+        batchComplete: !batch.nextCursor
+    };
+}
+
 async function buildRowsForSelectedContacts(
     pageId: string,
     page: PageRecord,
@@ -265,7 +330,8 @@ async function buildRowsForSelectedContacts(
             const conversationId = await getConversationIdForPsid(
                 page.fb_page_id,
                 contactPsid,
-                page.access_token
+                page.access_token,
+                { throwOnError: true }
             );
             if (!conversationId) return { rows: [] as ExportedMessage[], hasConversation: false };
 
@@ -282,7 +348,8 @@ async function buildRowsForSelectedContacts(
             const messages = await getConversationMessages(
                 conversationId,
                 page.access_token,
-                Number.MAX_SAFE_INTEGER
+                Number.MAX_SAFE_INTEGER,
+                { throwOnError: true }
             );
 
             return {
@@ -331,6 +398,14 @@ async function handleExport(
         const format = parseFormat(
             typeof body.format === 'string' ? body.format : url.searchParams.get('format')
         );
+        const batched = parseBoolean(
+            typeof body.batched !== 'undefined' ? body.batched : url.searchParams.get('batched')
+        );
+        const cursorValue = typeof body.cursor === 'string' ? body.cursor : url.searchParams.get('cursor');
+        const cursor = cursorValue?.trim() || null;
+        const batchSize = parseBatchSize(
+            typeof body.batchSize !== 'undefined' ? body.batchSize : url.searchParams.get('batchSize')
+        );
         const contactIds = normalizeContactIds(
             Array.isArray(body.contactIds) || typeof body.contactIds === 'string'
                 ? body.contactIds
@@ -353,18 +428,53 @@ async function handleExport(
             );
         }
 
+
+        if (batched && contactIds.length > MAX_SELECTED_CONTACTS_PER_BATCHED_REQUEST) {
+            return NextResponse.json(
+                {
+                    error: 'Export Batch Too Large',
+                    message: `Send at most ${MAX_SELECTED_CONTACTS_PER_BATCHED_REQUEST} selected contacts per export batch.`
+                },
+                { status: 413 }
+            );
+        }
+
+        if (!batched && contactIds.length > MAX_SELECTED_CONTACTS_PER_LEGACY_REQUEST) {
+            return NextResponse.json(
+                {
+                    error: 'Export Request Too Large',
+                    message: 'This export is too large for one request. Refresh the Contacts page and retry so it can use resumable batches.'
+                },
+                { status: 413 }
+            );
+        }
+
         const exportResult = contactIds.length > 0
             ? await buildRowsForSelectedContacts(
                 pageId,
                 page,
                 await getContactsForExport(supabase, pageId, contactIds)
             )
-            : await buildRowsForAllPageConversations(pageId, page);
+            : batched
+                ? await buildRowsForPageConversationBatch(pageId, page, cursor, batchSize)
+                : await buildRowsForAllPageConversations(pageId, page);
         const { rows, conversationCount, selectedContactCount } = exportResult;
+        const batchMetadata = exportResult as typeof exportResult & ExportBatchMetadata;
 
         const exportedAt = new Date().toISOString();
         const scope = contactIds.length > 0 ? 'selected-contact-conversations' : 'conversations';
         const filenameBase = `${sanitizeFilenamePart(page.name)}-${scope}-${exportedAt.slice(0, 10)}`;
+        const batchHeaders: Record<string, string> = batched
+            ? {
+                'X-Export-Batched': 'true',
+                'X-Export-Batch-Complete': String(batchMetadata.batchComplete !== false),
+                'X-Export-Conversation-Count': String(conversationCount),
+                'X-Export-Message-Count': String(rows.length),
+                ...(batchMetadata.nextCursor
+                    ? { 'X-Export-Next-Cursor': batchMetadata.nextCursor }
+                    : {})
+            }
+            : {};
 
         if (format === 'json') {
             return new NextResponse(
@@ -383,7 +493,8 @@ async function handleExport(
                 {
                     headers: {
                         'Content-Type': 'application/json; charset=utf-8',
-                        'Content-Disposition': `attachment; filename="${filenameBase}.json"`
+                        'Content-Disposition': `attachment; filename="${filenameBase}.json"`,
+                        ...batchHeaders
                     }
                 }
             );
@@ -392,7 +503,8 @@ async function handleExport(
         return new NextResponse(toCsv(rows), {
             headers: {
                 'Content-Type': 'text/csv; charset=utf-8',
-                'Content-Disposition': `attachment; filename="${filenameBase}.csv"`
+                'Content-Disposition': `attachment; filename="${filenameBase}.csv"`,
+                ...batchHeaders
             }
         });
     } catch (error) {

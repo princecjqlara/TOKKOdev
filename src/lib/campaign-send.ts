@@ -803,7 +803,12 @@ export async function sendCampaignById({
                     updated_at: new Date().toISOString()
                 })
                 .eq('id', campaignId)
-                .eq('status', 'sending');
+                .in(
+                    'status',
+                    allowScheduled
+                        ? ['draft', 'scheduled', 'sending']
+                        : ['draft', 'sending']
+                );
             console.log(`Campaign ${campaignId} re-armed after sender error`);
         } catch (resetError) {
             console.error(`❌ Failed to reset campaign ${campaignId} status:`, resetError);

@@ -8,6 +8,7 @@ import { getUtilityTemplateParameterValidationError } from './send-errors';
 export { UTILITY_TEMPLATES } from './facebook-templates';
 
 const FACEBOOK_GRAPH_URL = 'https://graph.facebook.com/v21.0';
+const FACEBOOK_READ_TIMEOUT_MS = 30_000;
 
 type FacebookGraphErrorBody = {
     error?: {
@@ -101,6 +102,22 @@ async function readFacebookError(response: Response, endpoint: string) {
     );
 }
 
+async function fetchFacebookRead(input: string): Promise<Response> {
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), FACEBOOK_READ_TIMEOUT_MS);
+
+    try {
+        return await fetch(input, { signal: controller.signal });
+    } catch (error) {
+        if (controller.signal.aborted) {
+            throw new Error(`Facebook read request timed out after ${FACEBOOK_READ_TIMEOUT_MS / 1000} seconds`);
+        }
+        throw error;
+    } finally {
+        clearTimeout(timeoutId);
+    }
+}
+
 // Get user's Facebook pages (including business pages)
 // /me/accounts returns all pages the user manages, including business pages
 export async function getFacebookPages(userAccessToken: string): Promise<FacebookPage[]> {
@@ -181,11 +198,10 @@ export async function getPageConversations(
         seenPageUrls.add(nextUrl);
 
         pageCount++;
-        const res: Response = await fetch(nextUrl);
+        const res: Response = await fetchFacebookRead(nextUrl);
 
         if (!res.ok) {
-            const error = await res.json();
-            throw new Error(error.error?.message || 'Failed to fetch conversations');
+            throw await readFacebookError(res, `/${pageId}/conversations`);
         }
 
         const responseData: { data?: FacebookConversation[]; paging?: { next?: string } } = await res.json();
@@ -259,11 +275,10 @@ export async function getPageConversationsBatch(
         url += `&since=${unixTimestamp}`;
     }
 
-    const response: Response = await fetch(url);
+    const response: Response = await fetchFacebookRead(url);
 
     if (!response.ok) {
-        const error = await response.json();
-        throw new Error(error.error?.message || 'Failed to fetch conversations');
+        throw await readFacebookError(response, `/${pageId}/conversations`);
     }
 
     const responseData: {
@@ -668,18 +683,31 @@ export interface ConversationMessage {
 export async function getConversationMessages(
     conversationId: string,
     pageAccessToken: string,
-    maxMessages: number = 500 // Safety limit to prevent infinite loops
+    maxMessages: number = 500, // Safety limit to prevent infinite loops
+    options: { throwOnError?: boolean } = {}
 ): Promise<ConversationMessage[]> {
     const allMessages: ConversationMessage[] = [];
     let nextUrl: string | null = `${FACEBOOK_GRAPH_URL}/${conversationId}/messages?fields=id,message,from,created_time&limit=100&access_token=${pageAccessToken}`;
+    const seenPageUrls = new Set<string>();
 
     try {
         while (nextUrl && allMessages.length < maxMessages) {
-            const fetchResponse = await fetch(nextUrl);
+            if (seenPageUrls.has(nextUrl)) {
+                const paginationError = new Error(
+                    `Facebook returned a repeated message-history cursor for conversation ${conversationId}`
+                );
+                if (options.throwOnError) throw paginationError;
+                console.warn('⚠️ Stopping repeated conversation message pagination:', conversationId);
+                break;
+            }
+            seenPageUrls.add(nextUrl);
+
+            const fetchResponse = await fetchFacebookRead(nextUrl);
 
             if (!fetchResponse.ok) {
-                const errorData = await fetchResponse.json().catch(() => ({}));
-                console.warn('⚠️ Failed to fetch conversation messages:', errorData);
+                const graphError = await readFacebookError(fetchResponse, `/${conversationId}/messages`);
+                if (options.throwOnError) throw graphError;
+                console.warn('⚠️ Failed to fetch conversation messages:', graphError.message);
                 break;
             }
 
@@ -699,6 +727,7 @@ export async function getConversationMessages(
         console.log(`📨 Fetched ${allMessages.length} total messages for conversation ${conversationId}`);
         return allMessages;
     } catch (error) {
+        if (options.throwOnError) throw error;
         console.warn('⚠️ Error fetching conversation messages:', error);
         return allMessages; // Return what we have so far
     }
@@ -708,16 +737,19 @@ export async function getConversationMessages(
 export async function getConversationIdForPsid(
     pageId: string,
     psid: string,
-    pageAccessToken: string
+    pageAccessToken: string,
+    options: { throwOnError?: boolean } = {}
 ): Promise<string | null> {
     try {
         // Construct the conversation ID format used by Facebook
         // Format: t_<psid> for messenger conversations
-        const response = await fetch(
+        const response = await fetchFacebookRead(
             `${FACEBOOK_GRAPH_URL}/${pageId}/conversations?user_id=${psid}&fields=id&access_token=${pageAccessToken}`
         );
 
         if (!response.ok) {
+            const graphError = await readFacebookError(response, `/${pageId}/conversations`);
+            if (options.throwOnError) throw graphError;
             console.warn('⚠️ Failed to find conversation for PSID:', psid);
             return null;
         }
@@ -728,6 +760,7 @@ export async function getConversationIdForPsid(
         }
         return null;
     } catch (error) {
+        if (options.throwOnError) throw error;
         console.warn('⚠️ Error finding conversation ID:', error);
         return null;
     }

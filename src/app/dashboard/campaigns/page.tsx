@@ -42,7 +42,6 @@ const CAMPAIGN_ENVELOPE_MAP: Record<string, string> = {
 const CAMPAIGN_MEDIA_STORAGE_PREFIX = 'tokko:campaign-media:';
 const PAGE_MEDIA_DRAFT_STORAGE_PREFIX = 'tokko:page-media-draft:';
 const MAX_LOCAL_MEDIA_BYTES = 3 * 1024 * 1024;
-const BACKGROUND_DELIVERY_THRESHOLD = 5000;
 
 type StoredCampaignMedia = {
     url: string;
@@ -965,8 +964,8 @@ export default function CampaignsPage() {
                 header?.url ? { type: 'image' as const, url: header.url } : undefined
             ));
             const sendPayload = {
-                sendBatchSize: 20,
-                delayBetweenBatchesMs: 50,
+                sendBatchSize: 10,
+                delayBetweenBatchesMs: 250,
                 maxProcessingTimeMs: 45000,
                 templateMediaHeader: fallbackMediaHeader,
                 templateMediaHeaders: messageMediaHeaders
@@ -979,14 +978,15 @@ export default function CampaignsPage() {
 
             let data = await response.json().catch(() => ({} as Record<string, unknown>));
 
-            if (!response.ok) {
+            let remaining = Number((data as any).remaining || 0);
+            let deliveryQueuedForRetry = !response.ok && (data as any).retryable === true;
+
+            if (!response.ok && !deliveryQueuedForRetry) {
                 const errorMessage = (data as any).message || `Failed to send campaign (HTTP ${response.status})`;
                 console.error('Error sending campaign:', errorMessage, data);
                 alert(`Failed to send campaign: ${errorMessage}`);
             } else {
-                let remaining = Number((data as any).remaining || 0);
-                const continueInBrowser = Number(campaign.total_recipients || 0) <= BACKGROUND_DELIVERY_THRESHOLD;
-                while (continueInBrowser && (data as any).partial && remaining > 0) {
+                while ((data as any).partial && remaining > 0) {
                     await new Promise(resolve => setTimeout(resolve, 100));
 
                     response = await fetch(`/api/campaigns/${campaignId}/send`, {
@@ -997,6 +997,11 @@ export default function CampaignsPage() {
 
                     data = await response.json().catch(() => ({} as Record<string, unknown>));
                     if (!response.ok) {
+                        if ((data as any).retryable === true) {
+                            remaining = Number((data as any).remaining || remaining);
+                            deliveryQueuedForRetry = true;
+                            break;
+                        }
                         const errorMessage = (data as any).message || `Failed to continue campaign send (HTTP ${response.status})`;
                         console.error('Error continuing campaign send:', errorMessage, data);
                         alert(`Failed to continue campaign send: ${errorMessage}`);
@@ -1008,7 +1013,13 @@ export default function CampaignsPage() {
 
                 const sent = (data as any).sent ?? 0;
                 const failed = (data as any).failed ?? 0;
-                if ((data as any).partial && remaining > 0) {
+                if (deliveryQueuedForRetry) {
+                    alert(
+                        `Campaign is safely queued for automatic retry.\n\n` +
+                        `Sent: ${sent}\nFailed: ${failed}\nRemaining: ${remaining}\n\n` +
+                        'Facebook or the delivery service requested a temporary pause. Completed recipients will not be resent.'
+                    );
+                } else if ((data as any).partial && remaining > 0) {
                     alert(
                         `Campaign started in the durable background queue.\n\n` +
                         `Sent: ${sent}\nFailed: ${failed}\nRemaining: ${remaining}\n\n` +

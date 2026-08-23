@@ -57,13 +57,20 @@ function createSupabaseMock(
     const campaignSelect = vi.fn().mockReturnValue({ eq: campaignEqId });
 
     const campaignUpdateEq = vi.fn();
+    const campaignUpdateIn = vi.fn();
     const campaignUpdate = vi.fn().mockImplementation((updates: Record<string, unknown>) => {
         if (typeof updates.status === 'string') campaignRecord.status = updates.status as typeof campaignRecord.status;
         const query: any = {
-            eq: vi.fn(() => query),
+            eq: vi.fn((...args: unknown[]) => {
+                campaignUpdateEq(...args);
+                return query;
+            }),
+            in: vi.fn((...args: unknown[]) => {
+                campaignUpdateIn(...args);
+                return query;
+            }),
             then: (resolve: (value: { error: null }) => unknown) => Promise.resolve({ error: null }).then(resolve)
         };
-        campaignUpdateEq.mockImplementation(query.eq);
         return query;
     });
 
@@ -160,6 +167,7 @@ function createSupabaseMock(
         rpc,
         campaignUpdate,
         campaignUpdateEq,
+        campaignUpdateIn,
         claimRpc,
         finishBatchRpc,
         releaseBatchUpdate
@@ -723,6 +731,10 @@ describe('sendCampaignById', () => {
             status: 'sending',
             next_attempt_at: expect.any(String)
         }));
+        expect(supabase.campaignUpdateIn).toHaveBeenCalledWith(
+            'status',
+            ['draft', 'sending']
+        );
     });
 
     it('claims every pending recipient in bounded atomic batches without a per-run cap', async () => {

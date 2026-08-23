@@ -6,6 +6,7 @@ const mocks = vi.hoisted(() => ({
     getSupabaseAdmin: vi.fn(),
     getConversationIdForPsid: vi.fn(),
     getPageConversations: vi.fn(),
+    getPageConversationsBatch: vi.fn(),
     getConversationMessages: vi.fn(),
     isFacebookReauthRequired: vi.fn()
 }));
@@ -21,6 +22,7 @@ vi.mock('@/lib/supabase', () => ({
 vi.mock('@/lib/facebook', () => ({
     getConversationIdForPsid: mocks.getConversationIdForPsid,
     getPageConversations: mocks.getPageConversations,
+    getPageConversationsBatch: mocks.getPageConversationsBatch,
     getConversationMessages: mocks.getConversationMessages,
     isFacebookReauthRequired: mocks.isFacebookReauthRequired
 }));
@@ -125,6 +127,21 @@ describe('GET /api/pages/[pageId]/conversations/export', () => {
                 }
             }
         ]);
+        mocks.getPageConversationsBatch.mockResolvedValue({
+            conversations: [
+                {
+                    id: 'conversation_1',
+                    updated_time: '2026-07-26T10:00:00.000Z',
+                    participants: {
+                        data: [
+                            { id: 'fb_page_1', name: 'Study Page' },
+                            { id: 'contact_psid_1', name: 'Jane Contact' }
+                        ]
+                    }
+                }
+            ],
+            nextCursor: 'cursor_2'
+        });
         mocks.getConversationMessages.mockResolvedValue([
             {
                 id: 'message_1',
@@ -160,7 +177,8 @@ describe('GET /api/pages/[pageId]/conversations/export', () => {
         expect(mocks.getConversationMessages).toHaveBeenCalledWith(
             'conversation_1',
             'page_access_token_1',
-            Number.MAX_SAFE_INTEGER
+            Number.MAX_SAFE_INTEGER,
+            { throwOnError: true }
         );
         expect(body).toContain('pageId,pageName,fbPageId,conversationId');
         expect(body).toContain('"contact_psid_1","Jane Contact","message_1","contact_psid_1","Jane Contact","contact","Hello, ""Jane"""');
@@ -191,6 +209,27 @@ describe('GET /api/pages/[pageId]/conversations/export', () => {
         }));
     });
 
+    it('exports whole-page conversations in resumable batches', async () => {
+        const request = new Request(
+            'http://localhost:3000/api/pages/page_1/conversations/export?format=csv&batched=true&batchSize=25&cursor=cursor_1'
+        ) as unknown as NextRequest;
+        const response = await GET(request, {
+            params: Promise.resolve({ pageId: 'page_1' })
+        });
+
+        expect(response.status).toBe(200);
+        expect(mocks.getPageConversations).not.toHaveBeenCalled();
+        expect(mocks.getPageConversationsBatch).toHaveBeenCalledWith(
+            'fb_page_1',
+            'page_access_token_1',
+            { limit: 25, after: 'cursor_1' }
+        );
+        expect(response.headers.get('x-export-next-cursor')).toBe('cursor_2');
+        expect(response.headers.get('x-export-batch-complete')).toBe('false');
+        expect(response.headers.get('x-export-conversation-count')).toBe('1');
+        expect(response.headers.get('x-export-message-count')).toBe('2');
+    });
+
     it('downloads full conversations for selected contact IDs only', async () => {
         const response = await POST(createPostRequest({
             format: 'csv',
@@ -206,12 +245,14 @@ describe('GET /api/pages/[pageId]/conversations/export', () => {
         expect(mocks.getConversationIdForPsid).toHaveBeenCalledWith(
             'fb_page_1',
             'contact_psid_1',
-            'page_access_token_1'
+            'page_access_token_1',
+            { throwOnError: true }
         );
         expect(mocks.getConversationMessages).toHaveBeenCalledWith(
             'conversation_1',
             'page_access_token_1',
-            Number.MAX_SAFE_INTEGER
+            Number.MAX_SAFE_INTEGER,
+            { throwOnError: true }
         );
         expect(body).toContain('"contact_psid_1","Jane Contact","message_1"');
         expect(body).toContain('"message_2","fb_page_1","Study Page","page","Thanks for messaging us"');
@@ -233,6 +274,21 @@ describe('GET /api/pages/[pageId]/conversations/export', () => {
         expect(supabase.contactsIn).toHaveBeenCalledTimes(3);
         expect(supabase.contactsIn.mock.calls.map((call) => call[1].length)).toEqual([100, 100, 5]);
         expect(mocks.getConversationIdForPsid).toHaveBeenCalledTimes(205);
+    });
+
+    it('rejects oversized selected batches instead of silently truncating them', async () => {
+        const contactIds = Array.from({ length: 101 }, (_, index) => `contact_${index + 1}`);
+        const response = await POST(createPostRequest({
+            format: 'csv',
+            batched: true,
+            contactIds
+        }), {
+            params: Promise.resolve({ pageId: 'page_1' })
+        });
+
+        expect(response.status).toBe(413);
+        expect((await response.json()).message).toContain('at most 100');
+        expect(mocks.getConversationIdForPsid).not.toHaveBeenCalled();
     });
 
     it('returns 403 when the user does not have page access', async () => {
