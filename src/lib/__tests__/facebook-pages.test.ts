@@ -101,6 +101,21 @@ describe('strict conversation reads', () => {
         });
     });
 
+    it('skips a stale selected contact when Facebook reports no matching user', async () => {
+        vi.stubGlobal('fetch', vi.fn().mockResolvedValue(
+            createJsonResponse(
+                false,
+                { error: { message: 'No matching user found', code: 100 } },
+                400,
+                'Bad Request'
+            )
+        ));
+
+        await expect(
+            getConversationIdForPsid('page_1', 'stale_psid', 'page_token', { throwOnError: true })
+        ).resolves.toBeNull();
+    });
+
     it('stops a repeated Facebook message cursor instead of looping forever', async () => {
         const repeatedUrl = 'https://graph.facebook.com/repeated-page';
         const messages = Array.from({ length: 100 }, (_, index) => ({

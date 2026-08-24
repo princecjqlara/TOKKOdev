@@ -53,6 +53,17 @@ export class FacebookGraphApiError extends Error {
     }
 }
 
+function isMissingConversationParticipant(error: FacebookGraphApiError): boolean {
+    if (error.requiresReauth) return false;
+    const message = error.message.toLowerCase();
+
+    return (
+        message.includes('no matching user') ||
+        message.includes('user not found') ||
+        message.includes('cannot find the user')
+    );
+}
+
 function isFacebookPageAuthorizationFailure(body: FacebookGraphErrorBody, endpoint: string) {
     const message = body.error?.message?.toLowerCase() || '';
     const code = body.error?.code;
@@ -749,7 +760,7 @@ export async function getConversationIdForPsid(
 
         if (!response.ok) {
             const graphError = await readFacebookError(response, `/${pageId}/conversations`);
-            if (options.throwOnError) throw graphError;
+            if (options.throwOnError && !isMissingConversationParticipant(graphError)) throw graphError;
             console.warn('⚠️ Failed to find conversation for PSID:', psid);
             return null;
         }
