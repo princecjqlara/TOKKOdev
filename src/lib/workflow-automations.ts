@@ -38,6 +38,7 @@ type WorkflowAutomationState = {
     current_step_index?: number | null;
     next_step_at?: string | null;
     last_triggered_at?: string | null;
+    last_contact_reply_at?: string | null;
 };
 
 type SupabaseLike = {
@@ -113,6 +114,20 @@ function isWithinHumanAgentWindow(lastInteractionAt: string | null | undefined, 
 
 function addMinutes(date: Date, minutes: number): string {
     return new Date(date.getTime() + Math.max(0, minutes) * 60 * 1000).toISOString();
+}
+
+function isSameOrOlderInteraction(
+    interactionAt: string,
+    lastContactReplyAt: string | null | undefined
+): boolean {
+    if (!lastContactReplyAt) return false;
+
+    const interactionTime = new Date(interactionAt).getTime();
+    const lastReplyTime = new Date(lastContactReplyAt).getTime();
+
+    return Number.isFinite(interactionTime) &&
+        Number.isFinite(lastReplyTime) &&
+        interactionTime <= lastReplyTime;
 }
 
 function normalizeStepDelay(value: unknown): number {
@@ -271,7 +286,7 @@ async function fetchAutomationStates(
 
     const { data, error } = await supabase
         .from('workflow_automation_states')
-        .select('id, automation_id, status, stopped_reason, current_step_index, next_step_at, last_triggered_at')
+        .select('id, automation_id, status, stopped_reason, current_step_index, next_step_at, last_triggered_at, last_contact_reply_at')
         .eq('contact_id', contactId)
         .in('automation_id', automationIds);
 
@@ -338,12 +353,30 @@ export async function handleFollowUpWorkflowContactReply(params: {
                 continue;
             }
 
-            if (existingState?.status === 'stopped' && existingState.stopped_reason === 'page_stop_code') {
+            // Facebook can redeliver the same webhook event. Do not let a replay
+            // reset the workflow timer or change a state that already handled it.
+            if (existingState && isSameOrOlderInteraction(interactionAt, existingState.last_contact_reply_at)) {
                 result.skipped += 1;
                 continue;
             }
 
-            if (automation.reply_action === 'stop') {
+            // Manual stops and reply-driven stops stay stopped until an
+            // explicit reset. A contact that was stopped only because the
+            // Human Agent window expired may start again after a fresh reply.
+            if (
+                existingState?.status === 'stopped' &&
+                (existingState.stopped_reason === 'page_stop_code' ||
+                    existingState.stopped_reason === 'contact_reply')
+            ) {
+                result.skipped += 1;
+                continue;
+            }
+
+            // reply_action describes what to do when a contact replies while a
+            // sequence is already active. The first reply must start the
+            // workflow; otherwise the default "stop" option prevents step 1
+            // from ever being scheduled.
+            if (automation.reply_action === 'stop' && existingState?.status === 'active') {
                 await upsertAutomationState(supabase, automation.id, contact.id, {
                     status: 'stopped',
                     stopped_at: now.toISOString(),
@@ -373,7 +406,7 @@ export async function handleFollowUpWorkflowContactReply(params: {
                 interactionAt
             }));
 
-            if (automation.reply_action === 'reset') {
+            if (existingState?.status === 'active' && automation.reply_action === 'reset') {
                 result.reset += 1;
             } else {
                 result.scheduled += 1;

@@ -45,6 +45,27 @@ describe('GET /api/cron/follow-up-automations', () => {
         expect(mocks.processDueFollowUpAutomationSteps).toHaveBeenCalledTimes(1);
     });
 
+    it('processes follow-ups before invoking the potentially slow campaign worker', async () => {
+        const callOrder: string[] = [];
+        mocks.processDueFollowUpAutomationSteps.mockImplementation(async () => {
+            callOrder.push('follow-ups');
+            return { processed: 1 };
+        });
+        vi.spyOn(globalThis, 'fetch').mockImplementation(async () => {
+            callOrder.push('campaigns');
+            return new Response(JSON.stringify({ success: true }), {
+                status: 200,
+                headers: { 'Content-Type': 'application/json' }
+            });
+        });
+
+        await GET(new Request(
+            'https://tokkobeta.vercel.app/api/cron/follow-up-automations'
+        ) as NextRequest);
+
+        expect(callOrder).toEqual(['follow-ups', 'campaigns']);
+    });
+
     it('still processes follow-ups when campaign continuation temporarily fails', async () => {
         vi.spyOn(globalThis, 'fetch').mockRejectedValue(new Error('temporary timeout'));
 

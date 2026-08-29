@@ -9,6 +9,14 @@ export async function GET(_request: NextRequest) {
     const startTime = Date.now();
 
     try {
+        // Follow-ups are this route's primary job. Run them before the nested
+        // campaign worker, which can consume almost the entire external cron
+        // request timeout when campaign delivery is slow.
+        const result = await processDueFollowUpAutomationSteps({
+            supabase: getSupabaseAdmin(),
+            limit: 10
+        });
+
         // Reuse the already-configured minute job on cron-jobs.org to advance
         // durable immediate campaigns. Atomic recipient claims make this safe
         // even when a separate campaign-scheduled job also exists.
@@ -34,11 +42,6 @@ export async function GET(_request: NextRequest) {
             };
             console.warn('Campaign continuation from follow-up cron failed:', campaignError);
         }
-
-        const result = await processDueFollowUpAutomationSteps({
-            supabase: getSupabaseAdmin(),
-            limit: 10
-        });
 
         return NextResponse.json({
             success: true,

@@ -33,7 +33,10 @@ function createRequest(body: Record<string, unknown> = {
     }) as unknown as NextRequest;
 }
 
-function createSupabaseMock() {
+function createSupabaseMock(tagRows = [
+    { id: 'tag_1', owner_type: 'page', owner_id: 'page_1', page_id: 'page_1', is_shared: false },
+    { id: 'tag_2', owner_type: 'page', owner_id: 'page_1', page_id: 'page_1', is_shared: false }
+]) {
     const userPageSingle = vi.fn().mockResolvedValue({ data: { page_id: 'page_1' }, error: null });
     const userPageEqPage = vi.fn().mockReturnValue({ single: userPageSingle });
     const userPageEqUser = vi.fn().mockReturnValue({ eq: userPageEqPage });
@@ -69,6 +72,17 @@ function createSupabaseMock() {
         if (table === 'contact_tags') {
             return {
                 upsert
+            };
+        }
+
+        if (table === 'tags') {
+            return {
+                select: vi.fn().mockReturnValue({
+                    in: vi.fn((_column: string, ids: string[]) => Promise.resolve({
+                        data: tagRows.filter((tag) => ids.includes(tag.id)),
+                        error: null
+                    }))
+                })
             };
         }
 
@@ -154,5 +168,23 @@ describe('POST /api/pages/[pageId]/contacts/bulk-add-tags', () => {
         expect(supabase.contactsIn.mock.calls.map((call) => call[1].length)).toEqual([100, 100, 100]);
         expect(supabase.upsert).toHaveBeenCalledTimes(2);
         expect(supabase.upsert.mock.calls.map((call) => call[0].length)).toEqual([500, 100]);
+    });
+
+    it('rejects a tag owned by another page', async () => {
+        mocks.getServerSession.mockResolvedValue({ user: { id: 'user_1' } });
+        const supabase = createSupabaseMock([
+            { id: 'tag_other', owner_type: 'page', owner_id: 'page_2', page_id: 'page_2', is_shared: false }
+        ]);
+        mocks.getSupabaseAdmin.mockReturnValue(supabase);
+
+        const response = await POST(createRequest({
+            contactIds: ['contact_1'],
+            tagIds: ['tag_other']
+        }), {
+            params: Promise.resolve({ pageId: 'page_1' })
+        });
+
+        expect(response.status).toBe(400);
+        expect(supabase.upsert).not.toHaveBeenCalled();
     });
 });

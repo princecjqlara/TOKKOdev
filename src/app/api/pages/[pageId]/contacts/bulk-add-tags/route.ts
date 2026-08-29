@@ -13,6 +13,93 @@ function normalizeIds(value: unknown): string[] {
         .filter(Boolean))];
 }
 
+type AssignableTag = {
+    id: string;
+    owner_type: string;
+    owner_id: string;
+    page_id: string | null;
+    is_shared: boolean;
+};
+
+async function getAssignableTagIds(params: {
+    supabase: ReturnType<typeof getSupabaseAdmin>;
+    userId: string;
+    pageId: string;
+    tagIds: string[];
+}): Promise<Set<string>> {
+    const { supabase, userId, pageId, tagIds } = params;
+    const tags: AssignableTag[] = [];
+
+    for (const tagIdBatch of chunkArray(tagIds, SUPABASE_IN_FILTER_BATCH_SIZE)) {
+        const { data, error } = await supabase
+            .from('tags')
+            .select('id,owner_type,owner_id,page_id,is_shared')
+            .in('id', tagIdBatch);
+
+        if (error) throw error;
+        tags.push(...((data || []) as AssignableTag[]));
+    }
+
+    const businessOwnerIds = normalizeIds(
+        tags.filter((tag) => tag.owner_type === 'business').map((tag) => tag.owner_id)
+    );
+    const accessibleBusinessIds = new Set<string>();
+
+    if (businessOwnerIds.length > 0) {
+        const { data, error } = await supabase
+            .from('business_users')
+            .select('business_id')
+            .eq('user_id', userId)
+            .in('business_id', businessOwnerIds);
+
+        if (error) throw error;
+        for (const row of data || []) accessibleBusinessIds.add(row.business_id);
+    }
+
+    const sharedPersonalTagIds = tags
+        .filter((tag) =>
+            tag.owner_type === 'user' &&
+            tag.owner_id !== userId &&
+            tag.page_id === pageId &&
+            tag.is_shared
+        )
+        .map((tag) => tag.id);
+    const shareRecipientsByTagId = new Map<string, Set<string>>();
+
+    if (sharedPersonalTagIds.length > 0) {
+        const { data, error } = await supabase
+            .from('tag_shares')
+            .select('tag_id,shared_with_user_id')
+            .in('tag_id', sharedPersonalTagIds);
+
+        if (error) throw error;
+        for (const row of data || []) {
+            const recipients = shareRecipientsByTagId.get(row.tag_id) || new Set<string>();
+            recipients.add(row.shared_with_user_id);
+            shareRecipientsByTagId.set(row.tag_id, recipients);
+        }
+    }
+
+    return new Set(tags.filter((tag) => {
+        if (tag.owner_type === 'page') {
+            return tag.owner_id === pageId;
+        }
+
+        if (tag.owner_type === 'user') {
+            if (tag.page_id !== pageId) return false;
+            if (tag.owner_id === userId) return true;
+            if (!tag.is_shared) return false;
+
+            // No explicit recipients means the tag is shared with the full
+            // page team. Otherwise it must target the current user.
+            const recipients = shareRecipientsByTagId.get(tag.id);
+            return !recipients || recipients.has(userId);
+        }
+
+        return tag.owner_type === 'business' && accessibleBusinessIds.has(tag.owner_id);
+    }).map((tag) => tag.id));
+}
+
 // POST /api/pages/[pageId]/contacts/bulk-add-tags - Add tags to contacts
 export async function POST(
     request: NextRequest,
@@ -54,6 +141,24 @@ export async function POST(
             return NextResponse.json(
                 { error: 'Forbidden', message: 'You do not have access to this page' },
                 { status: 403 }
+            );
+        }
+
+        const assignableTagIds = await getAssignableTagIds({
+            supabase,
+            userId: session.user.id,
+            pageId,
+            tagIds
+        });
+        const inaccessibleTagIds = tagIds.filter((tagId) => !assignableTagIds.has(tagId));
+
+        if (inaccessibleTagIds.length > 0) {
+            return NextResponse.json(
+                {
+                    error: 'Bad Request',
+                    message: 'One or more tags are not available for this page'
+                },
+                { status: 400 }
             );
         }
 

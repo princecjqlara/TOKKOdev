@@ -164,7 +164,7 @@ describe('workflow automations', () => {
         });
     });
 
-    it('stops a follow-up sequence when configured to stop on contact reply', async () => {
+    it('schedules step 1 for a new contact even when later replies should stop the workflow', async () => {
         const { supabase, stateUpserts } = createWorkflowSupabaseMock({
             automations: [{ ...automation, reply_action: 'stop' }],
             states: []
@@ -189,12 +189,106 @@ describe('workflow automations', () => {
             now: new Date('2026-07-29T02:00:00.000Z')
         });
 
-        expect(result.stopped).toBe(1);
+        expect(result.scheduled).toBe(1);
         expect(mocks.sendMessage).not.toHaveBeenCalled();
+        expect(stateUpserts[0]).toMatchObject({
+            status: 'active',
+            current_step_index: 0,
+            next_step_at: '2026-07-29T02:30:00.000Z'
+        });
+    });
+
+    it('stops an active follow-up sequence when configured to stop on contact reply', async () => {
+        const { supabase, stateUpserts } = createWorkflowSupabaseMock({
+            automations: [{ ...automation, reply_action: 'stop' }],
+            states: [{ automation_id: 'automation_1', status: 'active', current_step_index: 0 }]
+        });
+
+        const result = await handleFollowUpWorkflowContactReply({
+            supabase,
+            page: { id: 'page_1', fb_page_id: 'fb_page_1', access_token: 'token_1' },
+            contact: {
+                id: 'contact_1',
+                page_id: 'page_1',
+                psid: 'psid_1',
+                name: 'Juan Dela Cruz',
+                last_interaction_at: '2026-07-29T02:00:00.000Z'
+            },
+            messageText: 'anything',
+            interactionAt: '2026-07-29T02:00:00.000Z',
+            now: new Date('2026-07-29T02:00:00.000Z')
+        });
+
+        expect(result.stopped).toBe(1);
         expect(stateUpserts[0]).toMatchObject({
             status: 'stopped',
             stopped_reason: 'contact_reply',
             next_step_at: null
+        });
+    });
+
+    it('ignores a replayed contact webhook instead of resetting the timer', async () => {
+        const { supabase, stateUpserts } = createWorkflowSupabaseMock({
+            automations: [automation],
+            states: [{
+                automation_id: 'automation_1',
+                status: 'active',
+                current_step_index: 0,
+                last_contact_reply_at: '2026-07-29T02:00:00.000Z'
+            }]
+        });
+
+        const result = await handleFollowUpWorkflowContactReply({
+            supabase,
+            page: { id: 'page_1', fb_page_id: 'fb_page_1', access_token: 'token_1' },
+            contact: {
+                id: 'contact_1',
+                page_id: 'page_1',
+                psid: 'psid_1',
+                name: null,
+                last_interaction_at: '2026-07-29T02:00:00.000Z'
+            },
+            messageText: 'duplicate delivery',
+            interactionAt: '2026-07-29T02:00:00.000Z',
+            now: new Date('2026-07-29T02:00:05.000Z')
+        });
+
+        expect(result.skipped).toBe(1);
+        expect(stateUpserts).toHaveLength(0);
+    });
+
+    it('restarts a workflow after a fresh reply reopens the Human Agent window', async () => {
+        const { supabase, stateUpserts } = createWorkflowSupabaseMock({
+            automations: [{ ...automation, reply_action: 'stop' }],
+            states: [{
+                automation_id: 'automation_1',
+                status: 'stopped',
+                stopped_reason: 'outside_human_agent_window',
+                current_step_index: 0,
+                last_contact_reply_at: '2026-07-20T02:00:00.000Z'
+            }]
+        });
+
+        const result = await handleFollowUpWorkflowContactReply({
+            supabase,
+            page: { id: 'page_1', fb_page_id: 'fb_page_1', access_token: 'token_1' },
+            contact: {
+                id: 'contact_1',
+                page_id: 'page_1',
+                psid: 'psid_1',
+                name: null,
+                last_interaction_at: '2026-07-29T02:00:00.000Z'
+            },
+            messageText: 'new reply',
+            interactionAt: '2026-07-29T02:00:00.000Z',
+            now: new Date('2026-07-29T02:00:00.000Z')
+        });
+
+        expect(result.scheduled).toBe(1);
+        expect(stateUpserts[0]).toMatchObject({
+            status: 'active',
+            current_step_index: 0,
+            next_step_at: '2026-07-29T02:30:00.000Z'
         });
     });
 

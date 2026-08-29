@@ -20,7 +20,7 @@ vi.mock('@/lib/supabase', () => ({
     getSupabaseAdmin: mocks.getSupabaseAdmin
 }));
 
-import { GET, POST } from './route';
+import { GET, POST, PUT } from './route';
 
 function createRequest(url: string, init?: RequestInit): NextRequest {
     const request = new Request(url, init) as NextRequest;
@@ -245,6 +245,24 @@ describe('GET /api/tags', () => {
         expect(tagIds).toContain('tag_visible_targeted');
         expect(tagIds).not.toContain('tag_hidden_targeted');
     });
+
+    it('rejects page-scope reads when the user is not a page member', async () => {
+        mocks.getServerSession.mockResolvedValue({ user: { id: 'user_1' } });
+        mocks.getSupabaseAdmin.mockReturnValue(createSupabaseMockForGet({
+            user_pages: [],
+            tags: [{
+                id: 'private_page_tag',
+                owner_type: 'page',
+                owner_id: 'page_2'
+            }]
+        }));
+
+        const response = await GET(
+            createRequest('http://localhost:3000/api/tags?scope=page&pageId=page_2')
+        );
+
+        expect(response.status).toBe(403);
+    });
 });
 
 describe('POST /api/tags', () => {
@@ -326,5 +344,96 @@ describe('POST /api/tags', () => {
                 ignoreDuplicates: true
             }
         );
+    });
+
+    it('rejects unsupported owner types instead of bypassing ownership checks', async () => {
+        mocks.getServerSession.mockResolvedValue({ user: { id: 'user_1' } });
+        mocks.getSupabaseAdmin.mockReturnValue(createSupabaseMockForPost());
+
+        const response = await POST(
+            createRequest('http://localhost:3000/api/tags', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    name: 'Invalid owner',
+                    ownerType: 'anything',
+                    ownerId: 'user_1'
+                })
+            })
+        );
+
+        expect(response.status).toBe(400);
+    });
+});
+
+describe('PUT /api/tags', () => {
+    beforeEach(() => {
+        vi.clearAllMocks();
+    });
+
+    it('preserves targeted share rows when isShared is updated without a recipient list', async () => {
+        mocks.getServerSession.mockResolvedValue({ user: { id: 'user_1' } });
+
+        const clearShares = vi.fn();
+        const existingTag = {
+            id: 'tag_1',
+            name: 'VIP',
+            color: '#000000',
+            owner_type: 'user',
+            owner_id: 'user_1',
+            page_id: 'page_1',
+            is_shared: true
+        };
+        let tagCallCount = 0;
+        const supabase = {
+            from: vi.fn((table: string) => {
+                if (table === 'tags') {
+                    tagCallCount += 1;
+                    if (tagCallCount === 1) {
+                        return {
+                            select: vi.fn(() => ({
+                                eq: vi.fn(() => ({
+                                    single: vi.fn().mockResolvedValue({ data: existingTag, error: null })
+                                }))
+                            }))
+                        };
+                    }
+
+                    return {
+                        update: vi.fn((updates: Row) => ({
+                            eq: vi.fn(() => ({
+                                select: vi.fn(() => ({
+                                    single: vi.fn().mockResolvedValue({
+                                        data: { ...existingTag, ...updates },
+                                        error: null
+                                    })
+                                }))
+                            }))
+                        }))
+                    };
+                }
+
+                if (table === 'user_pages') {
+                    return createFilterableQuery([{ user_id: 'user_1', page_id: 'page_1' }]);
+                }
+
+                if (table === 'tag_shares') {
+                    clearShares();
+                    throw new Error('Share rows should not be replaced');
+                }
+
+                throw new Error(`Unexpected table: ${table}`);
+            })
+        };
+        mocks.getSupabaseAdmin.mockReturnValue(supabase);
+
+        const response = await PUT(createRequest('http://localhost:3000/api/tags', {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ id: 'tag_1', isShared: true })
+        }));
+
+        expect(response.status).toBe(200);
+        expect(clearShares).not.toHaveBeenCalled();
     });
 });

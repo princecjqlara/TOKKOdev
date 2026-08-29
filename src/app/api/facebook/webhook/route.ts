@@ -549,7 +549,10 @@ export async function POST(request: NextRequest) {
                                 ? event.message.text.trim()
                                 : '';
 
-                            if (eventType === 'message' && inboundMessageText) {
+                            // Attachments are replies too. The workflow handler
+                            // does not require text, so schedule/reset on every
+                            // inbound message rather than text-only messages.
+                            if (eventType === 'message') {
                                 try {
                                     const workflowResult = await handleFollowUpWorkflowContactReply({
                                         supabase,

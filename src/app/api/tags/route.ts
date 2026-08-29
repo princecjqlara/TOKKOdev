@@ -39,6 +39,36 @@ export async function GET(request: NextRequest) {
 
         const supabase = getSupabaseAdmin();
 
+        if (!['user', 'page', 'business', 'all'].includes(scope)) {
+            return NextResponse.json(
+                { error: 'Bad Request', message: 'Invalid tag scope' },
+                { status: 400 }
+            );
+        }
+
+        if (scope === 'page') {
+            if (!pageId) {
+                return NextResponse.json(
+                    { error: 'Bad Request', message: 'pageId is required for page tags' },
+                    { status: 400 }
+                );
+            }
+
+            const { data: userPage, error: userPageError } = await supabase
+                .from('user_pages')
+                .select('page_id')
+                .eq('user_id', currentUserId)
+                .eq('page_id', pageId)
+                .single();
+
+            if (userPageError || !userPage) {
+                return NextResponse.json(
+                    { error: 'Forbidden', message: 'You do not have access to this page' },
+                    { status: 403 }
+                );
+            }
+        }
+
         // Build query based on scope
         let query = supabase
             .from('tags')
@@ -126,10 +156,12 @@ export async function GET(request: NextRequest) {
 
                 if (visibleSharedPersonalTags.length > 0) {
                     const sharedTagIds = visibleSharedPersonalTags.map((tag) => tag.id);
-                    const { data: shareRows } = await supabase
+                    const { data: shareRows, error: shareRowsError } = await supabase
                         .from('tag_shares')
                         .select('tag_id,shared_with_user_id')
                         .in('tag_id', sharedTagIds);
+
+                    if (shareRowsError) throw shareRowsError;
 
                     const sharesByTagId = new Map<string, string[]>();
                     for (const row of shareRows || []) {
@@ -180,10 +212,12 @@ export async function GET(request: NextRequest) {
                 .map((tag) => tag.id);
 
             if (ownSharedTagIds.length > 0) {
-                const { data: ownShareRows } = await supabase
+                const { data: ownShareRows, error: ownShareRowsError } = await supabase
                     .from('tag_shares')
                     .select('tag_id,shared_with_user_id')
                     .in('tag_id', ownSharedTagIds);
+
+                if (ownShareRowsError) throw ownShareRowsError;
 
                 const sharedWithByTagId = new Map<string, string[]>();
                 for (const row of ownShareRows || []) {
@@ -258,8 +292,9 @@ export async function POST(request: NextRequest) {
 
         const body = await request.json();
         const { name, color, ownerType, ownerId, pageId, isShared, sharedWithUserIds } = body;
+        const normalizedName = typeof name === 'string' ? name.trim() : '';
 
-        if (!name || !ownerType || !ownerId) {
+        if (!normalizedName || !ownerType || !ownerId) {
             return NextResponse.json(
                 { error: 'Bad Request', message: 'Name, ownerType, and ownerId are required' },
                 { status: 400 }
@@ -267,6 +302,13 @@ export async function POST(request: NextRequest) {
         }
 
         const supabase = getSupabaseAdmin();
+
+        if (!['user', 'page', 'business'].includes(ownerType)) {
+            return NextResponse.json(
+                { error: 'Bad Request', message: 'Invalid tag owner type' },
+                { status: 400 }
+            );
+        }
 
         const shouldShareWithPage = ownerType === 'user' && isShared === true;
         const normalizedShareTargets = normalizeUserIdList(sharedWithUserIds)
@@ -308,14 +350,7 @@ export async function POST(request: NextRequest) {
             );
         }
 
-        if (shouldShareWithPage) {
-            if (!pageId) {
-                return NextResponse.json(
-                    { error: 'Bad Request', message: 'pageId is required when sharing a personal tag' },
-                    { status: 400 }
-                );
-            }
-
+        if (ownerType === 'user' && pageId) {
             const { data: userPage } = await supabase
                 .from('user_pages')
                 .select('page_id')
@@ -327,6 +362,15 @@ export async function POST(request: NextRequest) {
                 return NextResponse.json(
                     { error: 'Forbidden', message: 'You do not have access to this page' },
                     { status: 403 }
+                );
+            }
+        }
+
+        if (shouldShareWithPage) {
+            if (!pageId) {
+                return NextResponse.json(
+                    { error: 'Bad Request', message: 'pageId is required when sharing a personal tag' },
+                    { status: 400 }
                 );
             }
 
@@ -357,11 +401,13 @@ export async function POST(request: NextRequest) {
         const { data: tag, error } = await supabase
             .from('tags')
             .insert({
-                name,
+                name: normalizedName,
                 color: color || '#6366f1',
                 owner_type: ownerType,
                 owner_id: ownerId,
-                page_id: pageId || null,
+                // A page-owned tag always belongs to its owner page. Do not
+                // trust a second, potentially mismatched pageId from clients.
+                page_id: ownerType === 'page' ? ownerId : pageId || null,
                 is_shared: shouldShareWithPage
             })
             .select()
@@ -570,7 +616,12 @@ export async function PUT(request: NextRequest) {
 
         if (error) throw error;
 
-        if (existingTag.owner_type === 'user' && (typeof isShared === 'boolean' || shouldUpdateShareTargets)) {
+        const shouldClearShareTargets = existingTag.owner_type === 'user' && (
+            shouldUpdateShareTargets ||
+            (typeof isShared === 'boolean' && !nextIsShared)
+        );
+
+        if (shouldClearShareTargets) {
             const { error: clearShareError } = await supabase
                 .from('tag_shares')
                 .delete()
@@ -578,7 +629,7 @@ export async function PUT(request: NextRequest) {
 
             if (clearShareError) throw clearShareError;
 
-            if (nextIsShared && shouldUpdateShareTargets && normalizedShareTargets.length > 0) {
+            if (nextIsShared && normalizedShareTargets.length > 0) {
                 const { error: addShareError } = await supabase
                     .from('tag_shares')
                     .upsert(
@@ -599,7 +650,9 @@ export async function PUT(request: NextRequest) {
         return NextResponse.json({
             tag: {
                 ...tag,
-                shared_with_user_ids: nextIsShared && shouldUpdateShareTargets ? normalizedShareTargets : []
+                ...(shouldUpdateShareTargets
+                    ? { shared_with_user_ids: nextIsShared ? normalizedShareTargets : [] }
+                    : {})
             }
         });
     } catch (error) {
