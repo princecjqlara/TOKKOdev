@@ -3,6 +3,7 @@ import { getServerSession } from 'next-auth';
 import { authOptions } from '@/lib/auth';
 import { getSupabaseAdmin } from '@/lib/supabase';
 import { sendUtilityMessage } from '@/lib/facebook';
+import { recordOutboundMessageEvent } from '@/lib/outbound-message-events';
 
 export async function POST(request: NextRequest) {
     try {
@@ -62,6 +63,22 @@ export async function POST(request: NextRequest) {
             language,
             messageText
         );
+        const { data: contact } = await supabase
+            .from('contacts')
+            .select('id')
+            .eq('page_id', pageId)
+            .eq('psid', recipientPsid)
+            .maybeSingle();
+        await recordOutboundMessageEvent(supabase, {
+            pageId,
+            contactId: contact?.id || null,
+            messageId: result.message_id,
+            sourceType: 'manual',
+            sourceName: 'Tokko template send',
+            actorUserId: session.user.id,
+            actorName: session.user.name || session.user.email || null,
+            messageKind: `UTILITY (${templateName})`
+        });
 
         return NextResponse.json({
             success: true,

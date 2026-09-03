@@ -4,6 +4,7 @@ import { sendMessage } from '@/lib/facebook';
 import { generatePersonalizedMessage } from '@/lib/ai';
 import { getNextPhilippinesScheduledAtIso } from '@/lib/philippines-time';
 import { claimCampaignRecipients, finishLoopCampaignRecipient } from '@/lib/campaign-recipient-queue';
+import { recordOutboundMessageEvent } from '@/lib/outbound-message-events';
 
 export const dynamic = 'force-dynamic';
 
@@ -31,7 +32,9 @@ export async function GET(_request: NextRequest) {
             .from('campaigns')
             .select(`
                 id, 
-                page_id, 
+                page_id,
+                name,
+                created_by,
                 ai_prompt,
                 pages(fb_page_id, access_token)
             `)
@@ -144,13 +147,23 @@ export async function GET(_request: NextRequest) {
                     );
 
                     // Send the message
-                    await sendMessage(
+                    const sendResult = await sendMessage(
                         page.fb_page_id,
                         page.access_token,
                         recipient.contact_psid,
                         messageText,
                         'HUMAN_AGENT'
                     );
+                    await recordOutboundMessageEvent(supabase, {
+                        pageId: campaign.page_id,
+                        contactId: recipient.contact_id,
+                        messageId: sendResult.message_id,
+                        sourceType: 'campaign',
+                        sourceId: campaign.id,
+                        sourceName: campaign.name,
+                        actorUserId: campaign.created_by || null,
+                        messageKind: 'HUMAN_AGENT (AI loop)'
+                    });
 
                     // Calculate next scheduled time at the next PH best-time hour.
                     const bestHour = recipient.contact_best_hour ?? 12;

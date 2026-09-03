@@ -85,6 +85,10 @@ function createSupabaseMock(options: { hasAccess?: boolean; hasPage?: boolean } 
     const contactsEq = vi.fn().mockReturnValue({ in: contactsIn });
     const contactsSelect = vi.fn().mockReturnValue({ eq: contactsEq });
 
+    const outboundIn = vi.fn().mockResolvedValue({ data: [], error: null });
+    const outboundEq = vi.fn().mockReturnValue({ in: outboundIn });
+    const outboundSelect = vi.fn().mockReturnValue({ eq: outboundEq });
+
     const from = vi.fn((table: string) => {
         if (table === 'user_pages') {
             return { select: userPageSelect };
@@ -98,10 +102,14 @@ function createSupabaseMock(options: { hasAccess?: boolean; hasPage?: boolean } 
             return { select: contactsSelect };
         }
 
+        if (table === 'outbound_message_events') {
+            return { select: outboundSelect };
+        }
+
         throw new Error(`Unexpected table: ${table}`);
     });
 
-    return { from, contactsIn };
+    return { from, contactsIn, outboundIn };
 }
 
 describe('GET /api/pages/[pageId]/conversations/export', () => {
@@ -180,9 +188,10 @@ describe('GET /api/pages/[pageId]/conversations/export', () => {
             Number.MAX_SAFE_INTEGER,
             { throwOnError: true }
         );
-        expect(body).toContain('pageId,pageName,fbPageId,conversationId');
-        expect(body).toContain('"contact_psid_1","Jane Contact","message_1","contact_psid_1","Jane Contact","contact","Hello, ""Jane"""');
-        expect(body).toContain('"message_2","fb_page_1","Study Page","page","Thanks for messaging us"');
+        expect(body).toContain('senderType,sentBy,direction,messageSource,sourceName');
+        expect(body).toContain('"message_1","contact_psid_1","Jane Contact","contact","Jane Contact","incoming","contact","Messenger contact"');
+        expect(body).toContain('"message_2","fb_page_1","Study Page","page","Study Page","outgoing","facebook_page_untracked"');
+        expect(body).toContain('"Hello, ""Jane""","2026-07-26T09:59:00.000Z"');
     });
 
     it('downloads a JSON transcript when requested', async () => {
@@ -206,6 +215,38 @@ describe('GET /api/pages/[pageId]/conversations/export', () => {
             contactPsid: 'contact_psid_1',
             senderType: 'contact',
             message: 'Hello, "Jane"'
+        }));
+    });
+
+    it('adds exact app and automation attribution when a send event was recorded', async () => {
+        const supabase = createSupabaseMock();
+        supabase.outboundIn.mockResolvedValue({
+            data: [{
+                message_id: 'message_2',
+                source_type: 'automation',
+                source_id: 'automation_1',
+                source_name: 'First reply follow-up',
+                actor_user_id: null,
+                actor_name: null,
+                message_kind: 'HUMAN_AGENT'
+            }],
+            error: null
+        });
+        mocks.getSupabaseAdmin.mockReturnValue(supabase);
+
+        const response = await GET(createRequest('json'), {
+            params: Promise.resolve({ pageId: 'page_1' })
+        });
+        const body = await response.json();
+
+        expect(body.messages[1]).toEqual(expect.objectContaining({
+            sentBy: 'Study Page',
+            direction: 'outgoing',
+            messageSource: 'automation',
+            sourceName: 'First reply follow-up',
+            sourceId: 'automation_1',
+            messageKind: 'HUMAN_AGENT',
+            sentAt: '2026-07-26T10:00:00.000Z'
         }));
     });
 
@@ -255,7 +296,7 @@ describe('GET /api/pages/[pageId]/conversations/export', () => {
             { throwOnError: true }
         );
         expect(body).toContain('"contact_psid_1","Jane Contact","message_1"');
-        expect(body).toContain('"message_2","fb_page_1","Study Page","page","Thanks for messaging us"');
+        expect(body).toContain('"message_2","fb_page_1","Study Page","page","Study Page","outgoing","facebook_page_untracked"');
     });
 
     it('loads large selected exports in URL-safe query batches', async () => {

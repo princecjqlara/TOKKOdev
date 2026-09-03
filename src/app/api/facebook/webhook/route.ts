@@ -5,6 +5,7 @@ import { isExpectedFacebookProfileLookupError } from '@/lib/facebook-errors';
 import { getPhilippinesDayOfWeek, getPhilippinesHour } from '@/lib/philippines-time';
 import { replaceTemplateVariables } from '@/lib/placeholders';
 import { handleFollowUpWorkflowContactReply, stopWorkflowAutomationsFromPageMessage } from '@/lib/workflow-automations';
+import { recordOutboundMessageEvent } from '@/lib/outbound-message-events';
 import { composeContactName, hasUsableContactName, normalizeContactName, pickPreferredContactName } from '../../../../lib/contact-names';
 
 const PROFILE_LOOKUP_FAILURE_TTL_MS = 60 * 60 * 1000;
@@ -516,7 +517,7 @@ export async function POST(request: NextRequest) {
 
                                 // Send welcome message (must await in serverless environment)
                                 try {
-                                    await sendMessage(
+                                    const sendResult = await sendMessage(
                                         pageId,
                                         page.access_token,
                                         senderId,
@@ -527,6 +528,14 @@ export async function POST(request: NextRequest) {
                                         undefined,
                                         mappedWelcomeButtons.length > 0 ? mappedWelcomeButtons : undefined
                                     );
+                                    await recordOutboundMessageEvent(supabase, {
+                                        pageId: page.id,
+                                        contactId: (contact as { id: string }).id,
+                                        messageId: sendResult.message_id,
+                                        sourceType: 'welcome',
+                                        sourceName: 'Welcome message',
+                                        messageKind: welcomeMessagingType
+                                    });
                                     logInfo('Welcome message sent to new contact', {
                                         pageId,
                                         senderId,

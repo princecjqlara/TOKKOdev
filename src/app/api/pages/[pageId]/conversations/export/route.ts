@@ -42,8 +42,27 @@ type ExportedMessage = {
     senderId: string;
     senderName: string;
     senderType: 'page' | 'contact' | 'unknown';
+    sentBy: string;
+    direction: 'incoming' | 'outgoing' | 'unknown';
+    messageSource: 'contact' | 'manual' | 'campaign' | 'automation' | 'welcome' | 'facebook_page_untracked' | 'unknown';
+    sourceName: string;
+    sourceId: string;
+    actorUserId: string;
+    actorName: string;
+    messageKind: string;
     message: string;
+    sentAt: string;
     createdTime: string;
+};
+
+type OutboundMessageEventRecord = {
+    message_id: string;
+    source_type: 'manual' | 'campaign' | 'automation' | 'welcome';
+    source_id: string | null;
+    source_name: string | null;
+    actor_user_id: string | null;
+    actor_name: string | null;
+    message_kind: string | null;
 };
 
 const FACEBOOK_EXPORT_CONCURRENCY = 8;
@@ -123,7 +142,16 @@ function toCsv(rows: ExportedMessage[]) {
         'senderId',
         'senderName',
         'senderType',
+        'sentBy',
+        'direction',
+        'messageSource',
+        'sourceName',
+        'sourceId',
+        'actorUserId',
+        'actorName',
+        'messageKind',
         'message',
+        'sentAt',
         'createdTime'
     ];
 
@@ -156,6 +184,13 @@ function mapMessageToExportRow(
     }
 ): ExportedMessage {
     const senderId = options.message.from?.id || '';
+    const senderType = senderId === options.page.fb_page_id
+        ? 'page'
+        : senderId === options.contactPsid
+            ? 'contact'
+            : 'unknown';
+    const senderName = options.message.from?.name || '';
+    const createdTime = options.message.created_time || '';
 
     return {
         pageId: options.pageId,
@@ -167,16 +202,81 @@ function mapMessageToExportRow(
         contactName: options.contactName,
         messageId: options.message.id,
         senderId,
-        senderName: options.message.from?.name || '',
-        senderType:
-            senderId === options.page.fb_page_id
-                ? 'page'
-                : senderId === options.contactPsid
-                    ? 'contact'
-                    : 'unknown',
+        senderName,
+        senderType,
+        sentBy: senderName,
+        direction: senderType === 'contact' ? 'incoming' : senderType === 'page' ? 'outgoing' : 'unknown',
+        messageSource: senderType === 'contact'
+            ? 'contact'
+            : senderType === 'page'
+                ? 'facebook_page_untracked'
+                : 'unknown',
+        sourceName: senderType === 'contact' ? 'Messenger contact' : '',
+        sourceId: '',
+        actorUserId: '',
+        actorName: '',
+        messageKind: '',
         message: options.message.message || '',
-        createdTime: options.message.created_time || ''
+        sentAt: createdTime,
+        createdTime
     };
+}
+
+async function addOutboundAttribution(
+    supabase: ReturnType<typeof getSupabaseAdmin>,
+    pageId: string,
+    rows: ExportedMessage[]
+): Promise<ExportedMessage[]> {
+    const pageMessageIds = [...new Set(
+        rows
+            .filter((row) => row.senderType === 'page' && row.messageId)
+            .map((row) => row.messageId)
+    )];
+    if (pageMessageIds.length === 0) return rows;
+
+    const events = new Map<string, OutboundMessageEventRecord>();
+
+    try {
+        for (const batch of chunkArray(pageMessageIds, SUPABASE_IN_FILTER_BATCH_SIZE)) {
+            const { data, error } = await supabase
+                .from('outbound_message_events')
+                .select('message_id, source_type, source_id, source_name, actor_user_id, actor_name, message_kind')
+                .eq('page_id', pageId)
+                .in('message_id', batch);
+
+            if (error) {
+                // Allow exports while the attribution migration is being rolled out.
+                console.warn('[CONVERSATION_EXPORT] Message attribution is unavailable:', error.message);
+                return rows;
+            }
+
+            for (const event of (data || []) as OutboundMessageEventRecord[]) {
+                events.set(event.message_id, event);
+            }
+        }
+    } catch (error) {
+        console.warn(
+            '[CONVERSATION_EXPORT] Message attribution is unavailable:',
+            error instanceof Error ? error.message : error
+        );
+        return rows;
+    }
+
+    return rows.map((row) => {
+        const event = events.get(row.messageId);
+        if (!event) return row;
+
+        return {
+            ...row,
+            sentBy: event.actor_name || row.senderName || row.pageName,
+            messageSource: event.source_type,
+            sourceName: event.source_name || '',
+            sourceId: event.source_id || '',
+            actorUserId: event.actor_user_id || '',
+            actorName: event.actor_name || '',
+            messageKind: event.message_kind || ''
+        };
+    });
 }
 
 async function getAuthorizedPage(
@@ -458,7 +558,8 @@ async function handleExport(
             : batched
                 ? await buildRowsForPageConversationBatch(pageId, page, cursor, batchSize)
                 : await buildRowsForAllPageConversations(pageId, page);
-        const { rows, conversationCount, selectedContactCount } = exportResult;
+        const { conversationCount, selectedContactCount } = exportResult;
+        const rows = await addOutboundAttribution(supabase, pageId, exportResult.rows);
         const batchMetadata = exportResult as typeof exportResult & ExportBatchMetadata;
 
         const exportedAt = new Date().toISOString();

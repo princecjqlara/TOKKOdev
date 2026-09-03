@@ -1,5 +1,6 @@
 import { sendMessage, sendMessengerMediaAttachment } from './facebook';
 import { ContactRecord, replaceTemplateVariables } from './placeholders';
+import { recordOutboundMessageEvent } from './outbound-message-events';
 
 const HUMAN_AGENT_WINDOW_MS = 7 * 24 * 60 * 60 * 1000;
 const MAX_FOLLOW_UP_STEPS = 10;
@@ -537,17 +538,26 @@ export async function processDueFollowUpAutomationSteps(params: {
             }
 
             if (messageToSend) {
-                await sendMessage(
+                const sendResult = await sendMessage(
                     page.fb_page_id,
                     page.access_token,
                     contact.psid,
                     messageToSend,
                     'HUMAN_AGENT'
                 );
+                await recordOutboundMessageEvent(supabase, {
+                    pageId: automation.page_id,
+                    contactId: contact.id,
+                    messageId: sendResult.message_id,
+                    sourceType: 'automation',
+                    sourceId: automation.id,
+                    sourceName: automation.name,
+                    messageKind: 'HUMAN_AGENT'
+                });
             }
 
             if (mediaUrl) {
-                await sendMessengerMediaAttachment(
+                const mediaSendResult = await sendMessengerMediaAttachment(
                     page.fb_page_id,
                     page.access_token,
                     contact.psid,
@@ -557,6 +567,15 @@ export async function processDueFollowUpAutomationSteps(params: {
                     },
                     'HUMAN_AGENT'
                 );
+                await recordOutboundMessageEvent(supabase, {
+                    pageId: automation.page_id,
+                    contactId: contact.id,
+                    messageId: mediaSendResult.message_id,
+                    sourceType: 'automation',
+                    sourceId: automation.id,
+                    sourceName: automation.name,
+                    messageKind: `${step.media_type || 'image'} attachment`
+                });
             }
 
             const nextStepIndex = stepIndex + 1;

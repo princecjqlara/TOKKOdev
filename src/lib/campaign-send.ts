@@ -18,6 +18,7 @@ import {
     releaseCampaignRecipientBatch
 } from './campaign-recipient-queue';
 import type { TemplateMediaType } from './facebook-templates';
+import { recordOutboundMessageEvent } from './outbound-message-events';
 
 type SupabaseLike = ReturnType<typeof getSupabaseAdmin>;
 
@@ -517,7 +518,17 @@ export async function sendCampaignById({
                                     sendArgs.push(undefined, messageMediaHeader);
                                 }
 
-                                await sendMessage(...sendArgs);
+                                const sendResult = await sendMessage(...sendArgs);
+                                await recordOutboundMessageEvent(supabase, {
+                                    pageId: campaign.page_id,
+                                    contactId: recipient.contact_id,
+                                    messageId: sendResult.message_id,
+                                    sourceType: 'campaign',
+                                    sourceId: campaign.id,
+                                    sourceName: campaign.name,
+                                    actorUserId: campaign.created_by || null,
+                                    messageKind: messagingType
+                                });
                                 break;
                             } catch (sendError) {
                                 const errorMessage = (sendError as Error).message;

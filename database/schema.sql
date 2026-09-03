@@ -234,6 +234,24 @@
         CONSTRAINT workflow_automation_states_status_check CHECK (status IN ('active', 'stopped', 'completed'))
     );
 
+    -- Exact source attribution for outbound messages in conversation exports.
+    CREATE TABLE IF NOT EXISTS outbound_message_events (
+        id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+        page_id UUID NOT NULL REFERENCES pages(id) ON DELETE CASCADE,
+        contact_id UUID REFERENCES contacts(id) ON DELETE SET NULL,
+        message_id TEXT NOT NULL UNIQUE,
+        source_type TEXT NOT NULL,
+        source_id UUID,
+        source_name TEXT,
+        actor_user_id UUID REFERENCES users(id) ON DELETE SET NULL,
+        actor_name TEXT,
+        message_kind TEXT,
+        sent_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        CONSTRAINT outbound_message_events_source_type_check
+            CHECK (source_type IN ('manual', 'campaign', 'automation', 'welcome'))
+    );
+
     -- Indexes for better query performance
     CREATE INDEX IF NOT EXISTS idx_users_email ON users(email);
     CREATE INDEX IF NOT EXISTS idx_users_facebook_id ON users(facebook_id);
@@ -244,6 +262,8 @@
     CREATE INDEX IF NOT EXISTS idx_contact_tags_contact_id ON contact_tags(contact_id);
     CREATE INDEX IF NOT EXISTS idx_contact_tags_tag_id ON contact_tags(tag_id);
     CREATE INDEX IF NOT EXISTS idx_contact_tags_created_by ON contact_tags(created_by);
+    CREATE INDEX IF NOT EXISTS idx_outbound_message_events_page_message ON outbound_message_events(page_id, message_id);
+    CREATE INDEX IF NOT EXISTS idx_outbound_message_events_page_sent ON outbound_message_events(page_id, sent_at DESC);
     CREATE INDEX IF NOT EXISTS idx_tags_owner_type ON tags(owner_type);
     CREATE INDEX IF NOT EXISTS idx_tags_owner_id ON tags(owner_id);
     CREATE INDEX IF NOT EXISTS idx_tags_page_id ON tags(page_id);

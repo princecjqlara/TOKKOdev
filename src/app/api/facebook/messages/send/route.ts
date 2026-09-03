@@ -13,6 +13,7 @@ import { chunkArray } from '@/lib/chunking';
 import { replaceTemplateVariablesForParts, ContactRecord } from '@/lib/placeholders';
 import { stopWorkflowAutomationsFromPageMessage } from '@/lib/workflow-automations';
 import { recordPageActivity } from '@/lib/activity-history';
+import { recordOutboundMessageEvent } from '@/lib/outbound-message-events';
 import { SUPABASE_IN_FILTER_BATCH_SIZE } from '@/lib/supabase-pagination';
 import {
     applyDynamicButtonValue,
@@ -1181,7 +1182,7 @@ export async function POST(request: NextRequest) {
                             })
                             : undefined;
 
-                    await sendMessage(
+                    const sendResult = await sendMessage(
                         page.fb_page_id,
                         page.access_token,
                         contact.psid,
@@ -1193,6 +1194,16 @@ export async function POST(request: NextRequest) {
                         responseButtons,
                         msgType === 'UTILITY' ? templateMediaHeader : undefined
                     );
+                    await recordOutboundMessageEvent(supabase, {
+                        pageId,
+                        contactId: contact.id,
+                        messageId: sendResult.message_id,
+                        sourceType: 'manual',
+                        sourceName: 'Tokko manual send',
+                        actorUserId: userId,
+                        actorName: session.user?.name || session.user?.email || null,
+                        messageKind: msgType
+                    });
                     console.log(`✅ Successfully sent message to contact ${contact.id} (PSID: ${contact.psid})`);
 
                     return { success: true as const, contactId: contact.id, error: undefined };
