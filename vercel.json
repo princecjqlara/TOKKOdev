@@ -19,6 +19,18 @@
     "src/app/api/cron/follow-up-automations/route.ts": {
       "maxDuration": 300
     },
+    "src/app/api/cron/exports/route.ts": {
+      "maxDuration": 300
+    },
+    "src/app/api/pages/[pageId]/exports/route.ts": {
+      "maxDuration": 300
+    },
+    "src/app/api/exports/[exportId]/retry/route.ts": {
+      "maxDuration": 300
+    },
+    "src/app/api/exports/[exportId]/download/route.ts": {
+      "maxDuration": 300
+    },
     "src/app/api/campaigns/[campaignId]/send/route.ts": {
       "maxDuration": 300
     },

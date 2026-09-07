@@ -18,7 +18,8 @@ import {
     Hand,
     FileText,
     Workflow,
-    History
+    History,
+    Download
 } from 'lucide-react';
 import { Page } from '@/types';
 
@@ -89,6 +90,7 @@ export default function DashboardLayout({
         { href: '/dashboard/campaigns', icon: MessageSquare, label: 'Campaigns' },
         { href: '/dashboard/automations', icon: Workflow, label: 'Follow-Ups' },
         { href: '/dashboard/templates', icon: FileText, label: 'Templates' },
+        { href: '/dashboard/exports', icon: Download, label: 'Exports' },
         { href: '/dashboard/history', icon: History, label: 'History' },
         { href: '/dashboard/welcome', icon: Hand, label: 'Welcome' },
         { href: '/dashboard/settings', icon: Settings, label: 'Settings' },

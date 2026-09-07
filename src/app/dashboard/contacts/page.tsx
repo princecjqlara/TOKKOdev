@@ -1,6 +1,7 @@
 'use client';
 
 import { useSession } from 'next-auth/react';
+import { useRouter } from 'next/navigation';
 import { useEffect, useState, useCallback, useRef } from 'react';
 import {
     Search,
@@ -119,8 +120,6 @@ type ScheduledMessageTemplateSelection = {
 const CONTACT_MEDIA_DRAFT_STORAGE_PREFIX = 'tokko:contact-bulk-media-draft:';
 const CAMPAIGN_MEDIA_STORAGE_PREFIX = 'tokko:campaign-media:';
 const MAX_LOCAL_MEDIA_BYTES = 3 * 1024 * 1024;
-const CONVERSATION_EXPORT_BATCH_SIZE = 25;
-const CONVERSATION_EXPORT_RETRY_ATTEMPTS = 3;
 
 type StoredCampaignMedia = {
     url: string;
@@ -181,36 +180,6 @@ async function readApiResponse(response: Response) {
     return {
         message: text || `Request failed with status ${response.status}`
     };
-}
-
-async function fetchConversationExportBatch(
-    input: RequestInfo | URL,
-    init?: RequestInit
-): Promise<Response> {
-    let lastError: unknown;
-
-    for (let attempt = 0; attempt < CONVERSATION_EXPORT_RETRY_ATTEMPTS; attempt++) {
-        try {
-            const response = await fetch(input, init);
-            if (response.ok || response.status < 500 || attempt === CONVERSATION_EXPORT_RETRY_ATTEMPTS - 1) {
-                return response;
-            }
-
-            lastError = new Error(`Export service returned HTTP ${response.status}`);
-        } catch (error) {
-            lastError = error;
-            if (attempt === CONVERSATION_EXPORT_RETRY_ATTEMPTS - 1) throw error;
-        }
-
-        await new Promise(resolve => setTimeout(resolve, 500 * (attempt + 1)));
-    }
-
-    throw lastError instanceof Error ? lastError : new Error('Failed to export conversations');
-}
-
-function removeCsvHeader(csv: string): string {
-    const newlineIndex = csv.indexOf('\n');
-    return newlineIndex === -1 ? '' : csv.slice(newlineIndex + 1);
 }
 
 type MessageButton = {
@@ -330,6 +299,7 @@ function normalizeButtonsForSend(
 }
 
 export default function ContactsPage() {
+    const router = useRouter();
     const { data: session } = useSession();
     const [pages, setPages] = useState<Page[]>([]);
     const [selectedPageId, setSelectedPageId] = useState<string | null>(null);
@@ -1347,89 +1317,18 @@ export default function ContactsPage() {
             if (selectionCount > 0 && selectedContactIdsForExport.length === 0) {
                 throw new Error('Could not resolve the selected contacts. No conversations were exported; please retry.');
             }
-            const csvParts: string[] = [];
-            let contentDisposition = '';
-            let completedBatches = 0;
-
-            const appendResponse = async (response: Response) => {
-                if (!response.ok) {
-                    const data = await readApiResponse(response);
-                    throw new Error(data.message || 'Failed to export conversations');
-                }
-
-                if (!contentDisposition) {
-                    contentDisposition = response.headers.get('content-disposition') || '';
-                }
-                const csv = await response.text();
-                if (csvParts.length === 0) {
-                    csvParts.push(csv);
-                } else {
-                    const rows = removeCsvHeader(csv);
-                    if (rows) csvParts.push('\n', rows);
-                }
-                completedBatches++;
-            };
-
-            if (selectedContactIdsForExport.length > 0) {
-                const totalBatches = Math.ceil(selectedContactIdsForExport.length / CONVERSATION_EXPORT_BATCH_SIZE);
-                for (let offset = 0; offset < selectedContactIdsForExport.length; offset += CONVERSATION_EXPORT_BATCH_SIZE) {
-                    const contactIds = selectedContactIdsForExport.slice(
-                        offset,
-                        offset + CONVERSATION_EXPORT_BATCH_SIZE
-                    );
-                    const response = await fetchConversationExportBatch(
-                        `/api/pages/${selectedPageId}/conversations/export`,
-                        {
-                            method: 'POST',
-                            headers: { 'Content-Type': 'application/json' },
-                            body: JSON.stringify({
-                                format: 'csv',
-                                batched: true,
-                                contactIds
-                            })
-                        }
-                    );
-                    await appendResponse(response);
-                    console.log(`Conversation export batch ${completedBatches}/${totalBatches} completed.`);
-                }
-            } else {
-                let cursor: string | null = null;
-                const seenCursors = new Set<string>();
-
-                do {
-                    const params = new URLSearchParams({
-                        format: 'csv',
-                        batched: 'true',
-                        batchSize: String(CONVERSATION_EXPORT_BATCH_SIZE)
-                    });
-                    if (cursor) params.set('cursor', cursor);
-
-                    const response = await fetchConversationExportBatch(
-                        `/api/pages/${selectedPageId}/conversations/export?${params.toString()}`
-                    );
-                    await appendResponse(response);
-
-                    const nextCursor = response.headers.get('x-export-next-cursor');
-                    if (nextCursor && seenCursors.has(nextCursor)) {
-                        throw new Error('Facebook returned a repeated export cursor. Please retry the export.');
-                    }
-                    if (nextCursor) seenCursors.add(nextCursor);
-                    cursor = nextCursor;
-                    console.log(`Conversation export batch ${completedBatches} completed${cursor ? '; continuing.' : '.'}`);
-                } while (cursor);
-            }
-
-            const blob = new Blob(csvParts, { type: 'text/csv; charset=utf-8' });
-            const filenameMatch = contentDisposition.match(/filename="([^"]+)"/);
-            const filename = filenameMatch?.[1] || 'facebook-conversations.csv';
-            const downloadUrl = window.URL.createObjectURL(blob);
-            const link = document.createElement('a');
-            link.href = downloadUrl;
-            link.download = filename;
-            document.body.appendChild(link);
-            link.click();
-            link.remove();
-            window.URL.revokeObjectURL(downloadUrl);
+            const response = await fetch(`/api/pages/${selectedPageId}/exports`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    scope: selectedContactIdsForExport.length > 0 ? 'selected' : 'all',
+                    contactIds: selectedContactIdsForExport
+                })
+            });
+            const data = await readApiResponse(response);
+            if (!response.ok) throw new Error(data.message || 'Failed to queue the export');
+            clearSelection();
+            router.push('/dashboard/exports');
         } catch (error) {
             console.error('Error exporting conversations:', error);
             alert((error as Error).message || 'Failed to export conversations');
@@ -2244,7 +2143,7 @@ export default function ContactsPage() {
                     >
                         <Download className={`w-4 h-4 mr-2 ${exportingConversations ? 'animate-pulse' : ''}`} />
                         {exportingConversations
-                            ? 'Exporting'
+                            ? 'Queuing…'
                             : getSelectionCount() > 0
                                 ? `Export Selected (${getSelectionCount()})`
                                 : 'Export CSV'}

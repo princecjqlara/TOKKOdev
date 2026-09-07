@@ -193,6 +193,42 @@
     CREATE INDEX IF NOT EXISTS idx_page_activity_history_action
         ON page_activity_history(action_type, created_at DESC);
 
+    -- Durable conversation export queue. Export chunks are kept in the private
+    -- `conversation-exports` Storage bucket and expire after seven days.
+    CREATE TABLE IF NOT EXISTS conversation_export_jobs (
+        id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+        page_id UUID NOT NULL REFERENCES pages(id) ON DELETE CASCADE,
+        created_by UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        format TEXT NOT NULL DEFAULT 'csv' CHECK (format IN ('csv')),
+        scope TEXT NOT NULL CHECK (scope IN ('all', 'selected')),
+        status TEXT NOT NULL DEFAULT 'queued' CHECK (status IN ('queued', 'running', 'completed', 'failed')),
+        contact_ids JSONB NOT NULL DEFAULT '[]'::jsonb,
+        next_contact_index INTEGER NOT NULL DEFAULT 0 CHECK (next_contact_index >= 0),
+        next_cursor TEXT,
+        total_items INTEGER CHECK (total_items IS NULL OR total_items >= 0),
+        processed_items INTEGER NOT NULL DEFAULT 0 CHECK (processed_items >= 0),
+        conversation_count INTEGER NOT NULL DEFAULT 0 CHECK (conversation_count >= 0),
+        message_count INTEGER NOT NULL DEFAULT 0 CHECK (message_count >= 0),
+        chunk_count INTEGER NOT NULL DEFAULT 0 CHECK (chunk_count >= 0),
+        filename TEXT NOT NULL,
+        storage_prefix TEXT NOT NULL,
+        error_message TEXT,
+        attempt_count SMALLINT NOT NULL DEFAULT 0 CHECK (attempt_count >= 0),
+        next_attempt_at TIMESTAMPTZ,
+        claim_token UUID,
+        claimed_at TIMESTAMPTZ,
+        started_at TIMESTAMPTZ,
+        completed_at TIMESTAMPTZ,
+        expires_at TIMESTAMPTZ NOT NULL DEFAULT (NOW() + INTERVAL '7 days'),
+        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_conversation_export_jobs_worker
+        ON conversation_export_jobs(status, next_attempt_at, claimed_at, created_at);
+    CREATE INDEX IF NOT EXISTS idx_conversation_export_jobs_user_created
+        ON conversation_export_jobs(created_by, created_at DESC);
+
     -- Workflow automations table (multi-step follow-up messages)
     CREATE TABLE IF NOT EXISTS workflow_automations (
         id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
@@ -314,6 +350,45 @@
     CREATE TRIGGER update_workflow_automation_states_updated_at BEFORE UPDATE ON workflow_automation_states
         FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
 
+    CREATE TRIGGER update_conversation_export_jobs_updated_at BEFORE UPDATE ON conversation_export_jobs
+        FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+
+    CREATE OR REPLACE FUNCTION claim_conversation_export_job(p_job_id UUID DEFAULT NULL)
+    RETURNS SETOF conversation_export_jobs
+    LANGUAGE plpgsql
+    SECURITY DEFINER
+    SET search_path = public
+    AS $$
+    DECLARE
+        v_job_id UUID;
+    BEGIN
+        SELECT job.id INTO v_job_id
+        FROM conversation_export_jobs AS job
+        WHERE (p_job_id IS NULL OR job.id = p_job_id)
+          AND job.expires_at > NOW()
+          AND (
+              job.status = 'queued'
+              OR (job.status = 'running' AND (job.claimed_at IS NULL OR job.claimed_at < NOW() - INTERVAL '6 minutes'))
+          )
+          AND (job.next_attempt_at IS NULL OR job.next_attempt_at <= NOW())
+        ORDER BY job.created_at ASC
+        LIMIT 1
+        FOR UPDATE SKIP LOCKED;
+
+        IF v_job_id IS NULL THEN RETURN; END IF;
+
+        RETURN QUERY
+        UPDATE conversation_export_jobs AS claimed
+        SET status = 'running', claim_token = uuid_generate_v4(), claimed_at = NOW(),
+            started_at = COALESCE(started_at, NOW()), error_message = NULL, updated_at = NOW()
+        WHERE claimed.id = v_job_id
+        RETURNING claimed.*;
+    END;
+    $$;
+
+    REVOKE ALL ON FUNCTION claim_conversation_export_job(UUID) FROM PUBLIC;
+    GRANT EXECUTE ON FUNCTION claim_conversation_export_job(UUID) TO service_role;
+
     -- Row Level Security (RLS) Policies
     -- Enable RLS on all tables
     ALTER TABLE users ENABLE ROW LEVEL SECURITY;
@@ -327,6 +402,7 @@
     ALTER TABLE contact_tags ENABLE ROW LEVEL SECURITY;
     ALTER TABLE campaigns ENABLE ROW LEVEL SECURITY;
     ALTER TABLE campaign_recipients ENABLE ROW LEVEL SECURITY;
+    ALTER TABLE conversation_export_jobs ENABLE ROW LEVEL SECURITY;
     ALTER TABLE campaign_delivery_failures ENABLE ROW LEVEL SECURITY;
     ALTER TABLE workflow_automations ENABLE ROW LEVEL SECURITY;
     ALTER TABLE workflow_automation_states ENABLE ROW LEVEL SECURITY;

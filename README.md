@@ -67,6 +67,7 @@ SUPABASE_SERVICE_ROLE_KEY=your-supabase-service-role-key
 Run the SQL schema from `database/schema.sql` in your Supabase SQL editor.
 Then run `database/migration_database_retention.sql` to install bounded campaign-history retention and automatic database maintenance.
 For production, also run `database/migration_database_control_plane.sql` to add schema-version tracking, database health snapshots, integrity constraints, and maintenance observability.
+Run `database/migration_conversation_export_jobs.sql` to enable durable background conversation exports and the Exports download page.
 High-volume installations can then run `database/migration_compact_contact_interactions.sql` and its finalize migration to replace unbounded raw interaction events with compatible hourly counters.
 
 For large campaigns, deploy the compact delivery queue in this exact order:
@@ -144,8 +145,9 @@ Vercel Cron is not used. Configure cron jobs in [cron-jobs.org](https://cron-job
 - Scheduled campaigns, every minute: `https://your-app.vercel.app/api/cron/campaign-scheduled`
 - Loop campaigns, every minute: `https://your-app.vercel.app/api/cron/campaign-loop`
 - Follow-up automations, every minute: `https://your-app.vercel.app/api/cron/follow-up-automations`
+- Conversation export worker, every minute: `https://your-app.vercel.app/api/cron/exports`
 
-Use `GET` requests. The page sync and campaign cron routes do not require a cron secret.
+Use `GET` requests. These cron routes do not require a cron secret.
 
 **Note:** The `vercel.json` file is configured with extended function timeouts (5 minutes) for sync operations, but does not define Vercel Cron schedules.
 
