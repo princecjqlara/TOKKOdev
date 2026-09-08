@@ -1,3 +1,4 @@
+import { randomUUID } from 'crypto';
 import { getSupabaseAdmin } from '@/lib/supabase';
 import {
     getConversationIdForPsid,
@@ -13,7 +14,8 @@ import { SUPABASE_IN_FILTER_BATCH_SIZE } from '@/lib/supabase-pagination';
 export const CONVERSATION_EXPORT_BUCKET = 'conversation-exports';
 export const CONVERSATION_EXPORT_BATCH_SIZE = 25;
 const FACEBOOK_EXPORT_CONCURRENCY = 8;
-const MAX_EXPORT_CHUNK_BYTES = 100 * 1024 * 1024;
+const EXPORT_BUCKET_FILE_SIZE_LIMIT_BYTES = 50 * 1024 * 1024;
+const MAX_EXPORT_OBJECT_BYTES = 45 * 1024 * 1024;
 const MAX_ATTEMPTS = 3;
 
 type PageRecord = {
@@ -45,6 +47,12 @@ type ExportJob = {
     storage_prefix: string;
     attempt_count: number;
     claim_token: string;
+};
+
+type UnclaimedExportJob = Omit<ExportJob, 'claim_token'> & {
+    status: 'queued' | 'running';
+    claim_token: string | null;
+    claimed_at: string | null;
 };
 
 type ExportedMessage = {
@@ -212,7 +220,7 @@ async function ensureExportBucket() {
     if (data) return;
     const { error } = await supabase.storage.createBucket(CONVERSATION_EXPORT_BUCKET, {
         public: false,
-        fileSizeLimit: MAX_EXPORT_CHUNK_BYTES,
+        fileSizeLimit: EXPORT_BUCKET_FILE_SIZE_LIMIT_BYTES,
         allowedMimeTypes: ['text/csv', 'text/plain']
     });
     if (error) {
@@ -328,13 +336,68 @@ async function markJobError(job: ExportJob, error: unknown) {
     if (updateError) console.error('[EXPORT_WORKER] Could not record job failure:', updateError);
 }
 
+function isMissingUuidGenerator(error: unknown) {
+    const databaseError = error as { code?: string; message?: string } | null;
+    return databaseError?.code === '42883'
+        && /uuid_generate_v4\s*\(\).*does not exist/i.test(databaseError.message || '');
+}
+
+async function claimExportJobWithoutRpc(jobId?: string): Promise<ExportJob | null> {
+    const supabase = getSupabaseAdmin();
+    const now = new Date();
+    const nowIso = now.toISOString();
+    const staleBeforeIso = new Date(now.getTime() - 6 * 60_000).toISOString();
+    let candidateQuery = supabase
+        .from('conversation_export_jobs')
+        .select('*')
+        .gt('expires_at', nowIso)
+        .or(`next_attempt_at.is.null,next_attempt_at.lte.${nowIso}`)
+        .or(`status.eq.queued,and(status.eq.running,or(claimed_at.is.null,claimed_at.lt.${staleBeforeIso}))`)
+        .order('created_at', { ascending: true })
+        .limit(1);
+    if (jobId) candidateQuery = candidateQuery.eq('id', jobId);
+
+    const { data: candidate, error: selectError } = await candidateQuery.maybeSingle();
+    if (selectError) throw selectError;
+    if (!candidate) return null;
+
+    const unclaimed = candidate as UnclaimedExportJob;
+    const claimToken = randomUUID();
+    let claimQuery = supabase
+        .from('conversation_export_jobs')
+        .update({
+            status: 'running',
+            claim_token: claimToken,
+            claimed_at: nowIso,
+            started_at: (candidate as { started_at?: string | null }).started_at || nowIso,
+            error_message: null,
+            updated_at: nowIso
+        })
+        .eq('id', unclaimed.id)
+        .eq('status', unclaimed.status);
+
+    // Compare the old lease as well as the status so two workers cannot both
+    // reclaim the same stale job.
+    claimQuery = unclaimed.claim_token
+        ? claimQuery.eq('claim_token', unclaimed.claim_token)
+        : claimQuery.is('claim_token', null);
+
+    const { data: claimed, error: claimError } = await claimQuery
+        .select('*')
+        .maybeSingle();
+    if (claimError) throw claimError;
+    return claimed as ExportJob | null;
+}
+
 export async function processOneConversationExportBatch(jobId?: string) {
     const supabase = getSupabaseAdmin();
     const { data, error } = await supabase.rpc('claim_conversation_export_job', {
         p_job_id: jobId || null
     });
-    if (error) throw error;
-    const job = (Array.isArray(data) ? data[0] : data) as ExportJob | undefined;
+    if (error && !isMissingUuidGenerator(error)) throw error;
+    const job = error
+        ? await claimExportJobWithoutRpc(jobId)
+        : (Array.isArray(data) ? data[0] : data) as ExportJob | undefined;
     if (!job) return null;
 
     try {
@@ -376,15 +439,23 @@ export async function processOneConversationExportBatch(jobId?: string) {
             : newlineIndex >= 0 && newlineIndex < rawCsv.length - 1
                 ? `\n${rawCsv.slice(newlineIndex + 1)}`
                 : '';
-        const storagePath = `${job.storage_prefix}/chunk-${String(job.chunk_count).padStart(6, '0')}.csv`;
+        const chunkBuffer = Buffer.from(chunkBody, 'utf8');
+        const chunkBodies = Array.from(
+            { length: Math.ceil(chunkBuffer.byteLength / MAX_EXPORT_OBJECT_BYTES) },
+            (_, index) => chunkBuffer.subarray(
+                index * MAX_EXPORT_OBJECT_BYTES,
+                Math.min((index + 1) * MAX_EXPORT_OBJECT_BYTES, chunkBuffer.byteLength)
+            )
+        );
 
-        if (chunkBody) {
+        for (const [index, body] of chunkBodies.entries()) {
+            const storagePath = `${job.storage_prefix}/chunk-${String(job.chunk_count + index).padStart(6, '0')}.csv`;
             const { error: uploadError } = await supabase.storage
                 .from(CONVERSATION_EXPORT_BUCKET)
-                .upload(storagePath, chunkBody, {
+                .upload(storagePath, body, {
                     contentType: 'text/csv',
                     cacheControl: '3600',
-                    // Replacing the same deterministic chunk makes a retry safe
+                    // Replacing the same deterministic chunks makes a retry safe
                     // if storage succeeded but the database checkpoint did not.
                     upsert: true
                 });
@@ -393,7 +464,7 @@ export async function processOneConversationExportBatch(jobId?: string) {
 
         const now = new Date().toISOString();
         const nextProcessed = Number(job.processed_items || 0) + processedItems;
-        const nextChunkCount = Number(job.chunk_count || 0) + (chunkBody ? 1 : 0);
+        const nextChunkCount = Number(job.chunk_count || 0) + chunkBodies.length;
         const update = {
             status: complete ? 'completed' : 'queued',
             next_contact_index: nextContactIndex,

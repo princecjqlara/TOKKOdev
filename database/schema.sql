@@ -196,7 +196,7 @@
     -- Durable conversation export queue. Export chunks are kept in the private
     -- `conversation-exports` Storage bucket and expire after seven days.
     CREATE TABLE IF NOT EXISTS conversation_export_jobs (
-        id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+        id UUID PRIMARY KEY DEFAULT pg_catalog.gen_random_uuid(),
         page_id UUID NOT NULL REFERENCES pages(id) ON DELETE CASCADE,
         created_by UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
         format TEXT NOT NULL DEFAULT 'csv' CHECK (format IN ('csv')),
@@ -379,7 +379,7 @@
 
         RETURN QUERY
         UPDATE conversation_export_jobs AS claimed
-        SET status = 'running', claim_token = uuid_generate_v4(), claimed_at = NOW(),
+        SET status = 'running', claim_token = pg_catalog.gen_random_uuid(), claimed_at = NOW(),
             started_at = COALESCE(started_at, NOW()), error_message = NULL, updated_at = NOW()
         WHERE claimed.id = v_job_id
         RETURNING claimed.*;

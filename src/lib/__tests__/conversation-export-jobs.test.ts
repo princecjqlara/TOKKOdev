@@ -25,10 +25,11 @@ type Result = { data?: unknown; error?: unknown };
 
 function queryBuilder(result: Result) {
     const builder: Record<string, any> = {};
-    for (const method of ['select', 'eq', 'in']) {
+    for (const method of ['select', 'eq', 'in', 'is', 'gt', 'or', 'order', 'limit']) {
         builder[method] = vi.fn(() => builder);
     }
     builder.single = vi.fn().mockResolvedValue(result);
+    builder.maybeSingle = vi.fn().mockResolvedValue(result);
     builder.then = (onFulfilled: (value: Result) => unknown, onRejected?: (reason: unknown) => unknown) =>
         Promise.resolve(result).then(onFulfilled, onRejected);
     return builder;
@@ -121,8 +122,8 @@ describe('conversation export background worker', () => {
         expect(upload).toHaveBeenCalledOnce();
         const [path, body, options] = upload.mock.calls[0];
         expect(path).toBe('user_1/job_1/chunk-000000.csv');
-        expect(body).toContain('pageId,pageName,fbPageId');
-        expect(body).toContain('"Hello, ""Customer"""');
+        expect(body.toString()).toContain('pageId,pageName,fbPageId');
+        expect(body.toString()).toContain('"Hello, ""Customer"""');
         expect(options).toEqual({ contentType: 'text/csv', cacheControl: '3600', upsert: true });
         expect(updates.at(-1)).toMatchObject({
             status: 'completed', processed_items: 1, conversation_count: 1,
@@ -154,8 +155,8 @@ describe('conversation export background worker', () => {
         expect(result).toMatchObject({ complete: true, processedItems: 1 });
         const [path, body] = upload.mock.calls[0];
         expect(path).toBe('user_1/job_1/chunk-000001.csv');
-        expect(body.startsWith('\n')).toBe(true);
-        expect(body).not.toContain('pageId,pageName,fbPageId');
+        expect(body.toString().startsWith('\n')).toBe(true);
+        expect(body.toString()).not.toContain('pageId,pageName,fbPageId');
         expect(updates.at(-1)).toMatchObject({
             status: 'completed', processed_items: 2, conversation_count: 2,
             message_count: 2, chunk_count: 2, next_cursor: null
@@ -176,5 +177,39 @@ describe('conversation export background worker', () => {
             claim_token: null, claimed_at: null
         });
         expect(updates.at(-1)?.next_attempt_at).toEqual(expect.any(String));
+    });
+
+    it('falls back to an application-generated claim token when uuid-ossp is unavailable', async () => {
+        const job = baseJob({ status: 'queued', claim_token: null, claimed_at: null });
+        const { supabase, updates, upload } = createSupabaseMock(job);
+        const originalFrom = supabase.from;
+        let exportJobCall = 0;
+        supabase.rpc.mockResolvedValue({
+            data: null,
+            error: { code: '42883', message: 'function uuid_generate_v4() does not exist' }
+        });
+        supabase.from = vi.fn((table: string) => {
+            if (table !== 'conversation_export_jobs') return originalFrom(table);
+            exportJobCall += 1;
+            if (exportJobCall === 1) return queryBuilder({ data: job, error: null });
+            if (exportJobCall === 2) {
+                return {
+                    update: vi.fn((value: Record<string, unknown>) => {
+                        updates.push(value);
+                        return queryBuilder({ data: { ...job, ...value }, error: null });
+                    })
+                } as any;
+            }
+            return originalFrom(table);
+        });
+        mocks.getSupabaseAdmin.mockReturnValue(supabase);
+
+        const result = await processOneConversationExportBatch('job_1');
+
+        expect(result).toMatchObject({ jobId: 'job_1', complete: true });
+        expect(upload).toHaveBeenCalledOnce();
+        expect(updates[0]).toMatchObject({ status: 'running', error_message: null });
+        expect(updates[0].claim_token).toMatch(/^[0-9a-f-]{36}$/);
+        expect(updates.at(-1)).toMatchObject({ status: 'completed', claim_token: null });
     });
 });

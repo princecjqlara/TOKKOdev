@@ -2,7 +2,7 @@
 -- Run this migration before deploying the export queue application code.
 
 CREATE TABLE IF NOT EXISTS public.conversation_export_jobs (
-    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    id UUID PRIMARY KEY DEFAULT pg_catalog.gen_random_uuid(),
     page_id UUID NOT NULL REFERENCES public.pages(id) ON DELETE CASCADE,
     created_by UUID NOT NULL REFERENCES public.users(id) ON DELETE CASCADE,
     format TEXT NOT NULL DEFAULT 'csv' CHECK (format IN ('csv')),
@@ -80,7 +80,7 @@ BEGIN
     RETURN QUERY
     UPDATE public.conversation_export_jobs AS claimed
        SET status = 'running',
-           claim_token = uuid_generate_v4(),
+           claim_token = pg_catalog.gen_random_uuid(),
            claimed_at = NOW(),
            started_at = COALESCE(started_at, NOW()),
            error_message = NULL,
