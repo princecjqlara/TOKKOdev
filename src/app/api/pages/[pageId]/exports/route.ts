@@ -2,7 +2,6 @@ import { randomUUID } from 'crypto';
 import { NextRequest, NextResponse } from 'next/server';
 import { getSessionFromRequest } from '@/lib/get-session';
 import { getSupabaseAdmin } from '@/lib/supabase';
-import { processConversationExportQueue } from '@/lib/conversation-export-jobs';
 
 export const dynamic = 'force-dynamic';
 export const maxDuration = 300;
@@ -92,19 +91,9 @@ export async function POST(
             .single();
         if (insertError) throw insertError;
 
-        // Start one durable batch immediately. If this request is interrupted,
-        // the stale lease is reclaimed by the cron worker without duplicating chunks.
-        await processConversationExportQueue({ jobId, maxBatches: 1, maxDurationMs: 240_000 });
-
-        const { data: currentJob } = await supabase
-            .from('conversation_export_jobs')
-            .select('id, status, filename, created_at')
-            .eq('id', jobId)
-            .single();
-
         return NextResponse.json({
             success: true,
-            job: currentJob || job,
+            job,
             message: 'Export queued. It will keep running even if you close this browser.'
         }, { status: 202 });
     } catch (error) {
@@ -118,4 +107,3 @@ export async function POST(
         }, { status: 500 });
     }
 }
-

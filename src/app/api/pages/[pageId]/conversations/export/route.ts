@@ -65,7 +65,8 @@ type OutboundMessageEventRecord = {
     message_kind: string | null;
 };
 
-const FACEBOOK_EXPORT_CONCURRENCY = 8;
+const FACEBOOK_EXPORT_CONCURRENCY = 16;
+const ATTRIBUTION_LOOKUP_CONCURRENCY = 6;
 const DEFAULT_EXPORT_CONVERSATION_BATCH_SIZE = 25;
 const MAX_EXPORT_CONVERSATION_BATCH_SIZE = 50;
 const MAX_SELECTED_CONTACTS_PER_BATCHED_REQUEST = 100;
@@ -237,23 +238,21 @@ async function addOutboundAttribution(
     const events = new Map<string, OutboundMessageEventRecord>();
 
     try {
-        for (const batch of chunkArray(pageMessageIds, SUPABASE_IN_FILTER_BATCH_SIZE)) {
-            const { data, error } = await supabase
-                .from('outbound_message_events')
-                .select('message_id, source_type, source_id, source_name, actor_user_id, actor_name, message_kind')
-                .eq('page_id', pageId)
-                .in('message_id', batch);
+        const eventGroups = await mapWithConcurrency(
+            chunkArray(pageMessageIds, SUPABASE_IN_FILTER_BATCH_SIZE),
+            ATTRIBUTION_LOOKUP_CONCURRENCY,
+            async (batch) => {
+                const { data, error } = await supabase
+                    .from('outbound_message_events')
+                    .select('message_id, source_type, source_id, source_name, actor_user_id, actor_name, message_kind')
+                    .eq('page_id', pageId)
+                    .in('message_id', batch);
 
-            if (error) {
-                // Allow exports while the attribution migration is being rolled out.
-                console.warn('[CONVERSATION_EXPORT] Message attribution is unavailable:', error.message);
-                return rows;
+                if (error) throw error;
+                return (data || []) as OutboundMessageEventRecord[];
             }
-
-            for (const event of (data || []) as OutboundMessageEventRecord[]) {
-                events.set(event.message_id, event);
-            }
-        }
+        );
+        for (const event of eventGroups.flat()) events.set(event.message_id, event);
     } catch (error) {
         console.warn(
             '[CONVERSATION_EXPORT] Message attribution is unavailable:',
@@ -379,7 +378,7 @@ async function buildRowsForPageConversationBatch(
     const batch = await getPageConversationsBatch(
         page.fb_page_id,
         page.access_token,
-        { limit: batchSize, after: cursor }
+        { limit: batchSize, after: cursor, includeMessages: true }
     );
     const conversationRows = await mapWithConcurrency(
         batch.conversations,
@@ -392,7 +391,7 @@ async function buildRowsForPageConversationBatch(
                 conversation.id,
                 page.access_token,
                 Number.MAX_SAFE_INTEGER,
-                { throwOnError: true }
+                { throwOnError: true, initialPage: conversation.messages }
             );
 
             return messages.map((message) => mapMessageToExportRow({

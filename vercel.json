@@ -25,6 +25,9 @@
     "src/app/api/pages/[pageId]/exports/route.ts": {
       "maxDuration": 300
     },
+    "src/app/api/exports/[exportId]/process/route.ts": {
+      "maxDuration": 300
+    },
     "src/app/api/exports/[exportId]/retry/route.ts": {
       "maxDuration": 300
     },

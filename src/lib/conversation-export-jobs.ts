@@ -13,7 +13,8 @@ import { SUPABASE_IN_FILTER_BATCH_SIZE } from '@/lib/supabase-pagination';
 
 export const CONVERSATION_EXPORT_BUCKET = 'conversation-exports';
 export const CONVERSATION_EXPORT_BATCH_SIZE = 25;
-const FACEBOOK_EXPORT_CONCURRENCY = 8;
+const FACEBOOK_EXPORT_CONCURRENCY = 16;
+const ATTRIBUTION_LOOKUP_CONCURRENCY = 6;
 const EXPORT_BUCKET_FILE_SIZE_LIMIT_BYTES = 50 * 1024 * 1024;
 const MAX_EXPORT_OBJECT_BYTES = 45 * 1024 * 1024;
 const MAX_ATTEMPTS = 3;
@@ -95,11 +96,15 @@ function normalizeContactIds(value: unknown): string[] {
     return value.filter((item): item is string => typeof item === 'string' && Boolean(item.trim()));
 }
 
-async function mapWithConcurrency<T, R>(items: T[], mapper: (item: T) => Promise<R>): Promise<R[]> {
+async function mapWithConcurrency<T, R>(
+    items: T[],
+    mapper: (item: T) => Promise<R>,
+    concurrency = FACEBOOK_EXPORT_CONCURRENCY
+): Promise<R[]> {
     const results = new Array<R>(items.length);
     let nextIndex = 0;
     const workers = Array.from(
-        { length: Math.min(FACEBOOK_EXPORT_CONCURRENCY, items.length) },
+        { length: Math.min(Math.max(1, concurrency), items.length) },
         async () => {
             while (nextIndex < items.length) {
                 const index = nextIndex++;
@@ -167,15 +172,20 @@ async function addOutboundAttribution(pageId: string, rows: ExportedMessage[]) {
     const supabase = getSupabaseAdmin();
     const events = new Map<string, OutboundEvent>();
     try {
-        for (const ids of chunkArray(messageIds, SUPABASE_IN_FILTER_BATCH_SIZE)) {
-            const { data, error } = await supabase
-                .from('outbound_message_events')
-                .select('message_id, source_type, source_id, source_name, actor_user_id, actor_name, message_kind')
-                .eq('page_id', pageId)
-                .in('message_id', ids);
-            if (error) throw error;
-            for (const event of (data || []) as OutboundEvent[]) events.set(event.message_id, event);
-        }
+        const eventGroups = await mapWithConcurrency(
+            chunkArray(messageIds, SUPABASE_IN_FILTER_BATCH_SIZE),
+            async (ids) => {
+                const { data, error } = await supabase
+                    .from('outbound_message_events')
+                    .select('message_id, source_type, source_id, source_name, actor_user_id, actor_name, message_kind')
+                    .eq('page_id', pageId)
+                    .in('message_id', ids);
+                if (error) throw error;
+                return (data || []) as OutboundEvent[];
+            },
+            ATTRIBUTION_LOOKUP_CONCURRENCY
+        );
+        for (const event of eventGroups.flat()) events.set(event.message_id, event);
     } catch (error) {
         console.warn('[EXPORT_WORKER] Message attribution is unavailable:', error);
         return rows;
@@ -294,7 +304,8 @@ async function exportSelectedBatch(pageId: string, page: PageRecord, contacts: C
 async function exportAllBatch(pageId: string, page: PageRecord, cursor: string | null) {
     const batch = await getPageConversationsBatch(page.fb_page_id, page.access_token, {
         limit: CONVERSATION_EXPORT_BATCH_SIZE,
-        after: cursor
+        after: cursor,
+        includeMessages: true
     });
     const rowGroups = await mapWithConcurrency(batch.conversations, async (conversation) => {
         const contact = getContactParticipant(conversation, page.fb_page_id);
@@ -302,7 +313,7 @@ async function exportAllBatch(pageId: string, page: PageRecord, cursor: string |
             conversation.id,
             page.access_token,
             Number.MAX_SAFE_INTEGER,
-            { throwOnError: true }
+            { throwOnError: true, initialPage: conversation.messages }
         );
         return messages.map((message) => mapMessage(
             pageId, page, conversation, contact?.id || '', contact?.name || '', message

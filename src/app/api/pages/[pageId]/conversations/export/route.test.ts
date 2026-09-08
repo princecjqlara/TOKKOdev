@@ -263,7 +263,7 @@ describe('GET /api/pages/[pageId]/conversations/export', () => {
         expect(mocks.getPageConversationsBatch).toHaveBeenCalledWith(
             'fb_page_1',
             'page_access_token_1',
-            { limit: 25, after: 'cursor_1' }
+            { limit: 25, after: 'cursor_1', includeMessages: true }
         );
         expect(response.headers.get('x-export-next-cursor')).toBe('cursor_2');
         expect(response.headers.get('x-export-batch-complete')).toBe('false');

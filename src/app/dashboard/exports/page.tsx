@@ -86,16 +86,42 @@ export default function ExportsPage() {
 
     useEffect(() => { fetchJobs(); }, [fetchJobs]);
 
-    const hasActiveJobs = useMemo(
-        () => jobs.some((job) => job.status === 'queued' || job.status === 'running'),
+    const activeJobId = useMemo(
+        () => [...jobs]
+            .reverse()
+            .find((job) => job.status === 'queued' || job.status === 'running')?.id || '',
         [jobs]
     );
 
     useEffect(() => {
-        if (!hasActiveJobs) return;
-        const interval = window.setInterval(() => fetchJobs(true), 5000);
-        return () => window.clearInterval(interval);
-    }, [fetchJobs, hasActiveJobs]);
+        if (!activeJobId) return;
+        let cancelled = false;
+        let nextRun: number | undefined;
+
+        const processNextBatch = async () => {
+            if (cancelled) return;
+            let retryDelay = 1000;
+            try {
+                const response = await fetch(`/api/exports/${activeJobId}/process`, { method: 'POST' });
+                const data = await response.json().catch(() => ({}));
+                if (!response.ok && response.status !== 409) {
+                    throw new Error(data.message || 'Could not continue the export.');
+                }
+                if (!cancelled) await fetchJobs(true);
+            } catch (processError) {
+                retryDelay = 5000;
+                if (!cancelled) setError((processError as Error).message);
+            } finally {
+                if (!cancelled) nextRun = window.setTimeout(processNextBatch, retryDelay);
+            }
+        };
+
+        void processNextBatch();
+        return () => {
+            cancelled = true;
+            if (typeof nextRun !== 'undefined') window.clearTimeout(nextRun);
+        };
+    }, [activeJobId, fetchJobs]);
 
     const retry = async (jobId: string) => {
         setRetryingId(jobId);
@@ -237,4 +263,3 @@ export default function ExportsPage() {
         </div>
     );
 }
-

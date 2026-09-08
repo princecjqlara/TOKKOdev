@@ -145,7 +145,15 @@ describe('conversation export background worker', () => {
                 participants: { data: [
                     { id: 'fb_page_1', name: 'My Page' },
                     { id: 'psid_1', name: 'Customer One' }
-                ] }
+                ] },
+                messages: {
+                    data: [{
+                        id: 'embedded_message_1',
+                        message: 'Embedded first page',
+                        created_time: '2026-09-07T00:00:00.000Z',
+                        from: { id: 'psid_1', name: 'Customer One' }
+                    }]
+                }
             }],
             nextCursor: null
         });
@@ -153,6 +161,27 @@ describe('conversation export background worker', () => {
         const result = await processOneConversationExportBatch();
 
         expect(result).toMatchObject({ complete: true, processedItems: 1 });
+        expect(mocks.getPageConversationsBatch).toHaveBeenCalledWith(
+            'fb_page_1',
+            'page_token',
+            { limit: 25, after: 'cursor_1', includeMessages: true }
+        );
+        expect(mocks.getConversationMessages).toHaveBeenCalledWith(
+            'conversation_2',
+            'page_token',
+            Number.MAX_SAFE_INTEGER,
+            {
+                throwOnError: true,
+                initialPage: {
+                    data: [{
+                        id: 'embedded_message_1',
+                        message: 'Embedded first page',
+                        created_time: '2026-09-07T00:00:00.000Z',
+                        from: { id: 'psid_1', name: 'Customer One' }
+                    }]
+                }
+            }
+        );
         const [path, body] = upload.mock.calls[0];
         expect(path).toBe('user_1/job_1/chunk-000001.csv');
         expect(body.toString().startsWith('\n')).toBe(true);

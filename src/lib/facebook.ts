@@ -271,10 +271,14 @@ export async function getPageConversationsBatch(
         limit?: number;
         after?: string | null;
         sinceTimestamp?: string;
+        includeMessages?: boolean;
     } = {}
 ): Promise<PageConversationBatch> {
     const limit = options.limit || 100;
-    let url = `${FACEBOOK_GRAPH_URL}/${pageId}/conversations?fields=id,participants,updated_time&limit=${limit}&access_token=${pageAccessToken}`;
+    const fields = options.includeMessages
+        ? 'id,participants,updated_time,messages.limit(100){id,message,from,created_time}'
+        : 'id,participants,updated_time';
+    let url = `${FACEBOOK_GRAPH_URL}/${pageId}/conversations?fields=${encodeURIComponent(fields)}&limit=${limit}&access_token=${pageAccessToken}`;
 
     if (options.after) {
         url += `&after=${encodeURIComponent(options.after)}`;
@@ -690,15 +694,24 @@ export interface ConversationMessage {
     created_time: string;
 }
 
+export type ConversationMessagePage = {
+    data?: ConversationMessage[];
+    paging?: { next?: string };
+};
+
 // Get conversation messages for AI context - fetches ALL messages using pagination
 export async function getConversationMessages(
     conversationId: string,
     pageAccessToken: string,
     maxMessages: number = 500, // Safety limit to prevent infinite loops
-    options: { throwOnError?: boolean } = {}
+    options: { throwOnError?: boolean; initialPage?: ConversationMessagePage } = {}
 ): Promise<ConversationMessage[]> {
-    const allMessages: ConversationMessage[] = [];
-    let nextUrl: string | null = `${FACEBOOK_GRAPH_URL}/${conversationId}/messages?fields=id,message,from,created_time&limit=100&access_token=${pageAccessToken}`;
+    const allMessages: ConversationMessage[] = options.initialPage?.data
+        ? [...options.initialPage.data]
+        : [];
+    let nextUrl: string | null = options.initialPage
+        ? options.initialPage.paging?.next || null
+        : `${FACEBOOK_GRAPH_URL}/${conversationId}/messages?fields=id,message,from,created_time&limit=100&access_token=${pageAccessToken}`;
     const seenPageUrls = new Set<string>();
 
     try {
@@ -729,10 +742,8 @@ export async function getConversationMessages(
             // Check for next page
             nextUrl = responseData.paging?.next || null;
 
-            // If we got fewer messages than the limit, we've reached the end
-            if (messages.length < 100) {
-                break;
-            }
+            // Facebook's paging link is authoritative. A short page can still
+            // have a next page, so stopping based on row count can lose messages.
         }
 
         console.log(`📨 Fetched ${allMessages.length} total messages for conversation ${conversationId}`);

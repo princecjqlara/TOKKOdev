@@ -197,6 +197,12 @@ export interface FacebookConversation {
     }>;
   };
   updated_time: string;
+  messages?: {
+    data: FacebookMessage[];
+    paging?: {
+      next?: string;
+    };
+  };
 }
 
 export interface FacebookMessage {

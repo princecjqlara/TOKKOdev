@@ -4,6 +4,7 @@ import {
     getConversationIdForPsid,
     getConversationMessages,
     getFacebookPages,
+    getPageConversationsBatch,
     isFacebookReauthRequired
 } from '../facebook';
 
@@ -59,6 +60,60 @@ describe('getFacebookPages', () => {
 });
 
 describe('strict conversation reads', () => {
+    it('reuses embedded messages and follows paging links even after a short page', async () => {
+        const nextPage = 'https://graph.facebook.com/messages-next';
+        const finalPage = 'https://graph.facebook.com/messages-final';
+        const fetchMock = vi.fn()
+            .mockResolvedValueOnce(createJsonResponse(true, {
+                data: [{
+                    id: 'message_2', message: 'Second', from: { id: 'page_1' },
+                    created_time: '2026-09-09T00:01:00.000Z'
+                }],
+                paging: { next: finalPage }
+            }))
+            .mockResolvedValueOnce(createJsonResponse(true, {
+                data: [{
+                    id: 'message_3', message: 'Third', from: { id: 'psid_1' },
+                    created_time: '2026-09-09T00:02:00.000Z'
+                }]
+            }));
+        vi.stubGlobal('fetch', fetchMock);
+
+        const messages = await getConversationMessages(
+            'conversation_1',
+            'page_token',
+            Number.MAX_SAFE_INTEGER,
+            {
+                throwOnError: true,
+                initialPage: {
+                    data: [{
+                        id: 'message_1', message: 'First', from: { id: 'psid_1' },
+                        created_time: '2026-09-09T00:00:00.000Z'
+                    }],
+                    paging: { next: nextPage }
+                }
+            }
+        );
+
+        expect(messages.map((message) => message.id)).toEqual(['message_1', 'message_2', 'message_3']);
+        expect(fetchMock).toHaveBeenNthCalledWith(1, nextPage, expect.any(Object));
+        expect(fetchMock).toHaveBeenNthCalledWith(2, finalPage, expect.any(Object));
+    });
+
+    it('can include the first page of messages in a conversation batch', async () => {
+        const fetchMock = vi.fn().mockResolvedValue(createJsonResponse(true, { data: [] }));
+        vi.stubGlobal('fetch', fetchMock);
+
+        await getPageConversationsBatch('page_1', 'page_token', {
+            limit: 50,
+            includeMessages: true
+        });
+
+        const requestUrl = new URL(fetchMock.mock.calls[0][0]);
+        expect(requestUrl.searchParams.get('fields')).toContain('messages.limit(100)');
+        expect(requestUrl.searchParams.get('limit')).toBe('50');
+    });
+
     it('throws a classified Graph error instead of exporting an incomplete message history', async () => {
         vi.stubGlobal('fetch', vi.fn().mockResolvedValue(
             createJsonResponse(
