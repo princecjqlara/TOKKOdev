@@ -48,8 +48,9 @@ describe('POST /api/exports/[exportId]/process', () => {
 
         expect(response.status).toBe(200);
         expect(mocks.processConversationExportQueue).toHaveBeenCalledWith({
-            jobId: 'job_1', maxBatches: 1, maxDurationMs: 240_000
+            jobId: 'job_1', maxBatches: 10, maxDurationMs: 50_000
         });
+        expect(body.batchesProcessed).toBe(1);
         expect(body.result).toMatchObject({ processedItems: 25, messages: 100 });
     });
 

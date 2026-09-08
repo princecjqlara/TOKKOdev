@@ -100,13 +100,14 @@ export default function ExportsPage() {
 
         const processNextBatch = async () => {
             if (cancelled) return;
-            let retryDelay = 1000;
+            let retryDelay = 100;
             try {
                 const response = await fetch(`/api/exports/${activeJobId}/process`, { method: 'POST' });
                 const data = await response.json().catch(() => ({}));
                 if (!response.ok && response.status !== 409) {
                     throw new Error(data.message || 'Could not continue the export.');
                 }
+                retryDelay = data.result ? 100 : 1000;
                 if (!cancelled) await fetchJobs(true);
             } catch (processError) {
                 retryDelay = 5000;

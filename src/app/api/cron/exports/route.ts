@@ -32,7 +32,7 @@ async function removeExpiredExports() {
 
 export async function GET() {
     try {
-        const results = await processConversationExportQueue({ maxBatches: 8, maxDurationMs: 240_000 });
+        const results = await processConversationExportQueue({ maxBatches: 10, maxDurationMs: 50_000 });
         const removedExpired = await removeExpiredExports();
         return NextResponse.json({ success: true, processed: results.length, removedExpired, results });
     } catch (error) {

@@ -31,9 +31,16 @@ export async function POST(
 
     const results = await processConversationExportQueue({
         jobId: exportId,
-        maxBatches: 1,
-        maxDurationMs: 240_000
+        // Run up to ten durable checkpoints per browser request. This keeps
+        // the same lossless 25-conversation checkpoints while removing nine
+        // extra request/poll cycles from the common path.
+        maxBatches: 10,
+        maxDurationMs: 50_000
     });
 
-    return NextResponse.json({ success: true, result: results[0] || null });
+    return NextResponse.json({
+        success: true,
+        batchesProcessed: results.length,
+        result: results.at(-1) || null
+    });
 }

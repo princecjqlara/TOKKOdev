@@ -133,7 +133,7 @@ describe('conversation export background worker', () => {
 
     it('resumes an all-conversation job without adding a second CSV header', async () => {
         const job = baseJob({
-            scope: 'all', contact_ids: [], next_cursor: 'cursor_1', total_items: 2,
+            scope: 'all', contact_ids: [], next_cursor: 'cursor_1', total_items: 500,
             processed_items: 1, conversation_count: 1, message_count: 1, chunk_count: 1
         });
         const { supabase, updates, upload } = createSupabaseMock(job);
@@ -188,7 +188,7 @@ describe('conversation export background worker', () => {
         expect(body.toString()).not.toContain('pageId,pageName,fbPageId');
         expect(updates.at(-1)).toMatchObject({
             status: 'completed', processed_items: 2, conversation_count: 2,
-            message_count: 2, chunk_count: 2, next_cursor: null
+            message_count: 2, chunk_count: 2, next_cursor: null, total_items: 2
         });
     });
 

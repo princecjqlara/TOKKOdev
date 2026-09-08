@@ -481,7 +481,10 @@ export async function processOneConversationExportBatch(jobId?: string) {
             next_contact_index: nextContactIndex,
             next_cursor: nextCursor,
             processed_items: nextProcessed,
-            total_items: complete ? Math.max(job.total_items || 0, nextProcessed) : job.total_items,
+            // The initial whole-page total is only a contact-count estimate.
+            // Once Facebook reaches the final cursor, the processed count is
+            // the exact number of exportable conversations.
+            total_items: complete ? nextProcessed : job.total_items,
             conversation_count: Number(job.conversation_count || 0) + conversations,
             message_count: Number(job.message_count || 0) + rows.length,
             chunk_count: nextChunkCount,
@@ -519,9 +522,20 @@ export async function processConversationExportQueue(options?: {
     const results: Awaited<ReturnType<typeof processOneConversationExportBatch>>[] = [];
     const maxBatches = Math.max(1, options?.maxBatches || 6);
     const maxDurationMs = Math.max(5_000, options?.maxDurationMs || 45_000);
+    let previousBatchDurationMs = 0;
 
     for (let index = 0; index < maxBatches && Date.now() - startedAt < maxDurationMs; index++) {
+        const elapsedMs = Date.now() - startedAt;
+        const nextBatchBudgetMs = Math.ceil(previousBatchDurationMs * 1.2) + 1_000;
+
+        // Keep enough room for the next batch to checkpoint before the host
+        // terminates the request. Every completed 25-conversation checkpoint
+        // remains independently resumable.
+        if (index > 0 && elapsedMs + nextBatchBudgetMs >= maxDurationMs) break;
+
+        const batchStartedAt = Date.now();
         const result = await processOneConversationExportBatch(options?.jobId);
+        previousBatchDurationMs = Math.max(1, Date.now() - batchStartedAt);
         if (!result) break;
         results.push(result);
         if ('error' in result || result.complete) break;
