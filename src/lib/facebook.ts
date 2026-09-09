@@ -788,6 +788,41 @@ export async function getConversationIdForPsid(
     }
 }
 
+/**
+ * Looks up a contact's conversation and embeds its first message page in the
+ * same Graph request. Exporters can therefore avoid a second request for the
+ * common case where the conversation has at most 100 messages.
+ */
+export async function getConversationForPsid(
+    pageId: string,
+    psid: string,
+    pageAccessToken: string,
+    options: { throwOnError?: boolean } = {}
+): Promise<FacebookConversation | null> {
+    try {
+        const fields = 'id,participants,updated_time,messages.limit(100){id,message,from,created_time}';
+        const url = new URL(`${FACEBOOK_GRAPH_URL}/${pageId}/conversations`);
+        url.searchParams.set('user_id', psid);
+        url.searchParams.set('fields', fields);
+        url.searchParams.set('access_token', pageAccessToken);
+        const response = await fetchFacebookRead(url.toString());
+
+        if (!response.ok) {
+            const graphError = await readFacebookError(response, `/${pageId}/conversations`);
+            if (options.throwOnError && !isMissingConversationParticipant(graphError)) throw graphError;
+            console.warn('⚠️ Failed to find conversation for PSID:', psid);
+            return null;
+        }
+
+        const data: { data?: FacebookConversation[] } = await response.json();
+        return data.data?.[0] || null;
+    } catch (error) {
+        if (options.throwOnError) throw error;
+        console.warn('⚠️ Error finding conversation for PSID:', error);
+        return null;
+    }
+}
+
 // Generate verify token from app secret and app id
 export function generateVerifyToken(appSecret: string, appId: string): string {
     const crypto = require('crypto');

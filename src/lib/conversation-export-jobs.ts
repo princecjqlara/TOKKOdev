@@ -1,7 +1,7 @@
 import { randomUUID } from 'crypto';
 import { getSupabaseAdmin } from '@/lib/supabase';
 import {
-    getConversationIdForPsid,
+    getConversationForPsid,
     getConversationMessages,
     getPageConversationsBatch,
     isFacebookReauthRequired
@@ -18,6 +18,12 @@ const ATTRIBUTION_LOOKUP_CONCURRENCY = 6;
 const EXPORT_BUCKET_FILE_SIZE_LIMIT_BYTES = 50 * 1024 * 1024;
 const MAX_EXPORT_OBJECT_BYTES = 45 * 1024 * 1024;
 const MAX_ATTEMPTS = 3;
+
+type ExportProcessingContext = {
+    pages: Map<string, PageRecord>;
+};
+
+let exportBucketPromise: Promise<void> | null = null;
 
 type PageRecord = {
     fb_page_id: string;
@@ -225,6 +231,19 @@ function toCsv(rows: ExportedMessage[]) {
 }
 
 async function ensureExportBucket() {
+    if (exportBucketPromise) return exportBucketPromise;
+
+    exportBucketPromise = ensureExportBucketExists();
+    try {
+        await exportBucketPromise;
+    } catch (error) {
+        // A transient storage error must remain retryable on the next batch.
+        exportBucketPromise = null;
+        throw error;
+    }
+}
+
+async function ensureExportBucketExists() {
     const supabase = getSupabaseAdmin();
     const { data } = await supabase.storage.getBucket(CONVERSATION_EXPORT_BUCKET);
     if (data) return;
@@ -249,6 +268,14 @@ async function loadPage(pageId: string): Promise<PageRecord> {
     return data as PageRecord;
 }
 
+async function loadPageOnce(pageId: string, context?: ExportProcessingContext): Promise<PageRecord> {
+    const cached = context?.pages.get(pageId);
+    if (cached) return cached;
+    const page = await loadPage(pageId);
+    context?.pages.set(pageId, page);
+    return page;
+}
+
 async function loadContacts(pageId: string, ids: string[]): Promise<ContactRecord[]> {
     if (ids.length === 0) return [];
     const { data, error } = await getSupabaseAdmin()
@@ -267,26 +294,18 @@ async function loadContacts(pageId: string, ids: string[]): Promise<ContactRecor
 async function exportSelectedBatch(pageId: string, page: PageRecord, contacts: ContactRecord[]) {
     const results = await mapWithConcurrency(contacts, async (contact) => {
         if (!contact.psid) return { hasConversation: false, rows: [] as ExportedMessage[] };
-        const conversationId = await getConversationIdForPsid(
+        const conversation = await getConversationForPsid(
             page.fb_page_id,
             contact.psid,
             page.access_token,
             { throwOnError: true }
         );
-        if (!conversationId) return { hasConversation: false, rows: [] as ExportedMessage[] };
-        const conversation: FacebookConversation = {
-            id: conversationId,
-            updated_time: '',
-            participants: { data: [
-                { id: page.fb_page_id, name: page.name },
-                { id: contact.psid, name: contact.name || '' }
-            ] }
-        };
+        if (!conversation) return { hasConversation: false, rows: [] as ExportedMessage[] };
         const messages = await getConversationMessages(
-            conversationId,
+            conversation.id,
             page.access_token,
             Number.MAX_SAFE_INTEGER,
-            { throwOnError: true }
+            { throwOnError: true, initialPage: conversation.messages }
         );
         return {
             hasConversation: true,
@@ -400,7 +419,10 @@ async function claimExportJobWithoutRpc(jobId?: string): Promise<ExportJob | nul
     return claimed as ExportJob | null;
 }
 
-export async function processOneConversationExportBatch(jobId?: string) {
+export async function processOneConversationExportBatch(
+    jobId?: string,
+    context?: ExportProcessingContext
+) {
     const supabase = getSupabaseAdmin();
     const { data, error } = await supabase.rpc('claim_conversation_export_job', {
         p_job_id: jobId || null
@@ -413,7 +435,7 @@ export async function processOneConversationExportBatch(jobId?: string) {
 
     try {
         await ensureExportBucket();
-        const page = await loadPage(job.page_id);
+        const page = await loadPageOnce(job.page_id, context);
         const contactIds = normalizeContactIds(job.contact_ids);
         let rows: ExportedMessage[];
         let conversations: number;
@@ -523,6 +545,7 @@ export async function processConversationExportQueue(options?: {
     const maxBatches = Math.max(1, options?.maxBatches || 6);
     const maxDurationMs = Math.max(5_000, options?.maxDurationMs || 45_000);
     let previousBatchDurationMs = 0;
+    const context: ExportProcessingContext = { pages: new Map() };
 
     for (let index = 0; index < maxBatches && Date.now() - startedAt < maxDurationMs; index++) {
         const elapsedMs = Date.now() - startedAt;
@@ -534,7 +557,7 @@ export async function processConversationExportQueue(options?: {
         if (index > 0 && elapsedMs + nextBatchBudgetMs >= maxDurationMs) break;
 
         const batchStartedAt = Date.now();
-        const result = await processOneConversationExportBatch(options?.jobId);
+        const result = await processOneConversationExportBatch(options?.jobId, context);
         previousBatchDurationMs = Math.max(1, Date.now() - batchStartedAt);
         if (!result) break;
         results.push(result);

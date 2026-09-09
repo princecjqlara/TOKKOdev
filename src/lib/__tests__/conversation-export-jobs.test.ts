@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const mocks = vi.hoisted(() => ({
     getSupabaseAdmin: vi.fn(),
-    getConversationIdForPsid: vi.fn(),
+    getConversationForPsid: vi.fn(),
     getConversationMessages: vi.fn(),
     getPageConversationsBatch: vi.fn(),
     isFacebookReauthRequired: vi.fn()
@@ -13,7 +13,7 @@ vi.mock('@/lib/supabase', () => ({
 }));
 
 vi.mock('@/lib/facebook', () => ({
-    getConversationIdForPsid: mocks.getConversationIdForPsid,
+    getConversationForPsid: mocks.getConversationForPsid,
     getConversationMessages: mocks.getConversationMessages,
     getPageConversationsBatch: mocks.getPageConversationsBatch,
     isFacebookReauthRequired: mocks.isFacebookReauthRequired
@@ -101,7 +101,15 @@ describe('conversation export background worker', () => {
     beforeEach(() => {
         vi.clearAllMocks();
         mocks.isFacebookReauthRequired.mockReturnValue(false);
-        mocks.getConversationIdForPsid.mockResolvedValue('conversation_1');
+        mocks.getConversationForPsid.mockResolvedValue({
+            id: 'conversation_1',
+            updated_time: '2026-09-07T00:00:00.000Z',
+            participants: { data: [
+                { id: 'fb_page_1', name: 'My Page' },
+                { id: 'psid_1', name: 'Customer One' }
+            ] },
+            messages: { data: [] }
+        });
         mocks.getConversationMessages.mockResolvedValue([{
             id: 'message_1',
             message: 'Hello, "Customer"',
@@ -120,6 +128,12 @@ describe('conversation export background worker', () => {
             jobId: 'job_1', complete: true, processedItems: 1, conversations: 1, messages: 1
         });
         expect(upload).toHaveBeenCalledOnce();
+        expect(mocks.getConversationMessages).toHaveBeenCalledWith(
+            'conversation_1',
+            'page_token',
+            Number.MAX_SAFE_INTEGER,
+            { throwOnError: true, initialPage: { data: [] } }
+        );
         const [path, body, options] = upload.mock.calls[0];
         expect(path).toBe('user_1/job_1/chunk-000000.csv');
         expect(body.toString()).toContain('pageId,pageName,fbPageId');
@@ -195,7 +209,7 @@ describe('conversation export background worker', () => {
     it('requeues a transient Facebook failure without advancing the checkpoint', async () => {
         const { supabase, updates, upload } = createSupabaseMock(baseJob());
         mocks.getSupabaseAdmin.mockReturnValue(supabase);
-        mocks.getConversationIdForPsid.mockRejectedValue(new Error('Facebook temporarily unavailable'));
+        mocks.getConversationForPsid.mockRejectedValue(new Error('Facebook temporarily unavailable'));
 
         const result = await processOneConversationExportBatch('job_1');
 

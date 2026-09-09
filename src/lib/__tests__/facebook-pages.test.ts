@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { FACEBOOK_REAUTH_MESSAGE } from '../facebook-permissions';
 import {
+    getConversationForPsid,
     getConversationIdForPsid,
     getConversationMessages,
     getFacebookPages,
@@ -100,6 +101,48 @@ describe('strict conversation reads', () => {
         expect(fetchMock).toHaveBeenNthCalledWith(2, finalPage, expect.any(Object));
     });
 
+    it('exports every message when a conversation is longer than the embedded 100-message page', async () => {
+        const nextPage = 'https://graph.facebook.com/conversation_1/messages?after=page_2';
+        const embeddedMessages = Array.from({ length: 100 }, (_, index) => ({
+            id: `message_${index + 1}`,
+            message: `Message ${index + 1}`,
+            from: { id: index % 2 === 0 ? 'psid_1' : 'page_1' },
+            created_time: `2026-09-09T00:${String(index % 60).padStart(2, '0')}:00.000Z`
+        }));
+        const finalMessages = [101, 102].map((number) => ({
+            id: `message_${number}`,
+            message: `Message ${number}`,
+            from: { id: 'psid_1' },
+            created_time: '2026-09-09T02:00:00.000Z'
+        }));
+        const fetchMock = vi.fn().mockResolvedValue(
+            createJsonResponse(true, { data: finalMessages })
+        );
+        vi.stubGlobal('fetch', fetchMock);
+
+        const messages = await getConversationMessages(
+            'conversation_1',
+            'page_token',
+            Number.MAX_SAFE_INTEGER,
+            {
+                throwOnError: true,
+                initialPage: {
+                    data: embeddedMessages,
+                    paging: { next: nextPage }
+                }
+            }
+        );
+
+        expect(messages).toHaveLength(102);
+        expect(messages.map((message) => message.id)).toEqual([
+            ...embeddedMessages.map((message) => message.id),
+            'message_101',
+            'message_102'
+        ]);
+        expect(fetchMock).toHaveBeenCalledOnce();
+        expect(fetchMock).toHaveBeenCalledWith(nextPage, expect.any(Object));
+    });
+
     it('can include the first page of messages in a conversation batch', async () => {
         const fetchMock = vi.fn().mockResolvedValue(createJsonResponse(true, { data: [] }));
         vi.stubGlobal('fetch', fetchMock);
@@ -112,6 +155,25 @@ describe('strict conversation reads', () => {
         const requestUrl = new URL(fetchMock.mock.calls[0][0]);
         expect(requestUrl.searchParams.get('fields')).toContain('messages.limit(100)');
         expect(requestUrl.searchParams.get('limit')).toBe('50');
+    });
+
+    it('loads a selected contact conversation and its first message page together', async () => {
+        const conversation = {
+            id: 'conversation_1',
+            participants: { data: [{ id: 'psid_1', name: 'Customer' }] },
+            messages: { data: [{ id: 'message_1', message: 'Hello' }] }
+        };
+        const fetchMock = vi.fn().mockResolvedValue(createJsonResponse(true, { data: [conversation] }));
+        vi.stubGlobal('fetch', fetchMock);
+
+        await expect(
+            getConversationForPsid('page_1', 'psid_1', 'page token', { throwOnError: true })
+        ).resolves.toEqual(conversation);
+
+        const requestUrl = new URL(fetchMock.mock.calls[0][0]);
+        expect(requestUrl.searchParams.get('user_id')).toBe('psid_1');
+        expect(requestUrl.searchParams.get('fields')).toContain('messages.limit(100)');
+        expect(requestUrl.searchParams.get('access_token')).toBe('page token');
     });
 
     it('throws a classified Graph error instead of exporting an incomplete message history', async () => {
