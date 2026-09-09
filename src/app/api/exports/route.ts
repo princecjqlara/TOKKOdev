@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getSessionFromRequest } from '@/lib/get-session';
 import { getSupabaseAdmin } from '@/lib/supabase';
+import { getUserPageIds } from '@/lib/page-access';
 
 export const dynamic = 'force-dynamic';
 
@@ -10,6 +11,9 @@ export async function GET(request: NextRequest) {
         const userId = session?.user?.id;
         if (!userId) return NextResponse.json({ message: 'Please sign in.' }, { status: 401 });
 
+        const pageIds = await getUserPageIds(userId);
+        if (pageIds.length === 0) return NextResponse.json({ jobs: [] });
+
         const { data, error } = await getSupabaseAdmin()
             .from('conversation_export_jobs')
             .select(`
@@ -18,7 +22,7 @@ export async function GET(request: NextRequest) {
                 attempt_count, started_at, completed_at, expires_at, created_at,
                 pages(name)
             `)
-            .eq('created_by', userId)
+            .in('page_id', pageIds)
             .order('created_at', { ascending: false })
             .limit(100);
         if (error) throw error;
@@ -38,4 +42,3 @@ export async function GET(request: NextRequest) {
         }, { status: 500 });
     }
 }
-

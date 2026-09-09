@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getSessionFromRequest } from '@/lib/get-session';
 import { getSupabaseAdmin } from '@/lib/supabase';
 import { CONVERSATION_EXPORT_BUCKET } from '@/lib/conversation-export-jobs';
+import { userHasPageAccess } from '@/lib/page-access';
 
 export const dynamic = 'force-dynamic';
 export const maxDuration = 300;
@@ -21,12 +22,14 @@ export async function GET(
     const supabase = getSupabaseAdmin();
     const { data: job, error } = await supabase
         .from('conversation_export_jobs')
-        .select('status, filename, storage_prefix, chunk_count, expires_at')
+        .select('page_id, status, filename, storage_prefix, chunk_count, expires_at')
         .eq('id', exportId)
-        .eq('created_by', userId)
-        .single();
+        .maybeSingle();
 
-    if (error || !job) return NextResponse.json({ message: 'Export not found.' }, { status: 404 });
+    if (error) return NextResponse.json({ message: error.message }, { status: 500 });
+    if (!job || !await userHasPageAccess(userId, job.page_id)) {
+        return NextResponse.json({ message: 'Export not found.' }, { status: 404 });
+    }
     if (job.status !== 'completed') {
         return NextResponse.json({ message: 'This export is not ready to download yet.' }, { status: 409 });
     }

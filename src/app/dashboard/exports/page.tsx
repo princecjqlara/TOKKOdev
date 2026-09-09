@@ -147,7 +147,8 @@ export default function ExportsPage() {
                         <h1 className="text-2xl md:text-3xl font-bold text-black">Exports</h1>
                     </div>
                     <p className="text-sm text-gray-600 mt-2">
-                        Conversation exports continue in the background. Finished files remain available for 7 days.
+                        Conversation exports are shared with Page members, continue in the background,
+                        and remain available for 7 days.
                     </p>
                 </div>
                 <button
