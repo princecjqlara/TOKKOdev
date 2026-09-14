@@ -53,6 +53,16 @@ describe('mergeSendErrors', () => {
         ).toBe('recipient_unavailable');
 
         expect(
+            categorizeSendError('(#100) The thread owner has archived or deleted this conversation, or the thread does not exist.')
+        ).toBe('conversation_unavailable');
+
+        const deletedThread = Object.assign(
+            new Error('The conversation is unavailable.'),
+            { status: 400, code: 100, subcode: 2534001 }
+        );
+        expect(categorizeSendError(deletedThread)).toBe('conversation_unavailable');
+
+        expect(
             categorizeSendError(
                 '(#10) This message is being sent outside the allowed window. Learn more about the new policy here: https://developers.facebook.com/docs/messenger-platform/policy-overview'
             )
@@ -85,6 +95,9 @@ describe('mergeSendErrors', () => {
         ).toBe(false);
         expect(isRetryableSendError("(#551) This person isn't available right now.")).toBe(false);
         expect(
+            isRetryableSendError('(#100) The thread owner has archived or deleted this conversation, or the thread does not exist.')
+        ).toBe(false);
+        expect(
             isRetryableSendError(
                 '(#10) This message is being sent outside the allowed window. Learn more about the new policy here: https://developers.facebook.com/docs/messenger-platform/policy-overview'
             )
@@ -98,6 +111,9 @@ describe('mergeSendErrors', () => {
         expect(shouldPauseCampaignForSendError('Another app is controlling this thread now.')).toBe(false);
         expect(shouldPauseCampaignForSendError("Special characters not allowed in template parameter")).toBe(true);
         expect(shouldPauseCampaignForSendError("(#551) This person isn't available right now.")).toBe(false);
+        expect(
+            shouldPauseCampaignForSendError('(#100) The thread owner has archived or deleted this conversation, or the thread does not exist.')
+        ).toBe(false);
     });
 
     it('rejects Meta-forbidden utility parameter characters before sending', () => {
@@ -116,6 +132,10 @@ describe('mergeSendErrors', () => {
             },
             { contactId: 'b', error: "(#551) This person isn't available right now." },
             {
+                contactId: 'thread-gone',
+                error: '(#100) The thread owner has archived or deleted this conversation, or the thread does not exist.'
+            },
+            {
                 contactId: 'z',
                 error: '(#10) This message is being sent outside the allowed window. Learn more about the new policy here: https://developers.facebook.com/docs/messenger-platform/policy-overview'
             },
@@ -127,6 +147,7 @@ describe('mergeSendErrors', () => {
             utilityPermissionMissing: 2,
             utilityTemplateMissing: 1,
             recipientUnavailable: 1,
+            conversationUnavailable: 1,
             outsideMessagingWindow: 1,
             rateLimited: 0,
             authenticationRequired: 0,

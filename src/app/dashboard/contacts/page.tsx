@@ -1886,6 +1886,10 @@ export default function ContactsPage() {
                     message += `\n⚠️ ${failedErrorSummary.recipientUnavailable} recipients are unavailable right now (#551).`;
                 }
 
+                if (failedErrorSummary.conversationUnavailable > 0) {
+                    message += `\nWarning: ${failedErrorSummary.conversationUnavailable} conversations were deleted, archived, or no longer exist (#100). The recipient must message the Page again before you can reply.`;
+                }
+
                 if (retryableFailedIds.length > 0) {
                     message += `\n\nYou can resend to failed contacts using the "Resend to Failed" button.`;
                 } else if (totalFailed > 0) {
@@ -2025,6 +2029,10 @@ export default function ContactsPage() {
 
                     if (retryErrorSummary.recipientUnavailable > 0) {
                         message += `\n⚠️ ${retryErrorSummary.recipientUnavailable} recipients are unavailable right now (#551).`;
+                    }
+
+                    if (retryErrorSummary.conversationUnavailable > 0) {
+                        message += `\nWarning: ${retryErrorSummary.conversationUnavailable} conversations were deleted, archived, or no longer exist (#100). The recipient must message the Page again before you can reply.`;
                     }
 
                     if (retryableFailedIds.length === 0) {
@@ -3205,6 +3213,11 @@ export default function ContactsPage() {
                             {failedErrorSummary.recipientUnavailable > 0 && (
                                 <p className="font-mono text-xs text-red-800 mb-1">
                                     {failedErrorSummary.recipientUnavailable} recipients are unavailable right now (#551).
+                                </p>
+                            )}
+                            {failedErrorSummary.conversationUnavailable > 0 && (
+                                <p className="font-mono text-xs text-red-800 mb-1">
+                                    {failedErrorSummary.conversationUnavailable} conversations were deleted, archived, or no longer exist (#100). The recipient must message the Page again before you can reply.
                                 </p>
                             )}
                             {failedContactIds.length > 0 && (

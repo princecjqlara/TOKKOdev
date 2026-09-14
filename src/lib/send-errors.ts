@@ -4,6 +4,7 @@ export type SendErrorCategory =
     | 'utility_permission_missing'
     | 'utility_template_missing'
     | 'recipient_unavailable'
+    | 'conversation_unavailable'
     | 'outside_messaging_window'
     | 'thread_controlled_by_another_app'
     | 'invalid_utility_parameter'
@@ -85,6 +86,14 @@ export function categorizeSendError(error: unknown): SendErrorCategory {
         normalized.includes('status is rejected')
     ) {
         return 'utility_template_missing';
+    }
+
+    if (
+        structured?.subcode === 2534001 ||
+        normalized.includes('thread owner has archived or deleted this conversation') ||
+        normalized.includes('thread does not exist')
+    ) {
+        return 'conversation_unavailable';
     }
 
     if (
@@ -174,6 +183,7 @@ export function summarizeSendErrors(errors: SendError[]): {
     utilityPermissionMissing: number;
     utilityTemplateMissing: number;
     recipientUnavailable: number;
+    conversationUnavailable: number;
     outsideMessagingWindow: number;
     rateLimited: number;
     authenticationRequired: number;
@@ -184,6 +194,7 @@ export function summarizeSendErrors(errors: SendError[]): {
         utilityPermissionMissing: 0,
         utilityTemplateMissing: 0,
         recipientUnavailable: 0,
+        conversationUnavailable: 0,
         outsideMessagingWindow: 0,
         rateLimited: 0,
         authenticationRequired: 0,
@@ -199,6 +210,8 @@ export function summarizeSendErrors(errors: SendError[]): {
             summary.utilityTemplateMissing += 1;
         } else if (category === 'recipient_unavailable') {
             summary.recipientUnavailable += 1;
+        } else if (category === 'conversation_unavailable') {
+            summary.conversationUnavailable += 1;
         } else if (category === 'outside_messaging_window') {
             summary.outsideMessagingWindow += 1;
         } else if (category === 'rate_limited') {

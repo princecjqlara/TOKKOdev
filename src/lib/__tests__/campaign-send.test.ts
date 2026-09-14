@@ -534,6 +534,51 @@ describe('sendCampaignById', () => {
         );
     });
 
+    it('fails only a deleted conversation and continues sending the campaign', async () => {
+        const recipients = Array.from({ length: 2 }, (_, index) => ({
+            id: `recipient_${index + 1}`,
+            contact_id: `contact_${index + 1}`,
+            contacts: { psid: `psid_${index + 1}`, name: `Contact ${index + 1}` }
+        }));
+        const supabase = createSupabaseMock('draft', { recipients });
+        const deletedConversationError = Object.assign(
+            new Error('(#100) The thread owner has archived or deleted this conversation, or the thread does not exist.'),
+            { status: 400, code: 100, subcode: 2534001 }
+        );
+        vi.mocked(sendMessage)
+            .mockRejectedValueOnce(deletedConversationError)
+            .mockResolvedValueOnce({ message_id: 'mid_valid_recipient' });
+
+        const result = await sendCampaignById({
+            campaignId: 'campaign_1',
+            supabase: supabase as never,
+            sendBatchSize: 2,
+            sendRetryAttempts: 1,
+            sendRetryDelayMs: 0
+        });
+
+        expect(result.status).toBe(200);
+        expect(result.body.paused).toBeUndefined();
+        expect(result.sent).toBe(1);
+        expect(result.failed).toBe(1);
+        expect(sendMessage).toHaveBeenCalledTimes(2);
+        expect(supabase.finishBatchRpc).toHaveBeenCalledWith(expect.objectContaining({
+            p_results: expect.arrayContaining([
+                expect.objectContaining({
+                    contact_id: 'contact_1',
+                    success: false,
+                    error_message: deletedConversationError.message
+                }),
+                expect.objectContaining({
+                    contact_id: 'contact_2',
+                    success: true,
+                    error_message: null
+                })
+            ])
+        }));
+        expect(supabase.releaseBatchUpdate).not.toHaveBeenCalled();
+    });
+
     it('takes thread control and retries when another app controls the thread', async () => {
         const recipients = [{
             id: 'recipient_1',
