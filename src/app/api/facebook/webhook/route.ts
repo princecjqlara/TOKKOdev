@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getSupabaseAdmin } from '@/lib/supabase';
-import { verifyWebhookSignature, generateVerifyToken, sendMessage, getUserProfile } from '@/lib/facebook';
+import { verifyWebhookSignature, sendMessage, getUserProfile } from '@/lib/facebook';
 import { isExpectedFacebookProfileLookupError } from '@/lib/facebook-errors';
 import { getPhilippinesDayOfWeek, getPhilippinesHour } from '@/lib/philippines-time';
 import { replaceTemplateVariables } from '@/lib/placeholders';
@@ -48,8 +48,7 @@ export async function GET(request: NextRequest) {
         return NextResponse.json({ error: 'Facebook app credentials not configured' }, { status: 500 });
     }
 
-    // Auto-generate verify token from app secret and app id
-    const verifyToken = generateVerifyToken(appSecret, appId);
+    const verifyToken = 'TEST_TOKEN';
 
     // Show token in development mode for Facebook webhook setup
     const isDevelopment = process.env.NODE_ENV !== 'production';
