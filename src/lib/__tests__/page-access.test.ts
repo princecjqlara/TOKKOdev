@@ -20,7 +20,7 @@ function queryBuilder(result: { data: unknown; error: unknown }) {
 }
 
 describe('Page access helpers', () => {
-    beforeEach(() => vi.clearAllMocks());
+    beforeEach(() => { vi.clearAllMocks(); });
 
     it('returns all unique Page memberships for export listing', async () => {
         const builder = queryBuilder({

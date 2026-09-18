@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getSupabaseAdmin } from '@/lib/supabase';
 import { processDueFollowUpAutomationSteps } from '@/lib/workflow-automations';
+import { processOneMessagingAutoTagPage } from '@/lib/messaging-auto-tag-worker';
 
 export const dynamic = 'force-dynamic';
 
@@ -43,10 +44,21 @@ export async function GET(_request: NextRequest) {
             console.warn('Campaign continuation from follow-up cron failed:', campaignError);
         }
 
+        // The existing minute scheduler also advances one Messenger page per run.
+        // Keep this isolated so an unavailable Meta token cannot delay follow-ups.
+        let messagingAutoTag: Record<string, unknown> = { skipped: true };
+        try {
+            messagingAutoTag = await processOneMessagingAutoTagPage();
+        } catch (error) {
+            messagingAutoTag = { ok: false, message: error instanceof Error ? error.message : String(error) };
+            console.warn('Messaging auto-tag continuation failed:', error);
+        }
+
         return NextResponse.json({
             success: true,
             ...result,
             campaignWorker,
+            messagingAutoTag,
             duration: Date.now() - startTime
         });
     } catch (error) {

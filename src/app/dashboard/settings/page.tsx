@@ -13,11 +13,54 @@ export default function SettingsPage() {
     const [webhookActionPageId, setWebhookActionPageId] = useState<string | null>(null);
     const [webhookStatus, setWebhookStatus] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
     const [origin, setOrigin] = useState('');
+    const [autoTagByPage, setAutoTagByPage] = useState<Record<string, boolean>>({});
+    const [autoTagErrorsByPage, setAutoTagErrorsByPage] = useState<Record<string, string>>({});
+    const [autoTagLoading, setAutoTagLoading] = useState(true);
+    const [autoTagSaving, setAutoTagSaving] = useState<string | null>(null);
+    const [autoTagError, setAutoTagError] = useState<string | null>(null);
 
     useEffect(() => {
         setOrigin(window.location.origin);
         fetchPages();
+        fetchAutoTagSettings();
     }, []);
+
+    const fetchAutoTagSettings = async () => {
+        try {
+            const res = await fetch('/api/settings/messaging-auto-tag');
+            if (!res.ok) throw new Error('Could not load auto-tag settings');
+            const data = await res.json();
+            setAutoTagByPage(Object.fromEntries((data.pages || []).map((page: { id: string; messaging_auto_tag_enabled: boolean }) =>
+                [page.id, page.messaging_auto_tag_enabled]
+            )));
+            setAutoTagErrorsByPage(Object.fromEntries((data.pages || [])
+                .filter((page: { messaging_auto_tag_last_error?: string | null }) => page.messaging_auto_tag_last_error)
+                .map((page: { id: string; messaging_auto_tag_last_error: string }) => [page.id, page.messaging_auto_tag_last_error])));
+        } catch (error) {
+            setAutoTagError((error as Error).message);
+        } finally {
+            setAutoTagLoading(false);
+        }
+    };
+
+    const toggleAutoTag = async (page: Page) => {
+        setAutoTagSaving(page.id);
+        setAutoTagError(null);
+        try {
+            const res = await fetch('/api/settings/messaging-auto-tag', {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ pageId: page.id, enabled: !autoTagByPage[page.id] })
+            });
+            if (!res.ok) throw new Error('Could not save auto-tag setting');
+            const data = await res.json();
+            setAutoTagByPage(current => ({ ...current, [page.id]: data.page.messaging_auto_tag_enabled }));
+        } catch (error) {
+            setAutoTagError((error as Error).message);
+        } finally {
+            setAutoTagSaving(null);
+        }
+    };
 
     const fetchPages = async () => {
         try {
@@ -95,6 +138,36 @@ export default function SettingsPage() {
                         <p className="font-mono text-sm text-gray-600">{session?.user?.email}</p>
                     </div>
                 </div>
+            </div>
+
+            <div className="wireframe-card mb-6">
+                <div className="border-b-2 border-black pb-4 mb-4">
+                    <h2 className="text-xl font-bold uppercase">Messaging lead auto-tag</h2>
+                    <p className="font-mono text-xs text-gray-600 mt-2">
+                        Add each Page&apos;s Paid / Availed Service tag to its Tokko contact when Messenger records an order created
+                        or a lead stage set to Qualified or Converted. On by default. An order record does not prove payment.
+                    </p>
+                </div>
+                {autoTagError && <p role="alert" className="text-red-700 text-sm mb-3">{autoTagError}</p>}
+                {pages.map(page => (
+                    <div key={page.id} className="flex items-center justify-between gap-4 py-3 border-b border-gray-200 last:border-0">
+                        <span>
+                            <span className="font-bold block">{page.name}</span>
+                            {autoTagErrorsByPage[page.id] && <span className="text-xs text-red-700">Sync needs attention: {autoTagErrorsByPage[page.id]}</span>}
+                        </span>
+                        <button
+                            type="button"
+                            role="switch"
+                            aria-checked={autoTagByPage[page.id] ?? false}
+                            aria-label={`Auto-tag messaging leads for ${page.name}`}
+                            onClick={() => toggleAutoTag(page)}
+                            disabled={autoTagLoading || autoTagSaving === page.id || !(page.id in autoTagByPage)}
+                            className={`px-4 py-2 border-2 border-black font-bold min-w-16 disabled:opacity-50 ${autoTagByPage[page.id] ? 'bg-black text-white' : 'bg-white text-black'}`}
+                        >
+                            {autoTagLoading ? '...' : autoTagByPage[page.id] ? 'On' : 'Off'}
+                        </button>
+                    </div>
+                ))}
             </div>
 
             {/* Connected Pages Section */}

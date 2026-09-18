@@ -3,7 +3,8 @@ import type { NextRequest } from 'next/server';
 
 const mocks = vi.hoisted(() => ({
     getSupabaseAdmin: vi.fn(),
-    processDueFollowUpAutomationSteps: vi.fn()
+    processDueFollowUpAutomationSteps: vi.fn(),
+    processOneMessagingAutoTagPage: vi.fn()
 }));
 
 vi.mock('@/lib/supabase', () => ({
@@ -14,6 +15,10 @@ vi.mock('@/lib/workflow-automations', () => ({
     processDueFollowUpAutomationSteps: mocks.processDueFollowUpAutomationSteps
 }));
 
+vi.mock('@/lib/messaging-auto-tag-worker', () => ({
+    processOneMessagingAutoTagPage: mocks.processOneMessagingAutoTagPage
+}));
+
 import { GET } from './route';
 
 describe('GET /api/cron/follow-up-automations', () => {
@@ -21,6 +26,7 @@ describe('GET /api/cron/follow-up-automations', () => {
         vi.clearAllMocks();
         mocks.getSupabaseAdmin.mockReturnValue({ database: true });
         mocks.processDueFollowUpAutomationSteps.mockResolvedValue({ processed: 0 });
+        mocks.processOneMessagingAutoTagPage.mockResolvedValue({ pages: 1, conversations: 0, tagged: 0 });
     });
 
     it('uses the existing minute cron invocation to continue campaigns', async () => {
@@ -43,6 +49,7 @@ describe('GET /api/cron/follow-up-automations', () => {
             processed: 1
         }));
         expect(mocks.processDueFollowUpAutomationSteps).toHaveBeenCalledTimes(1);
+        expect(mocks.processOneMessagingAutoTagPage).toHaveBeenCalledTimes(1);
     });
 
     it('processes follow-ups before invoking the potentially slow campaign worker', async () => {
