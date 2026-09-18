@@ -633,7 +633,7 @@ export async function sendMessengerMediaAttachment(
     pageId: string,
     pageAccessToken: string,
     recipientPsid: string,
-    media: { type: TemplateMediaType; url: string },
+    media: { type: 'image' | 'video' | 'audio' | 'file'; url: string },
     messagingType: 'RESPONSE' | 'HUMAN_AGENT' = 'RESPONSE'
 ): Promise<{ message_id: string; attachment_id?: string }> {
     const bodyPayload: Record<string, unknown> = {
@@ -656,16 +656,29 @@ export async function sendMessengerMediaAttachment(
         bodyPayload.messaging_type = 'RESPONSE';
     }
 
-    const response = await fetch(
-        `${FACEBOOK_GRAPH_URL}/me/messages?access_token=${pageAccessToken}`,
-        {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json'
-            },
-            body: JSON.stringify(bodyPayload)
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), FACEBOOK_SEND_TIMEOUT_MS);
+    let response: Response;
+    try {
+        response = await fetch(
+            `${FACEBOOK_GRAPH_URL}/me/messages?access_token=${pageAccessToken}`,
+            {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify(bodyPayload),
+                signal: controller.signal
+            }
+        );
+    } catch (error) {
+        if (controller.signal.aborted) {
+            throw new Error(`Facebook media send timed out after ${FACEBOOK_SEND_TIMEOUT_MS / 1000} seconds`);
         }
-    );
+        throw error;
+    } finally {
+        clearTimeout(timeoutId);
+    }
 
     if (!response.ok) {
         const errorData = await response.json().catch(() => ({ error: { message: 'Unknown error' } }));

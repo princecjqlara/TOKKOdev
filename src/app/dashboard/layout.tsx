@@ -19,7 +19,8 @@ import {
     FileText,
     Workflow,
     History,
-    Download
+    Download,
+    Clock3
 } from 'lucide-react';
 import { Page } from '@/types';
 
@@ -86,6 +87,7 @@ export default function DashboardLayout({
     const navItems = [
         { href: '/dashboard', icon: LayoutDashboard, label: 'Dashboard' },
         { href: '/dashboard/contacts', icon: Users, label: 'Contacts' },
+        { href: '/dashboard/7-day-contacts', icon: Clock3, label: '7-Day Window Contacts' },
         { href: '/dashboard/tags', icon: Tag, label: 'Tags' },
         { href: '/dashboard/campaigns', icon: MessageSquare, label: 'Campaigns' },
         { href: '/dashboard/automations', icon: Workflow, label: 'Follow-Ups' },

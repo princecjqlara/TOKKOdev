@@ -317,7 +317,7 @@ export async function POST(request: NextRequest) {
                         // Check if contact exists BEFORE upsert (to detect new contacts)
                         const { data: existingContact, error: existingContactError } = await supabase
                             .from('contacts')
-                            .select('id, name')
+                            .select('id, name, last_inbound_at')
                             .eq('page_id', page.id)
                             .eq('psid', senderId)
                             .maybeSingle();
@@ -380,6 +380,10 @@ export async function POST(request: NextRequest) {
                             ...(resolvedName ? { name: resolvedName } : existingNameShouldBeCleared ? { name: null } : {}),
                             ...(profilePic ? { profile_pic: profilePic } : {}),
                             last_interaction_at: interactionAt,
+                            ...(eventType === 'message' && (
+                                !existingContact?.last_inbound_at ||
+                                new Date(existingContact.last_inbound_at).getTime() < interactionTime.getTime()
+                            ) ? { last_inbound_at: interactionAt } : {}),
                             updated_at: new Date().toISOString(),
                             ...(isNewContact ? { first_interaction_at: interactionAt } : {})
                         };

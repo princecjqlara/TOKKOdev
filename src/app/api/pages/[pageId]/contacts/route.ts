@@ -66,6 +66,7 @@ export async function GET(
         const tagIds = tagIdsRaw ? tagIdsRaw.split(',').filter(Boolean) : [];
         const excludeTagIds = excludeTagIdsRaw ? excludeTagIdsRaw.split(',').filter(Boolean) : [];
         const sendableOnly = searchParams.get('sendable') === 'true'; // Only return contacts with valid PSIDs
+        const humanAgentWindowOnly = searchParams.get('humanAgentWindow') === 'true';
         const includeCount = searchParams.get('includeCount') !== 'false';
         const dateFrom = searchParams.get('dateFrom') || '';
         const dateTo = searchParams.get('dateTo') || '';
@@ -125,7 +126,16 @@ export async function GET(
             : contactsTable.select(contactSelect);
         query = query
             .eq('page_id', pageId)
-            .order('last_interaction_at', { ascending: false, nullsFirst: false });
+            .order(humanAgentWindowOnly ? 'last_inbound_at' : 'last_interaction_at', { ascending: false, nullsFirst: false });
+
+        if (humanAgentWindowOnly) {
+            const now = new Date();
+            query = query
+                .gte('last_inbound_at', new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000 + 60 * 1000).toISOString())
+                .lte('last_inbound_at', now.toISOString())
+                .not('psid', 'is', null)
+                .neq('psid', '');
+        }
 
         // Filter for sendable contacts only (those with valid PSIDs)
         if (sendableOnly) {

@@ -601,6 +601,7 @@ export async function POST(
                     let bestContactHours: { hour: number; count: number }[] = [];
                     let interactionCount = 0;
                     let firstInteractionAt: string | null = null;
+                    let lastInboundAt: string | null = null;
                     let messageSenderName: string | null = null;
 
                     try {
@@ -645,6 +646,7 @@ export async function POST(
                                 new Date(a.created_time).getTime() - new Date(b.created_time).getTime()
                             );
                             firstInteractionAt = sortedByTime[0].created_time;
+                            lastInboundAt = sortedByTime[sortedByTime.length - 1].created_time;
 
                             // Set primary best hour (most common)
                             if (bestContactHours.length > 0) {
@@ -688,6 +690,7 @@ export async function POST(
                             ...(name ? { name } : existingNameShouldBeCleared ? { name: null } : {}),
                             ...(profilePic ? { profile_pic: profilePic } : {}),
                             last_interaction_at: conversation.updated_time,
+                            ...(lastInboundAt ? { last_inbound_at: lastInboundAt } : {}),
                             best_contact_hour: bestContactHour,
                             best_contact_confidence: bestContactConfidence,
                             best_contact_hours: bestContactHours,
