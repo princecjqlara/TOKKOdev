@@ -20,7 +20,7 @@ vi.mock('@/lib/supabase', () => ({
     getSupabaseAdmin: mocks.getSupabaseAdmin
 }));
 
-import { GET, POST, PUT } from './route';
+import { DELETE, GET, POST, PUT } from './route';
 
 function createRequest(url: string, init?: RequestInit): NextRequest {
     const request = new Request(url, init) as NextRequest;
@@ -363,6 +363,88 @@ describe('POST /api/tags', () => {
         );
 
         expect(response.status).toBe(400);
+    });
+
+    it('does not create a second copy of the combined default page tag', async () => {
+        mocks.getServerSession.mockResolvedValue({ user: { id: 'user_1' } });
+        const supabase = createSupabaseMockForPost();
+        mocks.getSupabaseAdmin.mockReturnValue(supabase);
+
+        const response = await POST(createRequest('http://localhost:3000/api/tags', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ name: ' paid / availed service ', ownerType: 'page', ownerId: 'page_1' })
+        }));
+
+        expect(response.status).toBe(400);
+        expect(supabase.insert).not.toHaveBeenCalled();
+    });
+});
+
+describe('default page tag protection', () => {
+    beforeEach(() => {
+        vi.clearAllMocks();
+        mocks.getServerSession.mockResolvedValue({ user: { id: 'user_1' } });
+    });
+
+    function defaultTagSupabase() {
+        const existingTag = {
+            id: 'default_tag',
+            name: 'Paid / Availed Service',
+            owner_type: 'page',
+            owner_id: 'page_1',
+            is_default: true
+        };
+        const tagUpdate = vi.fn();
+        const tagDelete = vi.fn();
+        return {
+            tagUpdate,
+            tagDelete,
+            from: vi.fn((table: string) => {
+                if (table === 'user_pages') {
+                    return createFilterableQuery([{ user_id: 'user_1', page_id: 'page_1' }]);
+                }
+                if (table === 'tags') {
+                    return {
+                        select: vi.fn(() => ({
+                            eq: vi.fn(() => ({
+                                single: vi.fn().mockResolvedValue({ data: existingTag, error: null })
+                            }))
+                        })),
+                        update: tagUpdate,
+                        delete: tagDelete
+                    };
+                }
+                throw new Error(`Unexpected table: ${table}`);
+            })
+        };
+    }
+
+    it('refuses to rename a default tag', async () => {
+        const supabase = defaultTagSupabase();
+        mocks.getSupabaseAdmin.mockReturnValue(supabase);
+
+        const response = await PUT(createRequest('http://localhost:3000/api/tags', {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ id: 'default_tag', name: 'Other' })
+        }));
+
+        expect(response.status).toBe(400);
+        expect(supabase.tagUpdate).not.toHaveBeenCalled();
+    });
+
+    it('refuses to delete a default tag or its contact assignments', async () => {
+        const supabase = defaultTagSupabase();
+        mocks.getSupabaseAdmin.mockReturnValue(supabase);
+
+        const response = await DELETE(createRequest('http://localhost:3000/api/tags?id=default_tag', {
+            method: 'DELETE'
+        }));
+
+        expect(response.status).toBe(400);
+        expect(supabase.tagDelete).not.toHaveBeenCalled();
+        expect(supabase.from).not.toHaveBeenCalledWith('contact_tags');
     });
 });
 

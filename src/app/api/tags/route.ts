@@ -17,6 +17,11 @@ function normalizeUserIdList(value: unknown): string[] {
     return Array.from(new Set(ids));
 }
 
+function isCombinedDefaultTagName(name: string): boolean {
+    const normalized = name.toLowerCase().replace(/[^a-z]/g, '');
+    return normalized === 'paidavailedservice' || normalized === 'paidavailedservices';
+}
+
 // GET /api/tags - Get tags with pagination
 export async function GET(request: NextRequest) {
     try {
@@ -310,6 +315,13 @@ export async function POST(request: NextRequest) {
             );
         }
 
+        if (ownerType === 'page' && isCombinedDefaultTagName(normalizedName)) {
+            return NextResponse.json(
+                { error: 'Bad Request', message: 'This default page tag already exists' },
+                { status: 400 }
+            );
+        }
+
         const shouldShareWithPage = ownerType === 'user' && isShared === true;
         const normalizedShareTargets = normalizeUserIdList(sharedWithUserIds)
             .filter((id) => id !== currentUserId);
@@ -516,8 +528,23 @@ export async function PUT(request: NextRequest) {
             );
         }
 
+        if (existingTag.is_default && typeof name === 'string' && name.trim() !== existingTag.name.trim()) {
+            return NextResponse.json(
+                { error: 'Bad Request', message: 'Default page tags cannot be renamed' },
+                { status: 400 }
+            );
+        }
+
+        if (existingTag.owner_type === 'page' && !existingTag.is_default && typeof name === 'string' &&
+            isCombinedDefaultTagName(name)) {
+            return NextResponse.json(
+                { error: 'Bad Request', message: 'This name is reserved for a default page tag' },
+                { status: 400 }
+            );
+        }
+
         const updates: { name?: string; color?: string; is_shared?: boolean } = {};
-        if (name) updates.name = name;
+        if (name && !existingTag.is_default) updates.name = name;
         if (color) updates.color = color;
 
         const shouldUpdateShareTargets = Array.isArray(sharedWithUserIds);
@@ -730,6 +757,13 @@ export async function DELETE(request: NextRequest) {
             return NextResponse.json(
                 { error: 'Forbidden', message: 'You do not have permission to delete this tag' },
                 { status: 403 }
+            );
+        }
+
+        if (existingTag.is_default) {
+            return NextResponse.json(
+                { error: 'Bad Request', message: 'Default page tags cannot be deleted' },
+                { status: 400 }
             );
         }
 

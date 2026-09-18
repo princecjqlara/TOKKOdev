@@ -107,14 +107,16 @@ export default function TagsPage() {
     };
 
     const handleSelectAll = () => {
-        if (selectedIds.size === tags.length) {
+        const deletableTags = tags.filter((tag) => !tag.is_default);
+        if (deletableTags.length > 0 && deletableTags.every((tag) => selectedIds.has(tag.id))) {
             setSelectedIds(new Set());
         } else {
-            setSelectedIds(new Set(tags.map(t => t.id)));
+            setSelectedIds(new Set(deletableTags.map((tag) => tag.id)));
         }
     };
 
     const handleSelect = (id: string) => {
+        if (tags.some((tag) => tag.id === id && tag.is_default)) return;
         const newSelected = new Set(selectedIds);
         if (newSelected.has(id)) {
             newSelected.delete(id);
@@ -411,7 +413,7 @@ export default function TagsPage() {
                                     <th className="w-12">
                                         <input
                                             type="checkbox"
-                                            checked={tags.length > 0 && selectedIds.size === tags.length}
+                                            checked={tags.some((tag) => !tag.is_default) && tags.filter((tag) => !tag.is_default).every((tag) => selectedIds.has(tag.id))}
                                             onChange={handleSelectAll}
                                             className="w-4 h-4 border border-black rounded-none focus:ring-0 text-black"
                                         />
@@ -430,6 +432,7 @@ export default function TagsPage() {
                                                 type="checkbox"
                                                 checked={selectedIds.has(tag.id)}
                                                 onChange={() => handleSelect(tag.id)}
+                                                disabled={tag.is_default}
                                                 className="w-4 h-4 border border-black rounded-none focus:ring-0 text-black"
                                             />
                                         </td>
@@ -440,6 +443,7 @@ export default function TagsPage() {
                                                     style={{ backgroundColor: tag.color }}
                                                 ></span>
                                                 <span className="font-bold">{tag.name}</span>
+                                                {tag.is_default && <span className="badge-wireframe bg-gray-100">Default</span>}
                                             </div>
                                         </td>
                                         <td>
@@ -471,8 +475,9 @@ export default function TagsPage() {
                                                 </button>
                                                 <button
                                                     onClick={() => openDeleteModal(tag)}
+                                                    disabled={tag.is_default}
                                                     className="btn-ghost-wireframe text-red-600 hover:bg-red-50 hover:text-red-700"
-                                                    title="Delete"
+                                                    title={tag.is_default ? 'Default page tags cannot be deleted' : 'Delete'}
                                                 >
                                                     <Trash2 className="w-4 h-4" />
                                                 </button>
@@ -660,8 +665,10 @@ export default function TagsPage() {
                             type="text"
                             value={tagName}
                             onChange={(e) => setTagName(e.target.value)}
+                            readOnly={editingTag?.is_default}
                             className="input-wireframe"
                         />
+                        {editingTag?.is_default && <p className="mt-2 text-xs text-gray-500">This default tag can be recolored, but not renamed or deleted.</p>}
                     </div>
 
                     <div>

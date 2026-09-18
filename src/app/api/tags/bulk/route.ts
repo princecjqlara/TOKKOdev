@@ -68,6 +68,13 @@ export async function DELETE(request: NextRequest) {
 
         const allowedTags = tags.filter(tag => allowedTagIds.includes(tag.id));
 
+        if (allowedTags.some(tag => tag.is_default)) {
+            return NextResponse.json(
+                { error: 'Bad Request', message: 'Default page tags cannot be deleted' },
+                { status: 400 }
+            );
+        }
+
         if (allowedTagIds.length === 0) {
             return NextResponse.json(
                 { error: 'Forbidden', message: 'No permission to delete any of the specified tags' },

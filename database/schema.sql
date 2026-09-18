@@ -83,6 +83,7 @@
         owner_id UUID NOT NULL, -- References user_id, page_id, or business_id based on owner_type
         page_id UUID REFERENCES pages(id) ON DELETE CASCADE,
         is_shared BOOLEAN NOT NULL DEFAULT FALSE,
+        is_default BOOLEAN NOT NULL DEFAULT FALSE,
         created_at TIMESTAMPTZ DEFAULT NOW(),
         updated_at TIMESTAMPTZ DEFAULT NOW()
     );
@@ -304,6 +305,8 @@
     CREATE INDEX IF NOT EXISTS idx_tags_owner_id ON tags(owner_id);
     CREATE INDEX IF NOT EXISTS idx_tags_page_id ON tags(page_id);
     CREATE INDEX IF NOT EXISTS idx_tags_is_shared ON tags(is_shared);
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_tags_one_default_per_page ON tags (owner_id)
+        WHERE owner_type = 'page' AND is_default;
     CREATE INDEX IF NOT EXISTS idx_tag_shares_tag_id ON tag_shares(tag_id);
     CREATE INDEX IF NOT EXISTS idx_tag_shares_shared_with_user_id ON tag_shares(shared_with_user_id);
     CREATE INDEX IF NOT EXISTS idx_campaigns_page_id ON campaigns(page_id);
@@ -340,6 +343,20 @@
 
     CREATE TRIGGER update_tags_updated_at BEFORE UPDATE ON tags
         FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+
+    CREATE OR REPLACE FUNCTION create_default_page_tags()
+    RETURNS TRIGGER
+    LANGUAGE plpgsql
+    AS $$
+    BEGIN
+        INSERT INTO tags (name, color, owner_type, owner_id, page_id, is_default)
+        VALUES ('Paid / Availed Service', '#16a34a', 'page', NEW.id, NEW.id, TRUE);
+        RETURN NEW;
+    END;
+    $$;
+
+    CREATE TRIGGER create_default_page_tags_on_insert AFTER INSERT ON pages
+        FOR EACH ROW EXECUTE FUNCTION create_default_page_tags();
 
     CREATE TRIGGER update_campaigns_updated_at BEFORE UPDATE ON campaigns
         FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
