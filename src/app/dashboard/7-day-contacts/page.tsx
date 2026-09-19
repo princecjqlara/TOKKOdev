@@ -1,7 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { CheckSquare, ChevronRight, Clock3, RefreshCw, Search, Send, Paperclip, X } from 'lucide-react';
+import { CheckSquare, Clock3, RefreshCw, Search, Send, Paperclip, X } from 'lucide-react';
 import Pagination from '@/components/Pagination';
 import { getSupabaseClient } from '@/lib/supabase';
 import { MAX_MESSENGER_MEDIA_BYTES } from '@/lib/messenger-media';
@@ -9,6 +9,9 @@ import type { Contact, Page, PaginatedResponse, Tag } from '@/types';
 
 type PreparedUpload = { path: string; token: string; type: 'image' | 'video' | 'audio' | 'file'; bucket: string };
 type ContactSort = 'expiring' | 'latest' | 'name_asc' | 'name_desc';
+type SendProgress = { completed: number; total: number } | null;
+
+const BULK_SEND_CONCURRENCY = 4;
 
 function formatRemaining(lastInboundAt: string | null | undefined, now: number): string {
     if (!lastInboundAt) return 'No customer message';
@@ -80,13 +83,13 @@ export default function SevenDayContactsPage() {
     const [sort, setSort] = useState<ContactSort>('expiring');
     const [listPage, setListPage] = useState(1);
     const [total, setTotal] = useState(0);
-    const [selectedContact, setSelectedContact] = useState<Contact | null>(null);
     const [selectedContacts, setSelectedContacts] = useState<Record<string, Contact>>({});
     const [text, setText] = useState('');
     const [file, setFile] = useState<File | null>(null);
     const [now, setNow] = useState(Date.now());
     const [loading, setLoading] = useState(false);
     const [sending, setSending] = useState(false);
+    const [sendProgress, setSendProgress] = useState<SendProgress>(null);
     const [selectingAll, setSelectingAll] = useState(false);
     const [allMatchingSelected, setAllMatchingSelected] = useState(false);
     const [error, setError] = useState('');
@@ -138,27 +141,18 @@ export default function SevenDayContactsPage() {
     const selectedContactList = Object.values(selectedContacts);
     const allVisibleSelected = contacts.length > 0 && contacts.every((contact) => selectedContacts[contact.id]);
 
-    const selectContact = useCallback((contact: Contact) => {
-        setSelectedContacts((current) => ({ ...current, [contact.id]: contact }));
-        setSelectedContact(contact);
-        setError('');
-        setNotice('');
-    }, []);
-
     const toggleContact = useCallback((contact: Contact) => {
         setAllMatchingSelected(false);
         const next = { ...selectedContacts };
         if (next[contact.id]) {
             delete next[contact.id];
-            if (selectedContact?.id === contact.id) {
-                setSelectedContact(Object.values(next)[0] || null);
-            }
         } else {
             next[contact.id] = contact;
-            setSelectedContact(selectedContact || contact);
         }
         setSelectedContacts(next);
-    }, [selectedContact, selectedContacts]);
+        setError('');
+        setNotice('');
+    }, [selectedContacts]);
 
     const toggleVisibleContacts = useCallback(() => {
         setAllMatchingSelected(false);
@@ -169,14 +163,10 @@ export default function SevenDayContactsPage() {
             for (const contact of contacts) next[contact.id] = contact;
         }
         setSelectedContacts(next);
-        if (!selectedContact || !next[selectedContact.id]) {
-            setSelectedContact(Object.values(next)[0] || null);
-        }
-    }, [contacts, selectedContact, selectedContacts]);
+    }, [contacts, selectedContacts]);
 
     const clearSelection = useCallback(() => {
         setSelectedContacts({});
-        setSelectedContact(null);
         setAllMatchingSelected(false);
     }, []);
 
@@ -227,9 +217,8 @@ export default function SevenDayContactsPage() {
 
             if (selectAllRequestRef.current !== requestId) return;
             setSelectedContacts(selected);
-            setSelectedContact(Object.values(selected)[0] || null);
             setAllMatchingSelected(true);
-            setNotice(`Selected all ${Object.keys(selected).length.toLocaleString()} matching contacts for individual review.`);
+            setNotice(`Selected all ${Object.keys(selected).length.toLocaleString()} matching contacts for bulk sending.`);
         } catch (selectionError) {
             if (selectAllRequestRef.current === requestId) {
                 setError(selectionError instanceof Error ? selectionError.message : 'Could not select all matching contacts.');
@@ -238,14 +227,6 @@ export default function SevenDayContactsPage() {
             if (selectAllRequestRef.current === requestId) setSelectingAll(false);
         }
     }, [allMatchingSelected, clearSelection, debouncedSearch, excludeTagIds, includeTagIds, pageId, selectingAll, sending, sort]);
-
-    const selectNextContact = useCallback(() => {
-        if (selectedContactList.length < 2) return;
-        const currentIndex = selectedContactList.findIndex((contact) => contact.id === selectedContact?.id);
-        setSelectedContact(selectedContactList[(currentIndex + 1) % selectedContactList.length]);
-        setError('');
-        setNotice('');
-    }, [selectedContact?.id, selectedContactList]);
 
     useEffect(() => {
         if (!pageId) return;
@@ -278,12 +259,6 @@ export default function SevenDayContactsPage() {
                     }
                     return changed ? next : current;
                 });
-                setSelectedContact((current) => current
-                    ? (() => {
-                        const refreshed = refreshedContacts.find((contact) => contact.id === current.id);
-                        return refreshed && !areContactsEquivalent(current, refreshed) ? refreshed : current;
-                    })()
-                    : null);
                 setError('');
             })
             .catch((fetchError) => { if (fetchError.name !== 'AbortError') setError(fetchError.message); })
@@ -300,10 +275,7 @@ export default function SevenDayContactsPage() {
         if (Object.keys(next).length === selectedContactList.length) return;
         setSelectedContacts(next);
         setAllMatchingSelected(false);
-        setSelectedContact(selectedContact && next[selectedContact.id]
-            ? next[selectedContact.id]
-            : Object.values(next)[0] || null);
-    }, [now, selectedContact, selectedContactList.length, selectedContacts]);
+    }, [now, selectedContactList.length, selectedContacts]);
 
     useEffect(() => {
         if (allMatchingSelected && selectedContactList.length !== total) {
@@ -311,9 +283,11 @@ export default function SevenDayContactsPage() {
         }
     }, [allMatchingSelected, selectedContactList.length, total]);
 
-    async function sendReply() {
-        if (!pageId || !selectedContact || (!text.trim() && !file) || sending) return;
+    async function sendBulkReply() {
+        if (!pageId || selectedContactList.length === 0 || (!text.trim() && !file) || sending) return;
+        const recipients = [...selectedContactList];
         setSending(true);
+        setSendProgress({ completed: 0, total: recipients.length });
         setError('');
         setNotice('');
         try {
@@ -337,26 +311,58 @@ export default function SevenDayContactsPage() {
                 mediaType = prepared.type;
             }
 
-            const response = await fetch(`/api/pages/${encodeURIComponent(pageId)}/human-agent-send`, {
-                method: 'POST', headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ contactId: selectedContact.id, text: text.trim(), mediaPath, mediaType })
-            });
-            const result = await response.json();
-            if (!response.ok) throw new Error(result.message || 'Messenger did not confirm the send.');
-            const sentContact = selectedContact;
-            setNotice(`Sent to ${sentContact.name || 'this contact'} as a ${result.messagingType === 'HUMAN_AGENT' ? 'Human Agent' : 'standard'} reply.`);
-            const next = { ...selectedContacts };
-            delete next[sentContact.id];
-            setSelectedContacts(next);
-            setSelectedContact(Object.values(next)[0] || null);
+            const successes = new Set<string>();
+            const failures: Array<{ contact: Contact; message: string }> = [];
+            let nextIndex = 0;
+            let completed = 0;
+
+            async function worker() {
+                while (nextIndex < recipients.length) {
+                    const contact = recipients[nextIndex++];
+                    try {
+                        const response = await fetch(`/api/pages/${encodeURIComponent(pageId)}/human-agent-send`, {
+                            method: 'POST', headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ contactId: contact.id, text: text.trim(), mediaPath, mediaType })
+                        });
+                        const result = await response.json();
+                        if (!response.ok) throw new Error(result.message || 'Messenger did not confirm the send.');
+                        successes.add(contact.id);
+                    } catch (sendError) {
+                        failures.push({
+                            contact,
+                            message: sendError instanceof Error ? sendError.message : 'Messenger did not confirm the send.'
+                        });
+                    } finally {
+                        completed += 1;
+                        setSendProgress({ completed, total: recipients.length });
+                    }
+                }
+            }
+
+            await Promise.all(Array.from(
+                { length: Math.min(BULK_SEND_CONCURRENCY, recipients.length) },
+                () => worker()
+            ));
+
+            setSelectedContacts((current) => Object.fromEntries(
+                Object.entries(current).filter(([contactId]) => !successes.has(contactId))
+            ));
             setAllMatchingSelected(false);
-            setText('');
-            setFile(null);
+            if (failures.length === 0) {
+                setNotice(`Sent successfully to all ${successes.size.toLocaleString()} selected contacts.`);
+                setText('');
+                setFile(null);
+            } else {
+                const firstFailure = failures[0];
+                setNotice(successes.size > 0 ? `Sent successfully to ${successes.size.toLocaleString()} of ${recipients.length.toLocaleString()} selected contacts.` : 'No messages were confirmed sent.');
+                setError(`${failures.length.toLocaleString()} failed and remain selected. ${firstFailure.contact.name || 'Unnamed contact'}: ${firstFailure.message}`);
+            }
             refreshContacts();
         } catch (sendError) {
-            setError(sendError instanceof Error ? sendError.message : 'Could not send the reply.');
+            setError(sendError instanceof Error ? sendError.message : 'Could not send the bulk reply.');
         } finally {
             setSending(false);
+            setSendProgress(null);
         }
     }
 
@@ -373,7 +379,7 @@ export default function SevenDayContactsPage() {
             </div>
 
             <p className="border border-black bg-[#f5f5f5] p-3 text-sm">
-                Human Agent is for a staff member replying to one customer&apos;s inquiry, not a bulk campaign or automated follow-up. Meta must approve Human Agent access for the connected app.
+                Sends the same staff reply to all selected eligible contacts. Each contact is rechecked against Meta&apos;s 7-day window immediately before delivery, and Meta must approve Human Agent access for the connected app.
             </p>
 
             <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-5 gap-3 border border-black p-4">
@@ -425,11 +431,11 @@ export default function SevenDayContactsPage() {
                     {loading && contacts.length === 0 && <p className="p-4 text-sm text-gray-600">Loading contacts…</p>}
                     {!loading && contacts.length === 0 && <p className="p-4 text-sm text-gray-600">No contacts currently match this 7-day window and filter. Sync contacts if older conversations have not been imported yet.</p>}
                     {contacts.map((contact) => (
-                        <div key={contact.id} className={`flex border-b border-black last:border-b-0 hover:bg-gray-50 ${selectedContact?.id === contact.id ? 'bg-gray-100 border-l-4 border-l-black' : ''}`}>
-                            <label className="flex items-start p-4 pr-1 cursor-pointer" aria-label={`Select ${contact.name || 'Unnamed contact'}`}>
-                                <input type="checkbox" checked={Boolean(selectedContacts[contact.id])} disabled={sending || selectingAll} onChange={() => toggleContact(contact)} className="mt-0.5" />
-                            </label>
-                            <button type="button" disabled={sending || selectingAll} onClick={() => selectContact(contact)} className="flex-1 min-w-0 text-left p-4 pl-2 disabled:cursor-wait">
+                        <label key={contact.id} className={`flex border-b border-black last:border-b-0 cursor-pointer hover:bg-gray-50 ${selectedContacts[contact.id] ? 'bg-gray-100 border-l-4 border-l-black' : ''}`}>
+                            <span className="flex items-start p-4 pr-1">
+                                <input type="checkbox" checked={Boolean(selectedContacts[contact.id])} disabled={sending || selectingAll} onChange={() => toggleContact(contact)} className="mt-0.5 h-5 w-5 accent-black cursor-pointer disabled:cursor-wait" />
+                            </span>
+                            <div className="flex-1 min-w-0 text-left p-4 pl-2">
                                 <div className="flex justify-between gap-2">
                                     <span className="font-semibold text-sm truncate">{contact.name || 'Unnamed contact'}</span>
                                     <span className="text-xs whitespace-nowrap">{formatRemaining(contact.last_inbound_at, now)}</span>
@@ -438,32 +444,30 @@ export default function SevenDayContactsPage() {
                                 <div className="flex flex-wrap gap-1 mt-2">
                                     {(contact.tags || []).map((tag) => <span key={tag.id} className="border border-gray-400 px-1.5 py-0.5 text-xs">{tag.name}</span>)}
                                 </div>
-                            </button>
-                        </div>
+                            </div>
+                        </label>
                     ))}
                     {total > 25 && <div className="p-3"><Pagination page={listPage} pageSize={25} total={total} onPageChange={setListPage} /></div>}
                 </section>
 
                 <section className="border border-black p-4 space-y-4 lg:sticky lg:top-4">
                     <div className="flex items-center justify-between gap-2">
-                        <h2 className="font-bold text-lg">Manual reply queue</h2>
+                        <h2 className="font-bold text-lg">Bulk reply</h2>
                         <span className="text-xs font-semibold">{selectedContactList.length.toLocaleString()} selected</span>
                     </div>
                     {selectedContactList.length > 0 && (
                         <div className="max-h-32 overflow-y-auto border border-black">
                             {selectedContactList.slice(0, 100).map((contact) => (
-                                <button key={contact.id} type="button" disabled={sending} onClick={() => setSelectedContact(contact)} className={`w-full flex items-center justify-between gap-2 border-b border-black last:border-b-0 px-2 py-1.5 text-xs text-left disabled:cursor-wait ${selectedContact?.id === contact.id ? 'bg-black text-white' : 'bg-white'}`}>
-                                    <span className="truncate">{contact.name || 'Unnamed contact'}</span>
+                                <label key={contact.id} className="w-full flex items-center gap-2 border-b border-black last:border-b-0 px-2 py-1.5 text-xs text-left bg-white cursor-pointer">
+                                    <input type="checkbox" checked disabled={sending} onChange={() => toggleContact(contact)} className="h-4 w-4 accent-black cursor-pointer disabled:cursor-wait" />
+                                    <span className="truncate flex-1">{contact.name || 'Unnamed contact'}</span>
                                     <span className="whitespace-nowrap">{formatRemaining(contact.last_inbound_at, now)}</span>
-                                </button>
+                                </label>
                             ))}
                             {selectedContactList.length > 100 && <p className="px-2 py-1.5 text-xs text-gray-600">+ {(selectedContactList.length - 100).toLocaleString()} more selected contacts</p>}
                         </div>
                     )}
-                    <div className="flex items-center justify-between gap-2">
-                        <p className="text-sm">{selectedContact ? `Replying to ${selectedContact.name || 'Unnamed contact'}` : 'Select one or more contacts from the list.'}</p>
-                        {selectedContactList.length > 1 && <button type="button" onClick={selectNextContact} className="border border-black p-1.5" title="Review next selected contact"><ChevronRight className="w-4 h-4" /></button>}
-                    </div>
+                    <p className="text-sm">{selectedContactList.length > 0 ? `This reply will be sent to ${selectedContactList.length.toLocaleString()} selected contact${selectedContactList.length === 1 ? '' : 's'}.` : 'Select one or more contacts from the list.'}</p>
                     <label className="block text-xs font-semibold">Message text (optional when media is selected)
                         <textarea value={text} onChange={(event) => setText(event.target.value)} maxLength={2000} rows={5} placeholder="Reply to this customer’s inquiry…" className="mt-1 w-full border border-black p-2 text-sm font-normal resize-y" />
                     </label>
@@ -478,11 +482,16 @@ export default function SevenDayContactsPage() {
                     {file && text.trim() && <p className="text-xs text-gray-600">Text and media will arrive as two Messenger messages from one send action.</p>}
                     <button
                         type="button"
-                        disabled={!selectedContact || (!text.trim() && !file) || sending || (selectedContact ? formatRemaining(selectedContact.last_inbound_at, now) === 'Expired' : false)}
-                        onClick={sendReply}
+                        disabled={selectedContactList.length === 0 || (!text.trim() && !file) || sending}
+                        onClick={sendBulkReply}
                         className="w-full flex items-center justify-center gap-2 bg-black text-white px-4 py-3 text-sm font-semibold disabled:opacity-50"
                     >
-                        {selectedContactList.length > 1 ? <CheckSquare className="w-4 h-4" /> : <Send className="w-4 h-4" />}{sending ? 'Sending…' : selectedContactList.length > 1 ? 'Send to this contact, then review next' : 'Send to this contact'}
+                        {selectedContactList.length > 1 ? <CheckSquare className="w-4 h-4" /> : <Send className="w-4 h-4" />}
+                        {sending && sendProgress
+                            ? `Sending ${sendProgress.completed.toLocaleString()} of ${sendProgress.total.toLocaleString()}…`
+                            : selectedContactList.length > 1
+                                ? `Send to all ${selectedContactList.length.toLocaleString()} selected contacts`
+                                : 'Send to selected contact'}
                     </button>
                 </section>
             </div>
