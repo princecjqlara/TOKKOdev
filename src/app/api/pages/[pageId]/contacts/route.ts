@@ -76,6 +76,7 @@ export async function GET(
         const humanAgentWindowOnly = searchParams.get('humanAgentWindow') === 'true';
         const humanAgentSort = getHumanAgentSort(searchParams.get('sort'));
         const includeCount = searchParams.get('includeCount') !== 'false';
+        const includeTags = searchParams.get('includeTags') !== 'false';
         const dateFrom = searchParams.get('dateFrom') || '';
         const dateTo = searchParams.get('dateTo') || '';
         const dateFilterMode: DateFilterMode = searchParams.get('dateFilterMode') === 'exclude'
@@ -231,7 +232,7 @@ export async function GET(
         const pageContactIds = (rawContacts || []).map((c) => c.id).filter((id): id is string => typeof id === 'string');
         const tagsByContact = new Map<string, { tag_id: string; created_by: string | null; tags: Record<string, unknown> }[]>();
 
-        if (pageContactIds.length > 0) {
+        if (includeTags && pageContactIds.length > 0) {
             const { data: tagRows, error: tagError } = await supabase
                 .from('contact_tags')
                 .select('contact_id, tag_id, created_by, tags(*)')

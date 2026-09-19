@@ -172,6 +172,7 @@ function createSupabaseMock(options?: {
         contactsOr: contactsBuilder.or,
         contactsOrder: contactsBuilder.order,
         contactTagsIn,
+        contactTagRowsIn,
         contactTagsEq
     };
 }
@@ -271,6 +272,20 @@ describe('GET /api/pages/[pageId]/contacts', () => {
                 nullsFirst: false
             });
         }
+    });
+
+    it('can skip tag hydration for cross-page contact selection', async () => {
+        mocks.getServerSession.mockResolvedValue({ user: { id: 'user_1' } });
+        const supabase = createSupabaseMock();
+        mocks.getSupabaseAdmin.mockReturnValue(supabase);
+
+        const response = await GET(
+            createRequest('http://localhost:3000/api/pages/page_1/contacts?humanAgentWindow=true&includeTags=false&includeCount=false&pageSize=1000'),
+            { params: Promise.resolve({ pageId: 'page_1' }) }
+        );
+
+        expect(response.status).toBe(200);
+        expect(supabase.contactTagRowsIn).not.toHaveBeenCalled();
     });
 
     it('normalizes placeholder contact names out of the API response', async () => {
