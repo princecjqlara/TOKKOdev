@@ -7,6 +7,7 @@ const mocks = vi.hoisted(() => ({
     generateVerifyToken: vi.fn(),
     sendMessage: vi.fn(),
     getUserProfile: vi.fn(),
+    getConversationForPsid: vi.fn(),
     handleFollowUpWorkflowContactReply: vi.fn(),
     triggerReplyWorkflowAutomations: vi.fn(),
     stopWorkflowAutomationsFromPageMessage: vi.fn()
@@ -20,7 +21,8 @@ vi.mock('@/lib/facebook', () => ({
     verifyWebhookSignature: mocks.verifyWebhookSignature,
     generateVerifyToken: mocks.generateVerifyToken,
     sendMessage: mocks.sendMessage,
-    getUserProfile: mocks.getUserProfile
+    getUserProfile: mocks.getUserProfile,
+    getConversationForPsid: mocks.getConversationForPsid
 }));
 
 vi.mock('@/lib/placeholders', () => ({
@@ -395,6 +397,7 @@ describe('POST /api/facebook/webhook', () => {
             stopped: 0,
             skipped: 0
         });
+        mocks.getConversationForPsid.mockResolvedValue(null);
     });
 
     afterEach(() => {
@@ -415,7 +418,11 @@ describe('POST /api/facebook/webhook', () => {
 
         expect(response.status).toBe(200);
         expect(body.success).toBe(true);
-        expect(mocks.getUserProfile).toHaveBeenCalledWith('contact_psid_1', 'page_access_token_1');
+        expect(mocks.getUserProfile).toHaveBeenCalledWith(
+            'contact_psid_1',
+            'page_access_token_1',
+            { timeoutMs: 2500 }
+        );
 
         expect(supabase.contactsUpsert).toHaveBeenCalledWith(
             expect.objectContaining({
@@ -450,7 +457,11 @@ describe('POST /api/facebook/webhook', () => {
 
         expect(response.status).toBe(200);
         expect(body.success).toBe(true);
-        expect(mocks.getUserProfile).toHaveBeenCalledWith('contact_psid_1', 'page_access_token_1');
+        expect(mocks.getUserProfile).toHaveBeenCalledWith(
+            'contact_psid_1',
+            'page_access_token_1',
+            { timeoutMs: 2500 }
+        );
 
         expect(supabase.contactsUpsert).toHaveBeenCalledWith(
             expect.objectContaining({
@@ -485,7 +496,11 @@ describe('POST /api/facebook/webhook', () => {
 
         expect(response.status).toBe(200);
         expect(body.success).toBe(true);
-        expect(mocks.getUserProfile).toHaveBeenCalledWith('contact_psid_1', 'page_access_token_1');
+        expect(mocks.getUserProfile).toHaveBeenCalledWith(
+            'contact_psid_1',
+            'page_access_token_1',
+            { timeoutMs: 2500 }
+        );
 
         const payload = supabase.contactsUpsert.mock.calls[0][0] as Record<string, unknown>;
         expect(payload.name).toBe('Recovered Contact Name');
@@ -556,6 +571,43 @@ describe('POST /api/facebook/webhook', () => {
         expect(payload.profile_pic).toBe('https://example.com/recovered.jpg');
     });
 
+    it('immediately uses the conversation participant name when profile lookup has no usable name', async () => {
+        const supabase = createSupabaseMock({
+            existingContact: {
+                id: 'contact_row_1',
+                name: null,
+                profile_pic: null
+            }
+        });
+        mocks.getSupabaseAdmin.mockReturnValue(supabase);
+        mocks.getUserProfile.mockResolvedValue({
+            id: 'contact_psid_1',
+            name: 'Messenger Contact'
+        });
+        mocks.getConversationForPsid.mockResolvedValue({
+            id: 'conversation_1',
+            participants: {
+                data: [
+                    { id: 'fb_page_1', name: 'Business Page' },
+                    { id: 'contact_psid_1', name: 'Immediate Real Name' }
+                ]
+            },
+            messages: { data: [] }
+        });
+
+        const response = await POST(createWebhookRequest());
+
+        expect(response.status).toBe(200);
+        expect(mocks.getConversationForPsid).toHaveBeenCalledWith(
+            'fb_page_1',
+            'contact_psid_1',
+            'page_access_token_1',
+            { throwOnError: true, timeoutMs: 2500 }
+        );
+        const payload = supabase.contactsUpsert.mock.calls[0][0] as Record<string, unknown>;
+        expect(payload.name).toBe('Immediate Real Name');
+    });
+
     it('does not persist placeholder UNKNOWN name values from profile fetch', async () => {
         const supabase = createSupabaseMock({
             existingContact: {
@@ -597,7 +649,11 @@ describe('POST /api/facebook/webhook', () => {
 
         expect(response.status).toBe(200);
         expect(body.success).toBe(true);
-        expect(mocks.getUserProfile).toHaveBeenCalledWith('contact_psid_1', 'page_access_token_1');
+        expect(mocks.getUserProfile).toHaveBeenCalledWith(
+            'contact_psid_1',
+            'page_access_token_1',
+            { timeoutMs: 2500 }
+        );
 
         const payload = supabase.contactsUpsert.mock.calls[0][0] as Record<string, unknown>;
         expect(payload.name).toBe('Maria Santos');
@@ -673,7 +729,11 @@ describe('POST /api/facebook/webhook', () => {
 
         expect(response.status).toBe(200);
         expect(body.success).toBe(true);
-        expect(mocks.getUserProfile).toHaveBeenCalledWith('contact_psid_1', 'page_access_token_1');
+        expect(mocks.getUserProfile).toHaveBeenCalledWith(
+            'contact_psid_1',
+            'page_access_token_1',
+            { timeoutMs: 2500 }
+        );
         expect(supabase.contactsUpsert).toHaveBeenCalledTimes(1);
     });
 

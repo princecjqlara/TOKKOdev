@@ -113,15 +113,15 @@ async function readFacebookError(response: Response, endpoint: string) {
     );
 }
 
-async function fetchFacebookRead(input: string): Promise<Response> {
+async function fetchFacebookRead(input: string, timeoutMs: number = FACEBOOK_READ_TIMEOUT_MS): Promise<Response> {
     const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), FACEBOOK_READ_TIMEOUT_MS);
+    const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
 
     try {
         return await fetch(input, { signal: controller.signal });
     } catch (error) {
         if (controller.signal.aborted) {
-            throw new Error(`Facebook read request timed out after ${FACEBOOK_READ_TIMEOUT_MS / 1000} seconds`);
+            throw new Error(`Facebook read request timed out after ${timeoutMs / 1000} seconds`);
         }
         throw error;
     } finally {
@@ -335,10 +335,12 @@ export async function getPageConversationsBatch(
 // Get user profile from PSID
 export async function getUserProfile(
     psid: string,
-    pageAccessToken: string
+    pageAccessToken: string,
+    options: { timeoutMs?: number } = {}
 ): Promise<{ id: string; name?: string; first_name?: string; last_name?: string; profile_pic?: string }> {
-    const response = await fetch(
-        `${FACEBOOK_GRAPH_URL}/${psid}?fields=id,name,first_name,last_name,profile_pic&access_token=${pageAccessToken}`
+    const response = await fetchFacebookRead(
+        `${FACEBOOK_GRAPH_URL}/${psid}?fields=id,name,first_name,last_name,profile_pic&access_token=${pageAccessToken}`,
+        options.timeoutMs
     );
 
     if (!response.ok) {
@@ -810,7 +812,7 @@ export async function getConversationForPsid(
     pageId: string,
     psid: string,
     pageAccessToken: string,
-    options: { throwOnError?: boolean } = {}
+    options: { throwOnError?: boolean; timeoutMs?: number } = {}
 ): Promise<FacebookConversation | null> {
     try {
         const fields = 'id,participants,updated_time,messages.limit(100){id,message,from,created_time}';
@@ -818,7 +820,7 @@ export async function getConversationForPsid(
         url.searchParams.set('user_id', psid);
         url.searchParams.set('fields', fields);
         url.searchParams.set('access_token', pageAccessToken);
-        const response = await fetchFacebookRead(url.toString());
+        const response = await fetchFacebookRead(url.toString(), options.timeoutMs);
 
         if (!response.ok) {
             const graphError = await readFacebookError(response, `/${pageId}/conversations`);

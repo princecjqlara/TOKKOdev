@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getSupabaseAdmin } from '@/lib/supabase';
-import { verifyWebhookSignature, sendMessage, getUserProfile } from '@/lib/facebook';
+import { verifyWebhookSignature, sendMessage, getConversationForPsid, getUserProfile } from '@/lib/facebook';
 import { isExpectedFacebookProfileLookupError } from '@/lib/facebook-errors';
 import { getPhilippinesDayOfWeek, getPhilippinesHour } from '@/lib/philippines-time';
 import { replaceTemplateVariables } from '@/lib/placeholders';
@@ -9,6 +9,7 @@ import { recordOutboundMessageEvent } from '@/lib/outbound-message-events';
 import { composeContactName, hasUsableContactName, normalizeContactName, pickPreferredContactName } from '../../../../lib/contact-names';
 
 const PROFILE_LOOKUP_FAILURE_TTL_MS = 60 * 60 * 1000;
+const CONTACT_NAME_LOOKUP_TIMEOUT_MS = 2500;
 const profileLookupSuppressedUntil = new Map<string, number>();
 
 function isProfileLookupSuppressed(pageId: string, senderId: string) {
@@ -340,11 +341,14 @@ export async function POST(request: NextRequest) {
                             !isProfileLookupSuppressed(page.id, senderId);
 
                         let profileName: string | null = null;
+                        let conversationName: string | null = null;
                         let profilePic: string | null = null;
 
                         if (shouldRefreshProfile) {
                             try {
-                                const profile = await getUserProfile(senderId, page.access_token);
+                                const profile = await getUserProfile(senderId, page.access_token, {
+                                    timeoutMs: CONTACT_NAME_LOOKUP_TIMEOUT_MS
+                                });
                                 profileName = normalizeContactName(profile.name);
 
                                 profileName = pickPreferredContactName(
@@ -369,7 +373,37 @@ export async function POST(request: NextRequest) {
                             }
                         }
 
-                        const resolvedName = pickPreferredContactName(profileName, eventSenderName, existingContact?.name);
+                        if ((isNewContact || missingName) && !profileName && !eventSenderName) {
+                            try {
+                                const conversation = await getConversationForPsid(
+                                    pageId,
+                                    senderId,
+                                    page.access_token,
+                                    { throwOnError: true, timeoutMs: CONTACT_NAME_LOOKUP_TIMEOUT_MS }
+                                );
+                                conversationName = pickPreferredContactName(
+                                    ...(conversation?.participants?.data || [])
+                                        .filter((participant) => participant.id === senderId)
+                                        .map((participant) => participant.name),
+                                    ...(conversation?.messages?.data || [])
+                                        .filter((message) => message.from?.id === senderId)
+                                        .map((message) => message.from?.name)
+                                );
+                            } catch (conversationError) {
+                                logWarn('Failed to fetch conversation name for contact enrichment', {
+                                    pageId,
+                                    senderId,
+                                    error: (conversationError as Error).message || String(conversationError)
+                                });
+                            }
+                        }
+
+                        const resolvedName = pickPreferredContactName(
+                            profileName,
+                            eventSenderName,
+                            conversationName,
+                            existingContact?.name
+                        );
                         const existingNameShouldBeCleared =
                             typeof existingContact?.name === 'string' &&
                             !hasUsableContactName(existingContact.name);

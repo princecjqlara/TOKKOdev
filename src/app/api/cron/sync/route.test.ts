@@ -131,7 +131,7 @@ describe('GET /api/cron/sync', () => {
         expect(mocks.repairMissingContactNamesForPage).toHaveBeenCalledWith(
             supabase,
             expect.objectContaining({ id: 'page_1' }),
-            { limit: 5 }
+            { limit: 20 }
         );
         expect(supabase.pagesOrder).toHaveBeenCalledWith(
             'updated_at',

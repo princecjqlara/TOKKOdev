@@ -8,10 +8,10 @@ export const dynamic = 'force-dynamic';
 
 const MAX_PAGES_PER_RUN = 1;
 const CONVERSATION_LIMIT_PER_PAGE = 5;
-const NAME_REPAIR_LIMIT_PER_PAGE = 5;
+const NAME_REPAIR_LIMIT_PER_PAGE = 20;
 const CONVERSATION_FETCH_TIMEOUT_MS = 5000;
 const PROFILE_FETCH_TIMEOUT_MS = 1500;
-const NAME_REPAIR_TIMEOUT_MS = 5000;
+const NAME_REPAIR_TIMEOUT_MS = 10000;
 
 async function withTimeout<T>(promise: Promise<T>, timeoutMs: number, label: string): Promise<T> {
     let timeout: ReturnType<typeof setTimeout> | undefined;

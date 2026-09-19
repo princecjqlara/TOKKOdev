@@ -1,6 +1,5 @@
 import {
-    getConversationIdForPsid,
-    getConversationMessages,
+    getConversationForPsid,
     getUserProfile
 } from './facebook';
 import {
@@ -34,6 +33,8 @@ export type ContactNameRepairResult = {
 };
 
 const DEFAULT_REPAIR_LIMIT = 200;
+const NAME_REPAIR_CONCURRENCY = 5;
+const NAME_LOOKUP_TIMEOUT_MS = 2000;
 
 function uniqContacts(contacts: ContactForNameRepair[]): ContactForNameRepair[] {
     const byId = new Map<string, ContactForNameRepair>();
@@ -112,7 +113,9 @@ async function resolveContactName(
     let profilePic: string | null = null;
 
     try {
-        const profile = await getUserProfile(contact.psid, page.access_token);
+        const profile = await getUserProfile(contact.psid, page.access_token, {
+            timeoutMs: NAME_LOOKUP_TIMEOUT_MS
+        });
         profileName = pickPreferredContactName(
             profile.name,
             composeContactName(profile.first_name, profile.last_name)
@@ -130,19 +133,22 @@ async function resolveContactName(
     }
 
     try {
-        const conversationId = await getConversationIdForPsid(
+        const conversation = await getConversationForPsid(
             page.fb_page_id,
             contact.psid,
-            page.access_token
+            page.access_token,
+            { throwOnError: true, timeoutMs: NAME_LOOKUP_TIMEOUT_MS }
         );
 
-        if (!conversationId) {
+        if (!conversation) {
             return { name: null, profilePic };
         }
 
-        const messages = await getConversationMessages(conversationId, page.access_token, 100);
         const messageName = pickPreferredContactName(
-            ...messages
+            ...(conversation.participants?.data || [])
+                .filter((participant) => participant.id === contact.psid)
+                .map((participant) => participant.name),
+            ...(conversation.messages?.data || [])
                 .filter((message) => message.from?.id === contact.psid)
                 .map((message) => message.from?.name)
         );
@@ -170,44 +176,54 @@ export async function repairMissingContactNamesForPage(
         failed: 0
     };
 
-    for (const contact of contacts) {
-        try {
-            const resolved = await resolveContactName(page, contact);
-            const normalizedExistingName = normalizeContactName(contact.name);
+    let nextIndex = 0;
 
-            if (resolved.name) {
-                const payload: Record<string, unknown> = {
-                    name: resolved.name,
-                    updated_at: new Date().toISOString()
-                };
+    async function worker() {
+        while (nextIndex < contacts.length) {
+            const contact = contacts[nextIndex++];
+            try {
+                const resolved = await resolveContactName(page, contact);
+                const normalizedExistingName = normalizeContactName(contact.name);
 
-                if (resolved.profilePic) {
-                    payload.profile_pic = resolved.profilePic;
-                }
-
-                const { error } = await supabase
-                    .from('contacts')
-                    .update(payload)
-                    .eq('id', contact.id);
-
-                if (error) throw error;
-                result.repaired += 1;
-            } else if (!normalizedExistingName && contact.name !== null) {
-                const { error } = await supabase
-                    .from('contacts')
-                    .update({
-                        name: null,
+                if (resolved.name) {
+                    const payload: Record<string, unknown> = {
+                        name: resolved.name,
                         updated_at: new Date().toISOString()
-                    })
-                    .eq('id', contact.id);
+                    };
 
-                if (error) throw error;
-                result.cleared += 1;
+                    if (resolved.profilePic) {
+                        payload.profile_pic = resolved.profilePic;
+                    }
+
+                    const { error } = await supabase
+                        .from('contacts')
+                        .update(payload)
+                        .eq('id', contact.id);
+
+                    if (error) throw error;
+                    result.repaired += 1;
+                } else if (!normalizedExistingName && contact.name !== null) {
+                    const { error } = await supabase
+                        .from('contacts')
+                        .update({
+                            name: null,
+                            updated_at: new Date().toISOString()
+                        })
+                        .eq('id', contact.id);
+
+                    if (error) throw error;
+                    result.cleared += 1;
+                }
+            } catch {
+                result.failed += 1;
             }
-        } catch {
-            result.failed += 1;
         }
     }
+
+    await Promise.all(Array.from(
+        { length: Math.min(NAME_REPAIR_CONCURRENCY, contacts.length) },
+        () => worker()
+    ));
 
     return result;
 }

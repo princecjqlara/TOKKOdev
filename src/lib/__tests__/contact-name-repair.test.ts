@@ -2,14 +2,12 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { repairMissingContactNamesForPage } from '../contact-name-repair';
 
 const mocks = vi.hoisted(() => ({
-    getConversationIdForPsid: vi.fn(),
-    getConversationMessages: vi.fn(),
+    getConversationForPsid: vi.fn(),
     getUserProfile: vi.fn()
 }));
 
 vi.mock('../facebook', () => ({
-    getConversationIdForPsid: mocks.getConversationIdForPsid,
-    getConversationMessages: mocks.getConversationMessages,
+    getConversationForPsid: mocks.getConversationForPsid,
     getUserProfile: mocks.getUserProfile
 }));
 
@@ -122,23 +120,27 @@ describe('repairMissingContactNamesForPage', () => {
             id: 'psid_1',
             name: 'Messenger Contact'
         });
-        mocks.getConversationIdForPsid.mockResolvedValue('conversation_1');
-        mocks.getConversationMessages.mockResolvedValue([
-            {
-                id: 'message_1',
-                message: 'hello',
-                from: { id: 'psid_1', name: 'Real Sender Name' },
-                created_time: '2026-04-07T02:00:00.000Z'
+        mocks.getConversationForPsid.mockResolvedValue({
+            id: 'conversation_1',
+            participants: { data: [] },
+            messages: {
+                data: [{
+                    id: 'message_1',
+                    message: 'hello',
+                    from: { id: 'psid_1', name: 'Real Sender Name' },
+                    created_time: '2026-04-07T02:00:00.000Z'
+                }]
             }
-        ]);
+        });
 
         const result = await repairMissingContactNamesForPage(supabase, page);
 
         expect(result.repaired).toBe(1);
-        expect(mocks.getConversationIdForPsid).toHaveBeenCalledWith(
+        expect(mocks.getConversationForPsid).toHaveBeenCalledWith(
             'fb_page_1',
             'psid_1',
-            'page_access_token_1'
+            'page_access_token_1',
+            { throwOnError: true, timeoutMs: 2000 }
         );
         expect(supabase.updates[0].payload).toEqual(expect.objectContaining({
             name: 'Real Sender Name'
@@ -154,7 +156,7 @@ describe('repairMissingContactNamesForPage', () => {
             id: 'psid_1',
             name: 'Messenger Contact'
         });
-        mocks.getConversationIdForPsid.mockResolvedValue(null);
+        mocks.getConversationForPsid.mockResolvedValue(null);
 
         const result = await repairMissingContactNamesForPage(supabase, page);
 
