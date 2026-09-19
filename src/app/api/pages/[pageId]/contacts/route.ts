@@ -6,6 +6,13 @@ import { PaginatedResponse, Contact } from '@/types';
 import { normalizeContactName } from '../../../../../lib/contact-names';
 
 type DateFilterMode = 'include' | 'exclude';
+type HumanAgentSort = 'expiring' | 'latest' | 'name_asc' | 'name_desc';
+
+function getHumanAgentSort(value: string | null): HumanAgentSort {
+    return value === 'latest' || value === 'name_asc' || value === 'name_desc'
+        ? value
+        : 'expiring';
+}
 
 function getDateToEndString(dateTo: string): string {
     const dateToEnd = new Date(dateTo);
@@ -67,6 +74,7 @@ export async function GET(
         const excludeTagIds = excludeTagIdsRaw ? excludeTagIdsRaw.split(',').filter(Boolean) : [];
         const sendableOnly = searchParams.get('sendable') === 'true'; // Only return contacts with valid PSIDs
         const humanAgentWindowOnly = searchParams.get('humanAgentWindow') === 'true';
+        const humanAgentSort = getHumanAgentSort(searchParams.get('sort'));
         const includeCount = searchParams.get('includeCount') !== 'false';
         const dateFrom = searchParams.get('dateFrom') || '';
         const dateTo = searchParams.get('dateTo') || '';
@@ -124,9 +132,22 @@ export async function GET(
         let query = includeCount
             ? contactsTable.select(contactSelect, { count: 'exact' })
             : contactsTable.select(contactSelect);
-        query = query
-            .eq('page_id', pageId)
-            .order(humanAgentWindowOnly ? 'last_inbound_at' : 'last_interaction_at', { ascending: false, nullsFirst: false });
+        query = query.eq('page_id', pageId);
+
+        if (humanAgentWindowOnly) {
+            if (humanAgentSort === 'name_asc' || humanAgentSort === 'name_desc') {
+                query = query
+                    .order('name', { ascending: humanAgentSort === 'name_asc', nullsFirst: false })
+                    .order('last_inbound_at', { ascending: false, nullsFirst: false });
+            } else {
+                query = query.order('last_inbound_at', {
+                    ascending: humanAgentSort === 'expiring',
+                    nullsFirst: false
+                });
+            }
+        } else {
+            query = query.order('last_interaction_at', { ascending: false, nullsFirst: false });
+        }
 
         if (humanAgentWindowOnly) {
             const now = new Date();

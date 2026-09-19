@@ -75,6 +75,9 @@ function createSupabaseMock(options?: {
         in: vi.fn(() => contactsBuilder),
         is: vi.fn(() => contactsBuilder),
         not: vi.fn(() => contactsBuilder),
+        neq: vi.fn(() => contactsBuilder),
+        gte: vi.fn(() => contactsBuilder),
+        lte: vi.fn(() => contactsBuilder),
         or: vi.fn(() => contactsBuilder),
         order: vi.fn(() => contactsBuilder),
         range: contactsRange
@@ -167,6 +170,7 @@ function createSupabaseMock(options?: {
         contactsIs: contactsBuilder.is,
         contactsNot: contactsBuilder.not,
         contactsOr: contactsBuilder.or,
+        contactsOrder: contactsBuilder.order,
         contactTagsIn,
         contactTagsEq
     };
@@ -244,6 +248,29 @@ describe('GET /api/pages/[pageId]/contacts', () => {
         expect(supabase.contactsOr).toHaveBeenCalledWith(
             'first_interaction_at.lt.2026-07-20,and(first_interaction_at.is.null,created_at.lt.2026-07-20),first_interaction_at.gte.2026-07-27,and(first_interaction_at.is.null,created_at.gte.2026-07-27)'
         );
+    });
+
+    it('sorts 7-day contacts by expiry, latest message, or name', async () => {
+        mocks.getServerSession.mockResolvedValue({ user: { id: 'user_1' } });
+
+        for (const [sort, expectedColumn, expectedAscending] of [
+            ['expiring', 'last_inbound_at', true],
+            ['latest', 'last_inbound_at', false],
+            ['name_asc', 'name', true],
+            ['name_desc', 'name', false]
+        ] as const) {
+            const supabase = createSupabaseMock();
+            mocks.getSupabaseAdmin.mockReturnValue(supabase);
+            const response = await GET(
+                createRequest(`http://localhost:3000/api/pages/page_1/contacts?humanAgentWindow=true&sort=${sort}`),
+                { params: Promise.resolve({ pageId: 'page_1' }) }
+            );
+            expect(response.status).toBe(200);
+            expect(supabase.contactsOrder).toHaveBeenCalledWith(expectedColumn, {
+                ascending: expectedAscending,
+                nullsFirst: false
+            });
+        }
     });
 
     it('normalizes placeholder contact names out of the API response', async () => {
