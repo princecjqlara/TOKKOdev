@@ -4,12 +4,23 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { CheckSquare, Clock3, RefreshCw, Search, Send, Paperclip, X } from 'lucide-react';
 import Pagination from '@/components/Pagination';
 import { getSupabaseClient } from '@/lib/supabase';
-import { MAX_MESSENGER_MEDIA_BYTES } from '@/lib/messenger-media';
+import { MAX_MESSENGER_MEDIA_BYTES, MAX_MESSENGER_MEDIA_FILES } from '@/lib/messenger-media';
+import {
+    createManualReplyFingerprint,
+    getSentPartsForRetry,
+    mergeSentParts,
+    type ManualReplyRetryState
+} from '@/lib/manual-reply-retry';
 import type { Contact, Page, PaginatedResponse, Tag } from '@/types';
 
 type PreparedUpload = { path: string; token: string; type: 'image' | 'video' | 'audio' | 'file'; bucket: string };
 type ContactSort = 'expiring' | 'latest' | 'name_asc' | 'name_desc';
 type SendProgress = { completed: number; total: number } | null;
+type SendResult = {
+    message?: string;
+    partial?: boolean;
+    sent?: Array<{ kind: string; partId?: string; messageId: string }>;
+};
 
 const BULK_SEND_CONCURRENCY = 4;
 
@@ -84,8 +95,9 @@ export default function SevenDayContactsPage() {
     const [listPage, setListPage] = useState(1);
     const [total, setTotal] = useState(0);
     const [selectedContacts, setSelectedContacts] = useState<Record<string, Contact>>({});
+    const [partialDeliveries, setPartialDeliveries] = useState<Record<string, ManualReplyRetryState>>({});
     const [text, setText] = useState('');
-    const [file, setFile] = useState<File | null>(null);
+    const [files, setFiles] = useState<File[]>([]);
     const [now, setNow] = useState(Date.now());
     const [loading, setLoading] = useState(false);
     const [sending, setSending] = useState(false);
@@ -283,36 +295,54 @@ export default function SevenDayContactsPage() {
         }
     }, [allMatchingSelected, selectedContactList.length, total]);
 
+    function addMediaFiles(selectedFiles: FileList | null) {
+        const additions = Array.from(selectedFiles || []);
+        if (additions.length === 0) return;
+        if (files.length + additions.length > MAX_MESSENGER_MEDIA_FILES) {
+            setError(`Choose up to ${MAX_MESSENGER_MEDIA_FILES} media files at a time.`);
+            return;
+        }
+        setFiles((current) => [...current, ...additions]);
+        setError('');
+    }
+
     async function sendBulkReply() {
-        if (!pageId || selectedContactList.length === 0 || (!text.trim() && !file) || sending) return;
+        if (!pageId || selectedContactList.length === 0 || (!text.trim() && files.length === 0) || sending) return;
         const recipients = [...selectedContactList];
         setSending(true);
         setSendProgress({ completed: 0, total: recipients.length });
         setError('');
         setNotice('');
         try {
-            let mediaPath = '';
-            let mediaType = '';
-            if (file) {
+            const replyFingerprint = createManualReplyFingerprint(text, files.map((file) => ({
+                name: file.name,
+                size: file.size,
+                type: file.type,
+                lastModified: file.lastModified
+            })));
+            if (files.length > MAX_MESSENGER_MEDIA_FILES) {
+                throw new Error(`Choose up to ${MAX_MESSENGER_MEDIA_FILES} media files at a time.`);
+            }
+            const preparedMedia = await Promise.all(files.map(async (file, index) => {
                 if (file.size <= 0 || file.size > MAX_MESSENGER_MEDIA_BYTES) {
-                    throw new Error('Choose a file up to 10 MB.');
+                    throw new Error(`${file.name} must be no larger than 10 MB.`);
                 }
                 const prepareResponse = await fetch(`/api/pages/${encodeURIComponent(pageId)}/human-agent-media`, {
                     method: 'POST', headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ mimeType: file.type, size: file.size })
                 });
                 const prepared: PreparedUpload & { message?: string } = await prepareResponse.json();
-                if (!prepareResponse.ok) throw new Error(prepared.message || 'Could not prepare upload.');
+                if (!prepareResponse.ok) throw new Error(prepared.message || `Could not prepare ${file.name}.`);
                 const { error: uploadError } = await getSupabaseClient().storage
                     .from(prepared.bucket)
                     .uploadToSignedUrl(prepared.path, prepared.token, file, { contentType: file.type });
-                if (uploadError) throw new Error(`Media upload failed: ${uploadError.message}`);
-                mediaPath = prepared.path;
-                mediaType = prepared.type;
-            }
+                if (uploadError) throw new Error(`${file.name} upload failed: ${uploadError.message}`);
+                return { path: prepared.path, type: prepared.type, partId: `media:${index}` };
+            }));
 
             const successes = new Set<string>();
             const failures: Array<{ contact: Contact; message: string }> = [];
+            const nextPartialDeliveries = { ...partialDeliveries };
             let nextIndex = 0;
             let completed = 0;
 
@@ -320,13 +350,44 @@ export default function SevenDayContactsPage() {
                 while (nextIndex < recipients.length) {
                     const contact = recipients[nextIndex++];
                     try {
+                        const alreadySent = getSentPartsForRetry(
+                            nextPartialDeliveries[contact.id],
+                            replyFingerprint
+                        );
+                        if (nextPartialDeliveries[contact.id]?.fingerprint !== replyFingerprint) {
+                            delete nextPartialDeliveries[contact.id];
+                        }
+                        const pendingText = alreadySent.has('text') ? '' : text.trim();
+                        const pendingMediaItems = preparedMedia.filter((item) => !alreadySent.has(item.partId));
+                        if (!pendingText && pendingMediaItems.length === 0) {
+                            successes.add(contact.id);
+                            delete nextPartialDeliveries[contact.id];
+                            continue;
+                        }
                         const response = await fetch(`/api/pages/${encodeURIComponent(pageId)}/human-agent-send`, {
                             method: 'POST', headers: { 'Content-Type': 'application/json' },
-                            body: JSON.stringify({ contactId: contact.id, text: text.trim(), mediaPath, mediaType })
+                            body: JSON.stringify({
+                                contactId: contact.id,
+                                text: pendingText,
+                                mediaItems: pendingMediaItems
+                            })
                         });
-                        const result = await response.json();
-                        if (!response.ok) throw new Error(result.message || 'Messenger did not confirm the send.');
+                        const result = await response.json() as SendResult;
+                        if (!response.ok) {
+                            const sentParts = mergeSentParts(
+                                alreadySent,
+                                (result.sent || []).map((item) => item.partId || item.kind)
+                            );
+                            if (sentParts.length > 0) {
+                                nextPartialDeliveries[contact.id] = {
+                                    fingerprint: replyFingerprint,
+                                    sentParts
+                                };
+                            }
+                            throw new Error(result.message || 'Messenger did not confirm the send.');
+                        }
                         successes.add(contact.id);
+                        delete nextPartialDeliveries[contact.id];
                     } catch (sendError) {
                         failures.push({
                             contact,
@@ -344,6 +405,7 @@ export default function SevenDayContactsPage() {
                 () => worker()
             ));
 
+            setPartialDeliveries(nextPartialDeliveries);
             setSelectedContacts((current) => Object.fromEntries(
                 Object.entries(current).filter(([contactId]) => !successes.has(contactId))
             ));
@@ -351,7 +413,7 @@ export default function SevenDayContactsPage() {
             if (failures.length === 0) {
                 setNotice(`Sent successfully to all ${successes.size.toLocaleString()} selected contacts.`);
                 setText('');
-                setFile(null);
+                setFiles([]);
             } else {
                 const firstFailure = failures[0];
                 setNotice(successes.size > 0 ? `Sent successfully to ${successes.size.toLocaleString()} of ${recipients.length.toLocaleString()} selected contacts.` : 'No messages were confirmed sent.');
@@ -386,7 +448,7 @@ export default function SevenDayContactsPage() {
                 <label className="text-xs font-semibold">Facebook Page
                     <select value={pageId} onChange={(event) => {
                         setPageId(event.target.value); setListPage(1); clearSelection();
-                        setIncludeTagIds([]); setExcludeTagIds([]); setText(''); setFile(null);
+                        setIncludeTagIds([]); setExcludeTagIds([]); setText(''); setFiles([]);
                     }} className="block mt-1 w-full border border-black bg-white p-2 text-sm">
                         {pages.length === 0 && <option value="">No connected Pages</option>}
                         {pages.map((page) => <option key={page.id} value={page.id}>{page.name}</option>)}
@@ -473,16 +535,34 @@ export default function SevenDayContactsPage() {
                     </label>
                     <div>
                         <label className="inline-flex items-center gap-2 border border-black px-3 py-2 text-sm cursor-pointer hover:bg-gray-100">
-                            <Paperclip className="w-4 h-4" />Upload media
-                            <input type="file" className="sr-only" accept="image/jpeg,image/png,image/webp,image/gif,video/mp4,video/quicktime,audio/mpeg,audio/mp4,audio/wav,audio/ogg,application/pdf,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document,application/vnd.ms-excel,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" onChange={(event) => setFile(event.target.files?.[0] || null)} />
+                            <Paperclip className="w-4 h-4" />Add media
+                            <input
+                                type="file"
+                                multiple
+                                className="sr-only"
+                                accept="image/jpeg,image/png,image/webp,image/gif,video/mp4,video/quicktime,audio/mpeg,audio/mp4,audio/wav,audio/ogg,application/pdf,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document,application/vnd.ms-excel,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                                onChange={(event) => {
+                                    addMediaFiles(event.target.files);
+                                    event.target.value = '';
+                                }}
+                            />
                         </label>
-                        {file && <div className="flex items-center justify-between gap-2 mt-2 text-xs border border-gray-400 p-2"><span className="truncate">{file.name} ({(file.size / (1024 * 1024)).toFixed(1)} MB)</span><button type="button" onClick={() => setFile(null)} aria-label="Remove media"><X className="w-4 h-4" /></button></div>}
-                        <p className="text-xs text-gray-600 mt-2">Images, videos, audio, PDF, Word, or Excel files up to 10 MB. Media is a normal Messenger attachment, not a template header.</p>
+                        {files.length > 0 && (
+                            <div className="mt-2 border border-gray-400 divide-y divide-gray-300">
+                                {files.map((file, index) => (
+                                    <div key={`${file.name}-${file.size}-${file.lastModified}-${index}`} className="flex items-center justify-between gap-2 p-2 text-xs">
+                                        <span className="truncate">{file.name} ({(file.size / (1024 * 1024)).toFixed(1)} MB)</span>
+                                        <button type="button" onClick={() => setFiles((current) => current.filter((_, fileIndex) => fileIndex !== index))} aria-label={`Remove ${file.name}`}><X className="w-4 h-4" /></button>
+                                    </div>
+                                ))}
+                            </div>
+                        )}
+                        <p className="text-xs text-gray-600 mt-2">Up to {MAX_MESSENGER_MEDIA_FILES} images, videos, audio, PDF, Word, or Excel files, each up to 10 MB. Each is sent as a normal Messenger attachment.</p>
                     </div>
-                    {file && text.trim() && <p className="text-xs text-gray-600">Text and media will arrive as two Messenger messages from one send action.</p>}
+                    {files.length > 0 && <p className="text-xs text-gray-600">Each attachment{ text.trim() ? ' and the text' : '' } will arrive as a separate Messenger message from one send action.</p>}
                     <button
                         type="button"
-                        disabled={selectedContactList.length === 0 || (!text.trim() && !file) || sending}
+                        disabled={selectedContactList.length === 0 || (!text.trim() && files.length === 0) || sending}
                         onClick={sendBulkReply}
                         className="w-full flex items-center justify-center gap-2 bg-black text-white px-4 py-3 text-sm font-semibold disabled:opacity-50"
                     >

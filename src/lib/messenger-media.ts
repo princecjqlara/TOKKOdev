@@ -1,5 +1,6 @@
 export const MESSENGER_MEDIA_BUCKET = 'messenger-agent-media';
 export const MAX_MESSENGER_MEDIA_BYTES = 10 * 1024 * 1024;
+export const MAX_MESSENGER_MEDIA_FILES = 10;
 
 export const MESSENGER_MEDIA_MIME_TYPES: Record<string, { type: 'image' | 'video' | 'audio' | 'file'; extension: string }> = {
     'image/jpeg': { type: 'image', extension: 'jpg' },

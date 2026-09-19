@@ -3,7 +3,11 @@ import { getSessionFromRequest } from '@/lib/get-session';
 import { getSupabaseAdmin } from '@/lib/supabase';
 import { getConversationForPsid, sendMessage, sendMessengerMediaAttachment } from '@/lib/facebook';
 import { getManualReplyMessagingType } from '@/lib/human-agent-window';
-import { MESSENGER_MEDIA_BUCKET, MESSENGER_MEDIA_MIME_TYPES } from '@/lib/messenger-media';
+import {
+    MAX_MESSENGER_MEDIA_FILES,
+    MESSENGER_MEDIA_BUCKET,
+    MESSENGER_MEDIA_MIME_TYPES
+} from '@/lib/messenger-media';
 import { recordOutboundMessageEvent } from '@/lib/outbound-message-events';
 import { recordPageActivity } from '@/lib/activity-history';
 
@@ -20,21 +24,40 @@ export async function POST(
         const body = await request.json().catch(() => ({}));
         const contactId = typeof body.contactId === 'string' ? body.contactId.trim() : '';
         const text = typeof body.text === 'string' ? body.text.trim() : '';
-        const mediaPath = typeof body.mediaPath === 'string' ? body.mediaPath.trim() : '';
-        const mediaType = typeof body.mediaType === 'string' ? body.mediaType : '';
-        if (!contactId || (!text && !mediaPath) || text.length > 2000) {
+        const legacyMediaPath = typeof body.mediaPath === 'string' ? body.mediaPath.trim() : '';
+        const legacyMediaType = typeof body.mediaType === 'string' ? body.mediaType : '';
+        const rawMediaItems = Array.isArray(body.mediaItems)
+            ? body.mediaItems
+            : legacyMediaPath
+                ? [{ path: legacyMediaPath, type: legacyMediaType, partId: 'media:0' }]
+                : [];
+        const mediaItems = rawMediaItems.map((item: unknown, index: number) => {
+            const value = item && typeof item === 'object' ? item as Record<string, unknown> : {};
+            return {
+                path: typeof value.path === 'string' ? value.path.trim() : '',
+                type: typeof value.type === 'string' ? value.type : '',
+                partId: typeof value.partId === 'string' ? value.partId : `media:${index}`
+            };
+        });
+        if (!contactId || (!text && mediaItems.length === 0) || text.length > 2000) {
             return NextResponse.json({ message: 'Select one contact and enter text, media, or both (text up to 2,000 characters).' }, { status: 400 });
         }
-        if (mediaPath) {
+        if (mediaItems.length > MAX_MESSENGER_MEDIA_FILES) {
+            return NextResponse.json({ message: `Choose up to ${MAX_MESSENGER_MEDIA_FILES} media files at a time.` }, { status: 400 });
+        }
+        const partIds = new Set<string>();
+        for (const mediaItem of mediaItems) {
             const ownerPrefix = `${session.user.id}/${pageId}/`;
-            const fileName = mediaPath.startsWith(ownerPrefix) ? mediaPath.slice(ownerPrefix.length) : '';
+            const fileName = mediaItem.path.startsWith(ownerPrefix) ? mediaItem.path.slice(ownerPrefix.length) : '';
             const extension = fileName.match(/^[0-9a-f-]{36}\.([a-z0-9]+)$/i)?.[1];
             const supported = Object.values(MESSENGER_MEDIA_MIME_TYPES).some(
-                (entry) => entry.extension === extension && entry.type === mediaType
+                (entry) => entry.extension === extension && entry.type === mediaItem.type
             );
-            if (!supported) {
+            const validPartId = /^media:\d+$/.test(mediaItem.partId) && !partIds.has(mediaItem.partId);
+            if (!supported || !validPartId) {
                 return NextResponse.json({ message: 'Upload the media from this page before sending.' }, { status: 400 });
             }
+            partIds.add(mediaItem.partId);
         }
 
         const db = getSupabaseAdmin();
@@ -73,33 +96,37 @@ export async function POST(
             if (timestampError) console.warn('Could not refresh last inbound time:', timestampError.message);
         }
 
-        let mediaUrl: string | null = null;
-        if (mediaPath) {
+        const preparedMedia: Array<{ type: 'image' | 'video' | 'audio' | 'file'; url: string; partId: string }> = [];
+        for (const mediaItem of mediaItems) {
             const { data, error } = await db.storage.from(MESSENGER_MEDIA_BUCKET)
-                .createSignedUrl(mediaPath, 24 * 60 * 60);
+                .createSignedUrl(mediaItem.path, 24 * 60 * 60);
             if (error || !data?.signedUrl) {
-                return NextResponse.json({ message: 'The uploaded media is no longer available. Upload it again.' }, { status: 400 });
+                return NextResponse.json({ message: 'One of the uploaded files is no longer available. Upload the files again.' }, { status: 400 });
             }
-            mediaUrl = data.signedUrl;
+            preparedMedia.push({
+                type: mediaItem.type as 'image' | 'video' | 'audio' | 'file',
+                url: data.signedUrl,
+                partId: mediaItem.partId
+            });
         }
 
-        const sent: Array<{ kind: string; messageId: string }> = [];
+        const sent: Array<{ kind: string; partId: string; messageId: string }> = [];
         try {
-            if (mediaUrl) {
+            for (const media of preparedMedia) {
                 const result = await sendMessengerMediaAttachment(
                     page.fb_page_id, page.access_token, contact.psid,
-                    { type: mediaType as 'image' | 'video' | 'audio' | 'file', url: mediaUrl }, messagingType
+                    { type: media.type, url: media.url }, messagingType
                 );
-                sent.push({ kind: mediaType, messageId: result.message_id });
+                sent.push({ kind: media.type, partId: media.partId, messageId: result.message_id });
                 await recordOutboundMessageEvent(db, {
                     pageId, contactId, messageId: result.message_id, sourceType: 'manual',
                     actorUserId: session.user.id, actorName: session.user.name || null,
-                    messageKind: `${mediaType} attachment`
+                    messageKind: `${media.type} attachment`
                 });
             }
             if (text) {
                 const result = await sendMessage(page.fb_page_id, page.access_token, contact.psid, text, messagingType);
-                sent.push({ kind: 'text', messageId: result.message_id });
+                sent.push({ kind: 'text', partId: 'text', messageId: result.message_id });
                 await recordOutboundMessageEvent(db, {
                     pageId, contactId, messageId: result.message_id, sourceType: 'manual',
                     actorUserId: session.user.id, actorName: session.user.name || null,
@@ -114,7 +141,11 @@ export async function POST(
                 status: partial ? 'partial' : 'failed',
                 summary: partial ? 'Manual Messenger reply partially sent' : 'Manual Messenger reply failed',
                 targetCount: 1, successCount: partial ? 1 : 0, failureCount: partial ? 0 : 1,
-                details: { sentKinds: sent.map((item) => item.kind), error: (error as Error).message }
+                details: {
+                    sentKinds: sent.map((item) => item.kind),
+                    sentParts: sent.map((item) => item.partId),
+                    error: (error as Error).message
+                }
             });
             return NextResponse.json({
                 message: partial
@@ -129,7 +160,11 @@ export async function POST(
             pageId, actorUserId: session.user.id, actionType: 'human_agent_manual_reply',
             entityType: 'contact', entityId: contactId, status: 'completed',
             summary: 'Manual Messenger reply sent', targetCount: 1, successCount: 1,
-            details: { sentKinds: sent.map((item) => item.kind), messagingType }
+            details: {
+                sentKinds: sent.map((item) => item.kind),
+                sentParts: sent.map((item) => item.partId),
+                messagingType
+            }
         });
         return NextResponse.json({ success: true, sent, messagingType });
     } catch (error) {

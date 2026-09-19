@@ -87,6 +87,30 @@ describe('manual Human Agent reply', () => {
         expect(mocks.recordOutboundMessageEvent).toHaveBeenCalledTimes(2);
     });
 
+    it('sends multiple media files from one action', async () => {
+        const secondMediaPath = 'user-1/page-1/223e4567-e89b-12d3-a456-426614174000.pdf';
+        const response = await POST(request({
+            contactId: 'contact-1',
+            mediaItems: [
+                { path: mediaPath, type: 'image', partId: 'media:0' },
+                { path: secondMediaPath, type: 'file', partId: 'media:1' }
+            ]
+        }), { params: Promise.resolve({ pageId: 'page-1' }) });
+
+        expect(response.status).toBe(200);
+        expect(mocks.sendMessengerMediaAttachment).toHaveBeenCalledTimes(2);
+        expect(mocks.sendMessengerMediaAttachment).toHaveBeenNthCalledWith(
+            1, 'fb-page-1', 'token', 'psid-1',
+            { type: 'image', url: 'https://example.com/media.png' }, 'HUMAN_AGENT'
+        );
+        expect(mocks.sendMessengerMediaAttachment).toHaveBeenNthCalledWith(
+            2, 'fb-page-1', 'token', 'psid-1',
+            { type: 'file', url: 'https://example.com/media.png' }, 'HUMAN_AGENT'
+        );
+        const body = await response.json();
+        expect(body.sent.map((item: { partId: string }) => item.partId)).toEqual(['media:0', 'media:1']);
+    });
+
     it('does not permit using another uploader’s media path', async () => {
         const response = await POST(request({
             contactId: 'contact-1', mediaPath: mediaPath.replace('user-1', 'other-user'), mediaType: 'image'
@@ -113,7 +137,7 @@ describe('manual Human Agent reply', () => {
         expect(response.status).toBe(502);
         const body = await response.json();
         expect(body.partial).toBe(true);
-        expect(body.sent).toEqual([{ kind: 'image', messageId: 'media-message' }]);
+        expect(body.sent).toEqual([{ kind: 'image', partId: 'media:0', messageId: 'media-message' }]);
         expect(mocks.sendMessengerMediaAttachment).toHaveBeenCalledTimes(1);
     });
 });
