@@ -305,7 +305,7 @@
     CREATE INDEX IF NOT EXISTS idx_tags_owner_id ON tags(owner_id);
     CREATE INDEX IF NOT EXISTS idx_tags_page_id ON tags(page_id);
     CREATE INDEX IF NOT EXISTS idx_tags_is_shared ON tags(is_shared);
-    CREATE UNIQUE INDEX IF NOT EXISTS idx_tags_one_default_per_page ON tags (owner_id)
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_tags_default_page_name ON tags (owner_id, lower(btrim(name)))
         WHERE owner_type = 'page' AND is_default;
     CREATE INDEX IF NOT EXISTS idx_tag_shares_tag_id ON tag_shares(tag_id);
     CREATE INDEX IF NOT EXISTS idx_tag_shares_shared_with_user_id ON tag_shares(shared_with_user_id);
@@ -350,7 +350,9 @@
     AS $$
     BEGIN
         INSERT INTO tags (name, color, owner_type, owner_id, page_id, is_default)
-        VALUES ('Paid / Availed Service', '#16a34a', 'page', NEW.id, NEW.id, TRUE);
+        VALUES
+            ('Paid / Availed Service', '#16a34a', 'page', NEW.id, NEW.id, TRUE),
+            ('Unqualified', '#dc2626', 'page', NEW.id, NEW.id, TRUE);
         RETURN NEW;
     END;
     $$;

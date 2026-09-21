@@ -144,8 +144,9 @@ export default function SettingsPage() {
                 <div className="border-b-2 border-black pb-4 mb-4">
                     <h2 className="text-xl font-bold uppercase">Messaging lead auto-tag</h2>
                     <p className="font-mono text-xs text-gray-600 mt-2">
-                        Add each Page&apos;s Paid / Availed Service tag to its Tokko contact when Messenger records an order created
-                        or a lead stage set to Qualified or Converted. On by default. An order record does not prove payment.
+                        Add each Page&apos;s Paid / Availed Service tag when Messenger records an order created or a lead stage set
+                        to Qualified or Converted. Lead stage Unqualified adds the Page&apos;s Unqualified tag instead. On by default.
+                        An order record does not prove payment.
                     </p>
                 </div>
                 {autoTagError && <p role="alert" className="text-red-700 text-sm mb-3">{autoTagError}</p>}

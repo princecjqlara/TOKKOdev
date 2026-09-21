@@ -1,4 +1,4 @@
--- Auto-tag Messenger contacts when Meta records an order or a qualified/converted lead stage.
+-- Auto-tag Messenger contacts when Meta records an order or a qualified/converted/unqualified lead stage.
 -- Start at deployment time: historical orders are not silently backfilled.
 ALTER TABLE pages ADD COLUMN IF NOT EXISTS messaging_auto_tag_enabled BOOLEAN NOT NULL DEFAULT TRUE;
 ALTER TABLE pages ADD COLUMN IF NOT EXISTS messaging_auto_tag_checked_at TIMESTAMPTZ NOT NULL DEFAULT NOW();

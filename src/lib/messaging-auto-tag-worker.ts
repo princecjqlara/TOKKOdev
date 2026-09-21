@@ -50,9 +50,13 @@ export async function processOneMessagingAutoTagPage() {
     const runStartedAt = new Date().toISOString();
 
     try {
-        const { data: tag, error: tagError } = await db.from('tags').select('id')
-            .eq('owner_type', 'page').eq('owner_id', current.id).eq('is_default', true).single();
-        if (tagError || !tag) throw tagError || new Error('Combined page tag is missing');
+        const { data: tags, error: tagError } = await db.from('tags').select('id,name')
+            .eq('owner_type', 'page').eq('owner_id', current.id).eq('is_default', true);
+        if (tagError) throw tagError;
+        const defaultTags = new Map((tags || []).map(tag => [tag.name.toLowerCase().replace(/[^a-z]/g, ''), tag.id]));
+        const paidTagId = defaultTags.get('paidavailedservice') || defaultTags.get('paidavailedservices');
+        const unqualifiedTagId = defaultTags.get('unqualified');
+        if (!paidTagId || !unqualifiedTagId) throw new Error('Default page tags are missing');
 
         const batch = await getPageConversationsBatch(current.fb_page_id, current.access_token, {
             limit: 10,
@@ -64,10 +68,14 @@ export async function processOneMessagingAutoTagPage() {
             const participant = conversation.participants?.data?.find(p => p.id !== current.fb_page_id);
             if (!participant) continue;
             const messages = await getMessagesSince(conversation.id, current.access_token, current.messaging_auto_tag_checked_at);
-            const qualifies = messages.some(message =>
-                message.from?.id === current.fb_page_id && classifyMessengerSystemMessage(message.message || '') !== null
-            );
-            if (!qualifies) continue;
+            const signals = messages
+                .filter(message => message.from?.id === current.fb_page_id)
+                .map(message => classifyMessengerSystemMessage(message.message || ''))
+                .filter(signal => signal !== null);
+            const targetTagIds = new Set<string>();
+            if (signals.some(signal => signal === 'unqualified')) targetTagIds.add(unqualifiedTagId);
+            if (signals.some(signal => signal !== 'unqualified')) targetTagIds.add(paidTagId);
+            if (targetTagIds.size === 0) continue;
 
             let { data: contact, error: contactError } = await db.from('contacts').select('id')
                 .eq('page_id', current.id).eq('psid', participant.id).maybeSingle();
@@ -88,10 +96,10 @@ export async function processOneMessagingAutoTagPage() {
                     contact = inserted.data;
                 }
             }
-            const { error: assignError } = await db.from('contact_tags').upsert({
-                contact_id: contact.id,
-                tag_id: tag.id
-            }, { onConflict: 'contact_id,tag_id', ignoreDuplicates: true });
+            const { error: assignError } = await db.from('contact_tags').upsert(
+                Array.from(targetTagIds, tagId => ({ contact_id: contact.id, tag_id: tagId })),
+                { onConflict: 'contact_id,tag_id', ignoreDuplicates: true }
+            );
             if (assignError) throw assignError;
             tagged++;
         }

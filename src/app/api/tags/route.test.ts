@@ -379,6 +379,21 @@ describe('POST /api/tags', () => {
         expect(response.status).toBe(400);
         expect(supabase.insert).not.toHaveBeenCalled();
     });
+
+    it('does not create a second copy of the unqualified default page tag', async () => {
+        mocks.getServerSession.mockResolvedValue({ user: { id: 'user_1' } });
+        const supabase = createSupabaseMockForPost();
+        mocks.getSupabaseAdmin.mockReturnValue(supabase);
+
+        const response = await POST(createRequest('http://localhost:3000/api/tags', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ name: ' Unqualified ', ownerType: 'page', ownerId: 'page_1' })
+        }));
+
+        expect(response.status).toBe(400);
+        expect(supabase.insert).not.toHaveBeenCalled();
+    });
 });
 
 describe('default page tag protection', () => {

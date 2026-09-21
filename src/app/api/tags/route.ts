@@ -17,9 +17,9 @@ function normalizeUserIdList(value: unknown): string[] {
     return Array.from(new Set(ids));
 }
 
-function isCombinedDefaultTagName(name: string): boolean {
+function isReservedDefaultTagName(name: string): boolean {
     const normalized = name.toLowerCase().replace(/[^a-z]/g, '');
-    return normalized === 'paidavailedservice' || normalized === 'paidavailedservices';
+    return normalized === 'paidavailedservice' || normalized === 'paidavailedservices' || normalized === 'unqualified';
 }
 
 // GET /api/tags - Get tags with pagination
@@ -315,7 +315,7 @@ export async function POST(request: NextRequest) {
             );
         }
 
-        if (ownerType === 'page' && isCombinedDefaultTagName(normalizedName)) {
+        if (ownerType === 'page' && isReservedDefaultTagName(normalizedName)) {
             return NextResponse.json(
                 { error: 'Bad Request', message: 'This default page tag already exists' },
                 { status: 400 }
@@ -536,7 +536,7 @@ export async function PUT(request: NextRequest) {
         }
 
         if (existingTag.owner_type === 'page' && !existingTag.is_default && typeof name === 'string' &&
-            isCombinedDefaultTagName(name)) {
+            isReservedDefaultTagName(name)) {
             return NextResponse.json(
                 { error: 'Bad Request', message: 'This name is reserved for a default page tag' },
                 { status: 400 }

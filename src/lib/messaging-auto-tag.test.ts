@@ -2,9 +2,11 @@ import { describe, expect, it } from 'vitest';
 import { classifyMessengerSystemMessage } from './messaging-auto-tag';
 
 describe('classifyMessengerSystemMessage', () => {
-    it('accepts qualified and converted stage records', () => {
+    it('accepts qualified, converted, and unqualified stage records', () => {
         expect(classifyMessengerSystemMessage('Lead stage set to Qualified')).toBe('qualified');
         expect(classifyMessengerSystemMessage('Lead stage set to Converted')).toBe('converted');
+        expect(classifyMessengerSystemMessage('Lead stage set to Unqualified')).toBe('unqualified');
+        expect(classifyMessengerSystemMessage(' lead stage set to unqualified. ')).toBe('unqualified');
     });
 
     it('accepts explicit created and requested order notifications', () => {

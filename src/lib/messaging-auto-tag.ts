@@ -1,11 +1,11 @@
-export type MessengerSystemSignal = 'order_created' | 'qualified' | 'converted';
+export type MessengerSystemSignal = 'order_created' | 'qualified' | 'converted' | 'unqualified';
 
 // These are Meta-generated conversation-history messages, not customer/staff prose.
 // The stage and order text was observed in the app's read-only Messenger audit.
 export function classifyMessengerSystemMessage(text: string): MessengerSystemSignal | null {
     const value = text.trim();
-    const stage = /^Lead stage set to (Qualified|Converted)\.?$/i.exec(value);
-    if (stage) return stage[1].toLowerCase() as 'qualified' | 'converted';
+    const stage = /^Lead stage set to (Qualified|Converted|Unqualified)\.?$/i.exec(value);
+    if (stage) return stage[1].toLowerCase() as 'qualified' | 'converted' | 'unqualified';
 
     if (/^You (?:created an order for|requested) (?:PHP|₱)[\d,.]+\b/i.test(value) &&
         /fb-pma:\/\/payments\/orderdetails\/\?[^\s]*invoice_id=\d+/i.test(value)) {
