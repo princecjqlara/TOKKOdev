@@ -207,9 +207,9 @@ describe('GET /api/cron/campaign-scheduled', () => {
             supabase,
             allowScheduled: true,
             dueAt: expect.any(String),
-            sendBatchSize: 10,
+            sendBatchSize: 25,
             delayBetweenBatchesMs: 0,
-            maxRecipientsPerRun: 25,
+            maxRecipientsPerRun: 250,
             maxProcessingTimeMs: 15000,
             includeUnscheduledRecipients: true
         });
@@ -243,9 +243,9 @@ describe('GET /api/cron/campaign-scheduled', () => {
             supabase,
             allowScheduled: true,
             dueAt: expect.any(String),
-            sendBatchSize: 10,
+            sendBatchSize: 25,
             delayBetweenBatchesMs: 0,
-            maxRecipientsPerRun: 25,
+            maxRecipientsPerRun: 250,
             maxProcessingTimeMs: 15000,
             includeUnscheduledRecipients: false
         });
@@ -350,5 +350,63 @@ describe('GET /api/cron/campaign-scheduled', () => {
             skipped: true
         }));
         expect(mocks.sendCampaignById).not.toHaveBeenCalled();
+    });
+
+    it('uses both worker slots for immediate campaigns when no scheduled work is due', async () => {
+        const { GET } = await loadRoute();
+        const immediateCampaigns = ['first', 'second'].map(id => createCampaign({
+            id, status: 'sending', audience_mode: 'specific', scheduled_at: null
+        }));
+        const supabase = createSupabaseMock({ campaignLevelCampaigns: [], immediateCampaigns });
+        mocks.getSupabaseAdmin.mockReturnValue(supabase);
+        mocks.sendCampaignById.mockResolvedValue({ success: true, body: { partial: true } });
+
+        await GET(createRequest());
+
+        expect(mocks.sendCampaignById).toHaveBeenCalledTimes(2);
+        expect(mocks.sendCampaignById.mock.calls.map(([options]) => options.campaignId)).toEqual(['first', 'second']);
+    });
+
+    it('keeps a recovered best-time campaign restricted to due recipients', async () => {
+        const { GET } = await loadRoute();
+        const campaign = createCampaign({
+            status: 'sending', scheduled_at: null, audience_mode: 'specific',
+            background_delivery_enabled: false, updated_at: '2020-01-01T00:00:00.000Z'
+        });
+        const supabase = createSupabaseMock({ campaignLevelCampaigns: [], dueRecipientCampaigns: [campaign] });
+        mocks.getSupabaseAdmin.mockReturnValue(supabase);
+        mocks.sendCampaignById.mockResolvedValue({ success: true, body: { partial: true } });
+
+        await GET(createRequest());
+
+        expect(mocks.sendCampaignById).toHaveBeenCalledWith(expect.objectContaining({
+            allowScheduled: true, dueAt: expect.any(String), includeUnscheduledRecipients: false
+        }));
+    });
+
+    it('starts the second campaign while the first delivery slice is still running', async () => {
+        const { GET } = await loadRoute();
+        const supabase = createSupabaseMock({ campaignLevelCampaigns: [
+            createCampaign({ id: 'first', audience_mode: 'specific' }),
+            createCampaign({ id: 'second', audience_mode: 'specific' })
+        ] });
+        mocks.getSupabaseAdmin.mockReturnValue(supabase);
+        let finishFirst!: (result: unknown) => void;
+        let secondStarted!: () => void;
+        const started = new Promise<void>(resolve => { secondStarted = resolve; });
+        mocks.sendCampaignById.mockImplementation(({ campaignId }) => {
+            if (campaignId === 'first') return new Promise(resolve => { finishFirst = resolve; });
+            secondStarted();
+            return Promise.resolve({ success: true, body: {} });
+        });
+
+        const response = GET(createRequest());
+        try {
+            await started;
+            expect(mocks.sendCampaignById).toHaveBeenCalledTimes(2);
+        } finally {
+            finishFirst({ success: true, body: {} });
+        }
+        expect((await response).status).toBe(200);
     });
 });

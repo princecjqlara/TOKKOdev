@@ -2,6 +2,7 @@
 import { ConversationMessage } from './facebook';
 
 const NVIDIA_API_URL = 'https://integrate.api.nvidia.com/v1/chat/completions';
+const AI_REQUEST_TIMEOUT_MS = 10000;
 
 /**
  * Format conversation history for AI context
@@ -88,8 +89,11 @@ PURPOSE: ${prompt}
 
 Write a short, friendly intro message (1-2 sentences). Output ONLY the message, nothing else.`;
 
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), AI_REQUEST_TIMEOUT_MS);
     try {
         const response = await fetch(NVIDIA_API_URL, {
+            signal: controller.signal,
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
@@ -139,6 +143,8 @@ Write a short, friendly intro message (1-2 sentences). Output ONLY the message, 
         console.error('❌ Error generating AI message:', error);
         // Fallback: Create a simple greeting (do NOT include raw prompt text)
         return `Hi ${firstName}! Just wanted to check in with you. Hope you're doing well!`;
+    } finally {
+        clearTimeout(timeoutId);
     }
 }
 

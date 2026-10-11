@@ -965,7 +965,7 @@ export async function getPageTemplates(
         `&limit=100&access_token=${pageAccessToken}`;
 
     while (nextUrl) {
-        const response: Response = await fetch(nextUrl);
+        const response: Response = await fetchFacebookRead(nextUrl);
 
         if (!response.ok) {
             const errorData = await response.json().catch(() => ({ error: { message: 'Unknown error' } }));

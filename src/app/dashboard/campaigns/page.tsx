@@ -964,8 +964,8 @@ export default function CampaignsPage() {
                 header?.url ? { type: 'image' as const, url: header.url } : undefined
             ));
             const sendPayload = {
-                sendBatchSize: 10,
-                delayBetweenBatchesMs: 250,
+                sendBatchSize: 25,
+                delayBetweenBatchesMs: 0,
                 maxProcessingTimeMs: 45000,
                 templateMediaHeader: fallbackMediaHeader,
                 templateMediaHeaders: messageMediaHeaders
@@ -986,9 +986,7 @@ export default function CampaignsPage() {
                 console.error('Error sending campaign:', errorMessage, data);
                 alert(`Failed to send campaign: ${errorMessage}`);
             } else {
-                while ((data as any).partial && remaining > 0) {
-                    await new Promise(resolve => setTimeout(resolve, 100));
-
+                while ((data as any).partial && !(data as any).paused && !(data as any).cancelled && remaining > 0) {
                     response = await fetch(`/api/campaigns/${campaignId}/send`, {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
@@ -1009,11 +1007,14 @@ export default function CampaignsPage() {
                     }
 
                     remaining = Number((data as any).remaining || 0);
+                    if ((data as any).processed === 0) break;
                 }
 
                 const sent = (data as any).sent ?? 0;
                 const failed = (data as any).failed ?? 0;
-                if (deliveryQueuedForRetry) {
+                if ((data as any).paused && !deliveryQueuedForRetry || (data as any).cancelled) {
+                    alert((data as any).message || 'Campaign stopped. Unsent recipients remain saved.');
+                } else if (deliveryQueuedForRetry) {
                     alert(
                         `Campaign is safely queued for automatic retry.\n\n` +
                         `Sent: ${sent}\nFailed: ${failed}\nRemaining: ${remaining}\n\n` +

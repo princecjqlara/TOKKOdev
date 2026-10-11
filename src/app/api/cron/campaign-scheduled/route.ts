@@ -5,11 +5,10 @@ import { getSupabaseAdmin } from '@/lib/supabase';
 export const dynamic = 'force-dynamic';
 
 const STALE_SENDING_AFTER_MS = 10 * 60 * 1000;
-// Process one immediate campaign per invocation. This keeps the route within
-// the external scheduler/serverless execution window and prevents one call
-// from spending minutes walking several large queues.
+// Each campaign gets a bounded slice. Run the independent slices together
+// so two queues do not consume two consecutive scheduler timeout windows.
 const MAX_CAMPAIGNS_PER_CRON_RUN = 2;
-const MAX_RECIPIENTS_PER_CAMPAIGN_RUN = 25;
+const MAX_RECIPIENTS_PER_CAMPAIGN_RUN = 250;
 const MAX_IMMEDIATE_RECIPIENTS_PER_CAMPAIGN_RUN = 250;
 const MAX_DUE_RECIPIENT_ROWS_TO_SCAN = 500;
 // cron-jobs.org can stop waiting around the 30-second mark. Leave enough
@@ -175,7 +174,7 @@ export async function GET(_request: NextRequest) {
                 // Always give an explicitly-enabled immediate campaign the
                 // first worker slot. The second slot remains available for a
                 // due scheduled/best-time campaign.
-                [...immediateCampaigns.slice(0, 1), ...campaignLevelCampaigns, ...recipientLevelCampaigns]
+                [...immediateCampaigns.slice(0, 1), ...campaignLevelCampaigns, ...recipientLevelCampaigns, ...immediateCampaigns.slice(1)]
                     .filter((campaign) => (
                         !campaign.next_attempt_at || campaign.next_attempt_at <= now
                     ))
@@ -183,97 +182,95 @@ export async function GET(_request: NextRequest) {
             ).values()
         ).slice(0, MAX_CAMPAIGNS_PER_CRON_RUN);
 
-        const results = [];
-
-        for (const campaign of dueCampaigns) {
-            try {
+        const results = await Promise.all(dueCampaigns.map(async (campaign) => {
             const isImmediateResume =
                 campaign.status === 'sending' &&
-                campaign.scheduled_at === null;
-            // Recipient claims are already atomic and use SKIP LOCKED. An
-            // immediate campaign therefore remains safe if a browser worker
-            // and cron overlap; they receive disjoint recipient batches.
-            const claimed = isImmediateResume || await claimCampaign(supabase, campaign, now, staleSendingCutoff);
-            if (!claimed) {
-                results.push({
+                campaign.scheduled_at === null &&
+                campaign.background_delivery_enabled;
+            try {
+                // Recipient claims are already atomic and use SKIP LOCKED. An
+                // immediate campaign therefore remains safe if a browser worker
+                // and cron overlap; they receive disjoint recipient batches.
+                const claimed = isImmediateResume || await claimCampaign(supabase, campaign, now, staleSendingCutoff);
+                if (!claimed) {
+                    return {
+                        campaignId: campaign.id,
+                        skipped: true,
+                        reason: 'Campaign is already being processed'
+                    };
+                }
+
+                if (campaign.audience_mode === 'dynamic' && !campaign.audience_materialized_at) {
+                    const { data: materializedRows, error: materializationError } = await supabase.rpc(
+                        'materialize_dynamic_campaign_audience',
+                        { p_campaign_id: campaign.id }
+                    );
+
+                    if (materializationError) throw materializationError;
+                    const materialized = Array.isArray(materializedRows)
+                        ? materializedRows[0]
+                        : materializedRows;
+                    if (!materialized) {
+                        throw new Error('Database did not return dynamic audience materialization progress.');
+                    }
+
+                    campaign.audience_materialized_at = materialized.audience_materialized_at;
+                }
+
+                const sendResult = await sendCampaignById({
                     campaignId: campaign.id,
-                    skipped: true,
-                    reason: 'Campaign is already being processed'
+                    supabase,
+                    allowScheduled: !isImmediateResume,
+                    dueAt: isImmediateResume ? undefined : now,
+                    sendBatchSize: 25,
+                    delayBetweenBatchesMs: 0,
+                    maxRecipientsPerRun: isImmediateResume
+                        ? MAX_IMMEDIATE_RECIPIENTS_PER_CAMPAIGN_RUN
+                        : MAX_RECIPIENTS_PER_CAMPAIGN_RUN,
+                    maxProcessingTimeMs: MAX_CRON_SEND_MS,
+                    includeUnscheduledRecipients: !isImmediateResume &&
+                        Boolean(campaign.scheduled_at) &&
+                        new Date(campaign.scheduled_at as string).getTime() <= new Date(now).getTime()
                 });
-                continue;
-            }
 
-            if (campaign.audience_mode === 'dynamic' && !campaign.audience_materialized_at) {
-                const { data: materializedRows, error: materializationError } = await supabase.rpc(
-                    'materialize_dynamic_campaign_audience',
-                    { p_campaign_id: campaign.id }
-                );
+                // Daily-recurring campaigns: re-arm for tomorrow at the same time
+                // unless we've passed the end date.
+                if (campaign.recurrence === 'daily' && sendResult.success && !sendResult.body.partial) {
+                    const baseTime = campaign.scheduled_at ? new Date(campaign.scheduled_at) : new Date();
+                    const nextRun = new Date(baseTime);
+                    // Roll forward in 1-day increments until we land in the future.
+                    const nowMs = Date.now();
+                    while (nextRun.getTime() <= nowMs) {
+                        nextRun.setUTCDate(nextRun.getUTCDate() + 1);
+                    }
+                    const endsAt = campaign.recurrence_end_at ? new Date(campaign.recurrence_end_at) : null;
 
-                if (materializationError) throw materializationError;
-                const materialized = Array.isArray(materializedRows)
-                    ? materializedRows[0]
-                    : materializedRows;
-                if (!materialized) {
-                    throw new Error('Database did not return dynamic audience materialization progress.');
+                    if (endsAt && nextRun > endsAt) {
+                        // Past the recurrence end — leave the campaign as completed.
+                    } else {
+                        // Re-arm: clear sent/failed counters on recipients and reset campaign.
+                        await supabase
+                            .from('campaign_recipients')
+                            .update({ status: 'pending', sent_at: null, error_message: null })
+                            .eq('campaign_id', campaign.id);
+
+                        await supabase
+                            .from('campaigns')
+                            .update({
+                                status: 'scheduled',
+                                scheduled_at: nextRun.toISOString(),
+                                sent_count: 0,
+                                failed_count: 0,
+                                updated_at: new Date().toISOString()
+                            })
+                            .eq('id', campaign.id);
+                    }
                 }
 
-                campaign.audience_materialized_at = materialized.audience_materialized_at;
-            }
-
-            const sendResult = await sendCampaignById({
-                campaignId: campaign.id,
-                supabase,
-                allowScheduled: !isImmediateResume,
-                dueAt: isImmediateResume ? undefined : now,
-                sendBatchSize: isImmediateResume ? 25 : 10,
-                delayBetweenBatchesMs: 0,
-                maxRecipientsPerRun: isImmediateResume
-                    ? MAX_IMMEDIATE_RECIPIENTS_PER_CAMPAIGN_RUN
-                    : MAX_RECIPIENTS_PER_CAMPAIGN_RUN,
-                maxProcessingTimeMs: MAX_CRON_SEND_MS,
-                includeUnscheduledRecipients: !isImmediateResume &&
-                    Boolean(campaign.scheduled_at) &&
-                    new Date(campaign.scheduled_at as string).getTime() <= new Date(now).getTime()
-            });
-
-            // Daily-recurring campaigns: re-arm for tomorrow at the same time
-            // unless we've passed the end date.
-            if (campaign.recurrence === 'daily' && sendResult.success && !sendResult.body.partial) {
-                const baseTime = campaign.scheduled_at ? new Date(campaign.scheduled_at) : new Date();
-                const nextRun = new Date(baseTime);
-                // Roll forward in 1-day increments until we land in the future.
-                const nowMs = Date.now();
-                while (nextRun.getTime() <= nowMs) {
-                    nextRun.setUTCDate(nextRun.getUTCDate() + 1);
-                }
-                const endsAt = campaign.recurrence_end_at ? new Date(campaign.recurrence_end_at) : null;
-
-                if (endsAt && nextRun > endsAt) {
-                    // Past the recurrence end — leave the campaign as completed.
-                } else {
-                    // Re-arm: clear sent/failed counters on recipients and reset campaign.
-                    await supabase
-                        .from('campaign_recipients')
-                        .update({ status: 'pending', sent_at: null, error_message: null })
-                        .eq('campaign_id', campaign.id);
-
-                    await supabase
-                        .from('campaigns')
-                        .update({
-                            status: 'scheduled',
-                            scheduled_at: nextRun.toISOString(),
-                            sent_count: 0,
-                            failed_count: 0,
-                            updated_at: new Date().toISOString()
-                        })
-                        .eq('id', campaign.id);
-                }
-            }
-
-            results.push({
-                campaignId: campaign.id,
-                ...sendResult
-            });
+                return {
+                    campaignId: campaign.id,
+                    ...sendResult
+                };
             } catch (campaignError) {
                 const message = campaignError instanceof Error
                     ? campaignError.message
@@ -283,21 +280,21 @@ export async function GET(_request: NextRequest) {
                 await supabase
                     .from('campaigns')
                     .update({
-                        status: campaign.scheduled_at ? 'scheduled' : 'sending',
+                        status: isImmediateResume ? 'sending' : 'scheduled',
                         next_attempt_at: retryAt,
                         last_error: message,
                         updated_at: new Date().toISOString()
                     })
                     .eq('id', campaign.id);
 
-                results.push({
+                return {
                     campaignId: campaign.id,
                     success: false,
                     retryable: true,
                     message: `Campaign remains queued after a temporary worker error: ${message}`
-                });
+                };
             }
-        }
+        }));
 
         return NextResponse.json({
             success: true,

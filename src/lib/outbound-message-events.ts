@@ -37,12 +37,22 @@ export async function recordOutboundMessageEvent(
     supabase: SupabaseLike,
     event: OutboundMessageEventInput
 ): Promise<void> {
-    if (!event.messageId?.trim()) return;
+    await recordOutboundMessageEvents(supabase, [event]);
+}
+
+export async function recordOutboundMessageEvents(
+    supabase: SupabaseLike,
+    events: OutboundMessageEventInput[]
+): Promise<void> {
+    const validEvents = [...new Map(events
+        .filter(event => event.messageId?.trim())
+        .map(event => [event.messageId, event])).values()];
+    if (validEvents.length === 0) return;
 
     try {
         const { error } = await supabase
             .from('outbound_message_events')
-            .upsert({
+            .upsert(validEvents.map(event => ({
                 page_id: event.pageId,
                 contact_id: event.contactId || null,
                 message_id: event.messageId,
@@ -53,7 +63,7 @@ export async function recordOutboundMessageEvent(
                 actor_name: event.actorName || null,
                 message_kind: event.messageKind || null,
                 sent_at: event.sentAt || new Date().toISOString()
-            }, { onConflict: 'message_id' });
+            })), { onConflict: 'message_id' });
 
         if (error) {
             warnOnce(error.message);

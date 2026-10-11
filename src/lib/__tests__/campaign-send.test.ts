@@ -24,6 +24,7 @@ function createSupabaseMock(
         incompleteAudience?: boolean;
         templateMediaHeader?: { type: 'image'; url: string };
         stopAfterFirstBatch?: boolean;
+        nextAttemptAt?: string;
     } = {}
 ) {
     const campaignRecord = {
@@ -38,6 +39,7 @@ function createSupabaseMock(
         audience_materialized_at: options.incompleteAudience ? null : '2026-08-12T00:00:00.000Z',
         template_media_header: options.templateMediaHeader || null,
         ai_prompt: null,
+        next_attempt_at: options.nextAttemptAt || null,
         total_recipients:
             (options.recipients?.length || 0) +
             (options.remainingPendingCount || 0) +
@@ -139,7 +141,9 @@ function createSupabaseMock(
         return query;
     });
 
+    const outboundUpsert = vi.fn().mockResolvedValue({ error: null });
     const from = vi.fn((table: string) => {
+        if (table === 'outbound_message_events') return { upsert: outboundUpsert };
         if (table === 'campaigns') {
             return {
                 select: campaignSelect,
@@ -170,7 +174,8 @@ function createSupabaseMock(
         campaignUpdateIn,
         claimRpc,
         finishBatchRpc,
-        releaseBatchUpdate
+        releaseBatchUpdate,
+        outboundUpsert
     };
 }
 
@@ -197,6 +202,39 @@ describe('sendCampaignById', () => {
 
         expect(result.status).toBe(400);
         expect(result.body.message).toBe('Campaign has already been completed or cancelled');
+    });
+
+    it('does not claim or send recipients before the queued retry time', async () => {
+        const nextAttemptAt = new Date(Date.now() + 60000).toISOString();
+        const supabase = createSupabaseMock('draft', { nextAttemptAt, remainingPendingCount: 10 });
+
+        const result = await sendCampaignById({ campaignId: 'campaign_1', supabase: supabase as never });
+
+        expect(result.status).toBe(503);
+        expect(result.body).toEqual(expect.objectContaining({
+            paused: true, retryable: true, nextAttemptAt, remaining: 10
+        }));
+        expect(supabase.claimRpc).not.toHaveBeenCalled();
+        expect(supabase.campaignUpdate).not.toHaveBeenCalled();
+        expect(sendMessage).not.toHaveBeenCalled();
+    });
+
+    it('records message attribution once per recipient batch', async () => {
+        const recipients = Array.from({ length: 3 }, (_, index) => ({
+            id: `recipient_${index}`, contact_id: `contact_${index}`,
+            contacts: { psid: `psid_${index}`, name: 'Alex' }
+        }));
+        const supabase = createSupabaseMock('draft', { recipients });
+        vi.mocked(sendMessage).mockImplementation(async (_pageId, _token, psid) => ({ message_id: `mid_${psid}` }));
+
+        const result = await sendCampaignById({ campaignId: 'campaign_1', supabase: supabase as never });
+
+        expect(result.sent).toBe(3);
+        expect(supabase.outboundUpsert).toHaveBeenCalledTimes(1);
+        expect(supabase.outboundUpsert.mock.calls[0][0]).toHaveLength(3);
+        expect(supabase.outboundUpsert.mock.calls[0][0].map((event: any) => event.contact_id)).toEqual([
+            'contact_0', 'contact_1', 'contact_2'
+        ]);
     });
 
     it('blocks an incompletely materialized campaign before any recipient is sent', async () => {

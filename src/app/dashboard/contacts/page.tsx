@@ -1242,15 +1242,13 @@ export default function ContactsPage() {
             setBulkSendProgress(`${batchLabel}Campaign ${campaignId.slice(0, 8)}: ${sent} sent, ${failed} failed, ${remaining} pending`);
 
             let deliveryQueuedForRetry = false;
-            while (sendData.partial && remaining > 0) {
-                await new Promise(resolve => setTimeout(resolve, 100));
-
+            while (sendData.partial && !sendData.paused && !sendData.cancelled && remaining > 0) {
                 const response = await fetch(`/api/campaigns/${campaignId}/send`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({
-                        sendBatchSize: 10,
-                        delayBetweenBatchesMs: 250,
+                        sendBatchSize: 25,
+                        delayBetweenBatchesMs: 0,
                         maxProcessingTimeMs: 45000,
                         templateMediaHeader
                     })
@@ -1276,6 +1274,7 @@ export default function ContactsPage() {
                 failed = Number(sendData.failed || failed);
                 remaining = Number(sendData.remaining || Math.max((createData.recipients || 0) - sent - failed, 0));
                 setBulkSendProgress(`${batchLabel}Campaign ${campaignId.slice(0, 8)}: ${sent} sent, ${failed} failed, ${remaining} pending`);
+                if (sendData.processed === 0) break;
             }
 
             setLastSendResults({ sent, failed });
@@ -1287,7 +1286,9 @@ export default function ContactsPage() {
             resetBestTimeScheduleState();
             clearSelection();
 
-            alert(deliveryQueuedForRetry
+            alert((sendData.paused && !deliveryQueuedForRetry) || sendData.cancelled
+                ? (sendData.message || 'Campaign stopped. Unsent recipients remain saved.')
+                : deliveryQueuedForRetry
                 ? `Tracked bulk send is safely queued for automatic retry.\n\n${batchLabel}Recipients: ${createData.recipients}\nSent: ${sent}\nFailed: ${failed}\nRemaining: ${remaining}\nCampaign ID: ${campaignId}\n\nFacebook or the delivery service asked for a temporary pause. The background worker will resume without resending completed recipients.`
                 : sendData.partial && remaining > 0
                 ? `Tracked bulk send started in the durable background queue.\n\n${batchLabel}Recipients: ${createData.recipients}\nSent: ${sent}\nFailed: ${failed}\nRemaining: ${remaining}\nCampaign ID: ${campaignId}\n\nThe campaign worker will continue even if this browser closes.`
@@ -1344,7 +1345,7 @@ export default function ContactsPage() {
         try {
             const contactIds = await getSelectedContactIds();
 
-            await fetch(`/api/pages/${selectedPageId}/contacts/bulk-add-tags`, {
+            const response = await fetch(`/api/pages/${selectedPageId}/contacts/bulk-add-tags`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
@@ -1352,6 +1353,8 @@ export default function ContactsPage() {
                     tagIds: Array.from(selectedTagIds)
                 })
             });
+            const data = await readApiResponse(response);
+            if (!response.ok) throw new Error(data.message || 'Failed to add tags');
 
             setShowAddTagsModal(false);
             setSelectedTagIds(new Set());
@@ -1359,6 +1362,7 @@ export default function ContactsPage() {
             await fetchContacts();
         } catch (error) {
             console.error('Error adding tags:', error);
+            alert((error as Error).message || 'Failed to add tags');
         } finally {
             setActionLoading(false);
         }
@@ -1371,7 +1375,7 @@ export default function ContactsPage() {
         try {
             const contactIds = await getSelectedContactIds();
 
-            await fetch(`/api/pages/${selectedPageId}/contacts/bulk-remove-tags`, {
+            const response = await fetch(`/api/pages/${selectedPageId}/contacts/bulk-remove-tags`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
@@ -1379,6 +1383,8 @@ export default function ContactsPage() {
                     tagIds: Array.from(selectedTagIds)
                 })
             });
+            const data = await readApiResponse(response);
+            if (!response.ok) throw new Error(data.message || 'Failed to remove tags');
 
             setShowRemoveTagsModal(false);
             setSelectedTagIds(new Set());
@@ -1386,6 +1392,7 @@ export default function ContactsPage() {
             await fetchContacts();
         } catch (error) {
             console.error('Error removing tags:', error);
+            alert((error as Error).message || 'Failed to remove tags');
         } finally {
             setActionLoading(false);
         }
@@ -2076,17 +2083,20 @@ export default function ContactsPage() {
         try {
             const contactIds = await getSelectedContactIds();
 
-            await fetch(`/api/pages/${selectedPageId}/contacts/bulk`, {
+            const response = await fetch(`/api/pages/${selectedPageId}/contacts/bulk`, {
                 method: 'DELETE',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ contactIds })
             });
+            const data = await readApiResponse(response);
+            if (!response.ok) throw new Error(data.message || 'Failed to delete contacts');
 
             setShowDeleteModal(false);
             clearSelection();
             await fetchContacts();
         } catch (error) {
             console.error('Error deleting contacts:', error);
+            alert((error as Error).message || 'Failed to delete contacts');
         } finally {
             setActionLoading(false);
         }

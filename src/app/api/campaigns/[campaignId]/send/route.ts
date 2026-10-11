@@ -60,7 +60,7 @@ export async function POST(
     };
 
     let result = await sendCampaignById(sendOptions);
-    if (result.status === 503 && result.body.retryable === true) {
+    if (result.status === 503 && result.body.retryable === true && result.body.paused !== true) {
         await new Promise(resolve => setTimeout(resolve, DATABASE_BUSY_RETRY_DELAY_MS));
         result = await sendCampaignById(sendOptions);
     }

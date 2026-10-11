@@ -105,4 +105,16 @@ describe('POST /api/campaigns/[campaignId]/send', () => {
             }
         }));
     });
+
+    it('preserves a delivery backoff instead of immediately retrying the paused campaign', async () => {
+        mocks.sendCampaignById.mockResolvedValue({
+            status: 503, body: { retryable: true, paused: true }
+        });
+        const response = await POST(new Request('http://localhost/api/campaigns/campaign_1/send', {
+            method: 'POST', body: '{}'
+        }) as NextRequest, { params: Promise.resolve({ campaignId: 'campaign_1' }) });
+
+        expect(response.status).toBe(503);
+        expect(mocks.sendCampaignById).toHaveBeenCalledTimes(1);
+    });
 });

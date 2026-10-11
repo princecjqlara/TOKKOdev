@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { sendMessage, sendUtilityMessage, takeThreadControl } from '../facebook';
+import { getPageTemplates, sendMessage, sendUtilityMessage, takeThreadControl } from '../facebook';
 
 function createJsonResponse(ok: boolean, payload: unknown, status: number = 200, statusText: string = 'OK') {
     return {
@@ -11,8 +11,23 @@ function createJsonResponse(ok: boolean, payload: unknown, status: number = 200,
 }
 
 afterEach(() => {
+    vi.useRealTimers();
     vi.restoreAllMocks();
     vi.unstubAllGlobals();
+});
+
+describe('getPageTemplates', () => {
+    it('times out a stalled template preflight request', async () => {
+        vi.useFakeTimers();
+        vi.stubGlobal('fetch', vi.fn((_url, init: RequestInit) => new Promise((_resolve, reject) => {
+            init.signal?.addEventListener('abort', () => reject(new Error('aborted')), { once: true });
+        })));
+
+        const assertion = expect(getPageTemplates('page_1', 'token_1')).rejects.toThrow('timed out');
+        await vi.runAllTimersAsync();
+        await assertion;
+        expect(vi.getTimerCount()).toBe(0);
+    });
 });
 
 describe('sendMessage', () => {

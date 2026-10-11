@@ -18,7 +18,7 @@ import {
     releaseCampaignRecipientBatch
 } from './campaign-recipient-queue';
 import type { TemplateMediaType } from './facebook-templates';
-import { recordOutboundMessageEvent } from './outbound-message-events';
+import { recordOutboundMessageEvents, type OutboundMessageEventInput } from './outbound-message-events';
 
 type SupabaseLike = ReturnType<typeof getSupabaseAdmin>;
 
@@ -105,9 +105,9 @@ export async function sendCampaignById({
     allowScheduled = false,
     dueAt,
     includeUnscheduledRecipients = false,
-    sendBatchSize = 20,
+    sendBatchSize = 25,
     maxRecipientsPerRun,
-    delayBetweenBatchesMs = 50,
+    delayBetweenBatchesMs = 0,
     maxProcessingTimeMs = 240000,
     sendRetryAttempts = 2,
     sendRetryDelayMs = 500,
@@ -151,6 +151,24 @@ export async function sendCampaignById({
                 body: {
                     error: 'Bad Request',
                     message: 'Campaign has already been completed or cancelled'
+                }
+            };
+        }
+
+        if (campaign.next_attempt_at && new Date(campaign.next_attempt_at).getTime() > Date.now()) {
+            const sent = Number(campaign.sent_count || 0);
+            const failed = Number(campaign.failed_count || 0);
+            return {
+                status: 503,
+                body: {
+                    success: false,
+                    paused: true,
+                    retryable: true,
+                    sent,
+                    failed,
+                    remaining: Math.max(0, Number(campaign.total_recipients || 0) - sent - failed),
+                    nextAttemptAt: campaign.next_attempt_at,
+                    message: 'Campaign is queued for retry after the delivery backoff.'
                 }
             };
         }
@@ -359,7 +377,9 @@ export async function sendCampaignById({
         let sentThisRun = 0;
         let failedThisRun = 0;
         let processedThisRun = 0;
-        const SEND_BATCH_SIZE = Math.max(1, Math.min(sendBatchSize || 10, 25));
+        const SEND_BATCH_SIZE = Number.isFinite(sendBatchSize)
+            ? Math.max(1, Math.min(Math.floor(sendBatchSize), 25))
+            : 25;
         const DELAY_BETWEEN_BATCHES = Math.max(0, delayBetweenBatchesMs || 0);
         const MAX_PROCESSING_TIME = Math.max(10000, Math.min(maxProcessingTimeMs || 240000, 270000));
         const SEND_RETRY_ATTEMPTS = Math.max(0, Math.min(sendRetryAttempts || 0, 3));
@@ -414,6 +434,7 @@ export async function sendCampaignById({
 
             if (batch.length === 0) break;
 
+            const outboundEvents: OutboundMessageEventInput[] = [];
             const batchPromises = batch.map(async (recipient) => {
                 if (!recipient.contact_psid) {
                     return {
@@ -457,7 +478,8 @@ export async function sendCampaignById({
                             const messageToSend = await generatePersonalizedMessage(
                                 campaign.ai_prompt,
                                 normalizedContactName || 'Friend',
-                                messages
+                                messages,
+                                page.fb_page_id
                             );
                             messagesToSend = [{ text: messageToSend }];
 
@@ -519,7 +541,7 @@ export async function sendCampaignById({
                                 }
 
                                 const sendResult = await sendMessage(...sendArgs);
-                                await recordOutboundMessageEvent(supabase, {
+                                outboundEvents.push({
                                     pageId: campaign.page_id,
                                     contactId: recipient.contact_id,
                                     messageId: sendResult.message_id,
@@ -599,6 +621,7 @@ export async function sendCampaignById({
             });
 
             const batchResults = await Promise.allSettled(batchPromises);
+            await recordOutboundMessageEvents(supabase, outboundEvents);
             const completionResults = batchResults.flatMap((result, index) => {
                 if (result.status === 'fulfilled') {
                     if (result.value.pauseCampaign) return [];
@@ -712,7 +735,7 @@ export async function sendCampaignById({
                 };
             }
 
-            if (processedThisRun < MAX_RECIPIENTS) {
+            if (processedThisRun < MAX_RECIPIENTS && DELAY_BETWEEN_BATCHES > 0) {
                 await new Promise(resolve => setTimeout(resolve, DELAY_BETWEEN_BATCHES));
             }
         }
