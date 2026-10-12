@@ -107,7 +107,7 @@ export async function POST(
         }
 
         try {
-            await subscribePageToAppWebhook(page.fb_page_id, page.access_token, ['messages', 'messaging_postbacks']);
+            await subscribePageToAppWebhook(page.fb_page_id, page.access_token, ['messages', 'messaging_postbacks', 'message_echoes']);
             logInfo('Successfully refreshed page webhook subscription', {
                 userId,
                 pageId,

@@ -355,7 +355,7 @@ export async function getUserProfile(
 export async function subscribePageToAppWebhook(
     pageId: string,
     pageAccessToken: string,
-    subscribedFields: string[] = ['messages', 'messaging_postbacks']
+    subscribedFields: string[] = ['messages', 'messaging_postbacks', 'message_echoes']
 ): Promise<void> {
     const formData = new URLSearchParams();
     formData.set('access_token', pageAccessToken);

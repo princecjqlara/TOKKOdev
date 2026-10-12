@@ -90,7 +90,7 @@ describe('POST /api/pages/[pageId]/webhook', () => {
         expect(mocks.subscribePageToAppWebhook).toHaveBeenCalledWith(
             'fb_page_1',
             'stored_page_access_token',
-            ['messages', 'messaging_postbacks']
+            ['messages', 'messaging_postbacks', 'message_echoes']
         );
     });
 

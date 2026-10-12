@@ -101,7 +101,7 @@ export async function POST(request: NextRequest) {
 
         let warning: WebhookRefreshWarning | null = null;
         try {
-            await subscribePageToAppWebhook(fbPageId, accessToken, ['messages', 'messaging_postbacks']);
+            await subscribePageToAppWebhook(fbPageId, accessToken, ['messages', 'messaging_postbacks', 'message_echoes']);
         } catch (subscriptionError) {
             console.error('🔴 Failed to subscribe page to webhook events:', subscriptionError);
             warning = {

@@ -138,6 +138,18 @@ describe('POST /api/pages/[pageId]/sync', () => {
         });
     });
 
+    it('keeps staff message echoes subscribed after a contact sync', async () => {
+        const { POST } = await loadRoute();
+        mocks.getSupabaseAdmin.mockReturnValue(createSupabaseMock());
+        let fields = new Set(['messages', 'messaging_postbacks', 'message_echoes']);
+        mocks.subscribePageToAppWebhook.mockImplementation(async (_pageId, _token, nextFields: string[]) => {
+            fields = new Set(nextFields);
+        });
+        const response = await POST(createRequest(), { params: Promise.resolve({ pageId: 'page_1' }) });
+        expect(response.status).toBe(200);
+        expect(fields.has('message_echoes')).toBe(true);
+    });
+
     it('persists participant names in the first basic contact upsert without mixing nameless rows', async () => {
         const { POST } = await loadRoute();
         const supabase = createSupabaseMock();

@@ -102,7 +102,7 @@ describe('POST /api/facebook/connect', () => {
         expect(mocks.subscribePageToAppWebhook).toHaveBeenCalledWith(
             'fb_page_1',
             'page_access_token_1',
-            ['messages', 'messaging_postbacks']
+            ['messages', 'messaging_postbacks', 'message_echoes']
         );
         expect(supabase.from).toHaveBeenCalledWith('pages');
         expect(supabase.from).toHaveBeenCalledWith('user_pages');
