@@ -15,6 +15,10 @@ vi.mock('../ai', () => ({
     generatePersonalizedMessage: vi.fn()
 }));
 
+vi.mock('../page-delivery', async importOriginal => ({
+    ...await importOriginal<typeof import('../page-delivery')>(), waitForPageDeliveryBatch: vi.fn().mockResolvedValue(undefined)
+}));
+
 function createSupabaseMock(
     campaignStatus: 'draft' | 'scheduled' = 'scheduled',
     options: {
@@ -25,6 +29,7 @@ function createSupabaseMock(
         templateMediaHeader?: { type: 'image'; url: string };
         stopAfterFirstBatch?: boolean;
         nextAttemptAt?: string;
+        deliveryBusy?: boolean;
     } = {}
 ) {
     const campaignRecord = {
@@ -92,6 +97,8 @@ function createSupabaseMock(
     const claimRpc = vi.fn();
     const finishBatchRpc = vi.fn();
     const rpc = vi.fn(async (name: string, args: Record<string, any>) => {
+        if (name === 'acquire_page_campaign_delivery') return { data: [{ acquired: !options.deliveryBusy, retry_at: options.deliveryBusy ? '2026-10-13T00:01:00Z' : null, batch_size: 10 }], error: null };
+        if (name === 'release_page_campaign_delivery') return { data: null, error: null };
         if (name === 'claim_campaign_recipients') {
             claimRpc(args);
             const claimed = pendingRecipients.splice(0, args.p_batch_size).map(recipient => ({
@@ -235,6 +242,16 @@ describe('sendCampaignById', () => {
         expect(supabase.outboundUpsert.mock.calls[0][0].map((event: any) => event.contact_id)).toEqual([
             'contact_0', 'contact_1', 'contact_2'
         ]);
+    });
+
+    it('leaves recipients untouched when another campaign owns this Page', async () => {
+        const supabase = createSupabaseMock('draft', { deliveryBusy: true, remainingPendingCount: 200 });
+        const result = await sendCampaignById({ campaignId: 'campaign_1', supabase: supabase as never });
+        expect(result.status).toBe(200);
+        expect(result.body).toMatchObject({ queued: true, remaining: 200 });
+        expect(supabase.claimRpc).not.toHaveBeenCalled();
+        expect(supabase.campaignUpdate).not.toHaveBeenCalled();
+        expect(sendMessage).not.toHaveBeenCalled();
     });
 
     it('blocks an incompletely materialized campaign before any recipient is sent', async () => {
@@ -759,7 +776,7 @@ describe('sendCampaignById', () => {
         expect(sendMessage).not.toHaveBeenCalled();
     });
 
-    it('pauses after rate-limit retries instead of recording a permanent failure', async () => {
+    it('immediately defers a rate-limited send without retrying or permanently failing the recipient', async () => {
         const supabase = createSupabaseMock('draft', {
             recipients: [{
                 id: 'recipient_1',
@@ -779,9 +796,10 @@ describe('sendCampaignById', () => {
         expect(result.status).toBe(503);
         expect(result.body.retryable).toBe(true);
         expect(result.failed).toBe(0);
-        expect(sendMessage).toHaveBeenCalledTimes(2);
+        expect(sendMessage).toHaveBeenCalledTimes(1);
         expect(supabase.finishBatchRpc).not.toHaveBeenCalled();
         expect(supabase.releaseBatchUpdate).toHaveBeenCalledWith(['contact_1']);
+        expect(supabase.rpc).toHaveBeenCalledWith('release_page_campaign_delivery', expect.objectContaining({ p_page_id: 'page_1', p_rate_limited: true }));
         expect(supabase.campaignUpdate).toHaveBeenLastCalledWith(expect.objectContaining({
             status: 'sending',
             next_attempt_at: expect.any(String),
@@ -843,8 +861,8 @@ describe('sendCampaignById', () => {
         expect(result.sent).toBe(2001);
         expect(result.failed).toBe(0);
         expect(sendMessage).toHaveBeenCalledTimes(2001);
-        expect(supabase.claimRpc).toHaveBeenCalledTimes(82);
-        expect(supabase.claimRpc).toHaveBeenNthCalledWith(1, expect.objectContaining({ p_batch_size: 25 }));
+        expect(supabase.claimRpc).toHaveBeenCalledTimes(202);
+        expect(supabase.claimRpc).toHaveBeenNthCalledWith(1, expect.objectContaining({ p_batch_size: 10 }));
     });
 
     it('caps fetched recipients for short cron runs', async () => {

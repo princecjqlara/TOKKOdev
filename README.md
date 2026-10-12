@@ -68,6 +68,7 @@ Run the SQL schema from `database/schema.sql` in your Supabase SQL editor.
 Then run `database/migration_database_retention.sql` to install bounded campaign-history retention and automatic database maintenance.
 For production, also run `database/migration_database_control_plane.sql` to add schema-version tracking, database health snapshots, integrity constraints, and maintenance observability.
 Run `database/migration_conversation_export_jobs.sql` to enable durable background conversation exports and the Exports download page.
+Run `database/migration_page_worker_coordination.sql` before deploying the coordinated campaign and Messenger auto-tag workers. It adds Page-level sending leases, shared Meta rate-limit cooldowns, and stable auto-tag scan checkpoints. See `docs/ads-guard.md` for Ads Guard setup and decision rules.
 High-volume installations can then run `database/migration_compact_contact_interactions.sql` and its finalize migration to replace unbounded raw interaction events with compatible hourly counters.
 
 For large campaigns, deploy the compact delivery queue in this exact order:

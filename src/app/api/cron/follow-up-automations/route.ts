@@ -21,38 +21,43 @@ export async function GET(_request: NextRequest) {
         // Reuse the already-configured minute job on cron-jobs.org to advance
         // durable immediate campaigns. Atomic recipient claims make this safe
         // even when a separate campaign-scheduled job also exists.
-        let campaignWorker: Record<string, unknown> = { skipped: true };
-        try {
-            const campaignUrl = new URL('/api/cron/campaign-scheduled', _request.url);
-            const campaignResponse = await fetch(campaignUrl, {
-                method: 'GET',
-                cache: 'no-store',
-                signal: AbortSignal.timeout(25_000)
-            });
-            const campaignBody = await campaignResponse.json().catch(() => ({}));
-            campaignWorker = {
-                ok: campaignResponse.ok,
-                status: campaignResponse.status,
-                ...campaignBody
-            };
-        } catch (campaignError) {
-            campaignWorker = {
-                ok: false,
-                retryable: true,
-                message: campaignError instanceof Error ? campaignError.message : String(campaignError)
-            };
-            console.warn('Campaign continuation from follow-up cron failed:', campaignError);
-        }
+        const campaignTask = async (): Promise<Record<string, unknown>> => {
+            try {
+                const campaignUrl = new URL('/api/cron/campaign-scheduled', _request.url);
+                const campaignResponse = await fetch(campaignUrl, {
+                    method: 'GET',
+                    cache: 'no-store',
+                    signal: AbortSignal.timeout(25_000)
+                });
+                const campaignBody = await campaignResponse.json().catch(() => ({}));
+                return {
+                    ok: campaignResponse.ok,
+                    status: campaignResponse.status,
+                    ...campaignBody
+                };
+            } catch (campaignError) {
+                console.warn('Campaign continuation from follow-up cron failed:', campaignError);
+                return {
+                    ok: false,
+                    retryable: true,
+                    message: campaignError instanceof Error ? campaignError.message : String(campaignError)
+                };
+            }
+        };
 
-        // The existing minute scheduler also advances one Messenger page per run.
+        // The minute scheduler advances three independently claimed Pages per run.
         // Keep this isolated so an unavailable Meta token cannot delay follow-ups.
-        let messagingAutoTag: Record<string, unknown> = { skipped: true };
-        try {
-            messagingAutoTag = await processOneMessagingAutoTagPage();
-        } catch (error) {
-            messagingAutoTag = { ok: false, message: error instanceof Error ? error.message : String(error) };
-            console.warn('Messaging auto-tag continuation failed:', error);
-        }
+        const tagTask = async (): Promise<Record<string, unknown>> => {
+            const results = await Promise.allSettled(Array.from({ length: 3 }, () => processOneMessagingAutoTagPage()));
+            return {
+                pages: results.reduce((sum, result) => sum + (result.status === 'fulfilled' ? result.value.pages : 0), 0),
+                tagged: results.reduce((sum, result) => sum + (result.status === 'fulfilled' ? result.value.tagged : 0), 0),
+                errors: results.flatMap(result => result.status === 'rejected' ? [result.reason instanceof Error ? result.reason.message : String(result.reason)] : [])
+            };
+        };
+        // Both continuations start after follow-ups. An 18-second tag deadline
+        // must not begin after the campaign's 25-second request timeout.
+        const [campaignWorker, messagingAutoTag] = await Promise.all([campaignTask(), tagTask()]);
 
         return NextResponse.json({
             success: true,

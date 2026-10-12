@@ -14,7 +14,7 @@ export async function GET() {
     const ids = (access || []).map(row => row.page_id);
     if (!ids.length) return NextResponse.json({ pages: [] });
     const { data, error } = await db.from('pages')
-        .select('id,messaging_auto_tag_enabled,messaging_auto_tag_last_error')
+        .select('id,messaging_auto_tag_enabled,messaging_auto_tag_last_error,messaging_auto_tag_checked_at,messaging_auto_tag_attempted_at,messaging_auto_tag_cursor')
         .in('id', ids);
     if (error) return NextResponse.json({ error: 'Could not load auto-tag settings' }, { status: 500 });
     return NextResponse.json({ pages: data });

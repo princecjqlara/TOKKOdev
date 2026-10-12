@@ -23,6 +23,13 @@ afterEach(() => {
     vi.unstubAllGlobals();
 });
 
+describe('conversation checkpoint safety', () => {
+    it('rejects an incomplete response instead of treating it as an empty completed scan', async () => {
+        vi.stubGlobal('fetch', vi.fn().mockResolvedValue(createJsonResponse(true, {})));
+        await expect(getPageConversationsBatch('page_1', 'token')).rejects.toThrow('checkpoint must be retained');
+    });
+});
+
 describe('getFacebookPages', () => {
     it('classifies Facebook /me permission failures as reauthorization required', async () => {
         const fetchMock = vi.fn().mockResolvedValue(

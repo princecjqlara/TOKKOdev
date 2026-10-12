@@ -20,7 +20,8 @@ import {
     Workflow,
     History,
     Download,
-    Clock3
+    Clock3,
+    ShieldCheck
 } from 'lucide-react';
 import { Page } from '@/types';
 
@@ -90,6 +91,7 @@ export default function DashboardLayout({
         { href: '/dashboard/7-day-contacts', icon: Clock3, label: '7-Day Window Contacts' },
         { href: '/dashboard/tags', icon: Tag, label: 'Tags' },
         { href: '/dashboard/campaigns', icon: MessageSquare, label: 'Campaigns' },
+        { href: '/dashboard/ads', icon: ShieldCheck, label: 'Ads Guard' },
         { href: '/dashboard/automations', icon: Workflow, label: 'Follow-Ups' },
         { href: '/dashboard/templates', icon: FileText, label: 'Templates' },
         { href: '/dashboard/exports', icon: Download, label: 'Exports' },

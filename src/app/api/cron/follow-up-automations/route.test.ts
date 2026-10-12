@@ -49,7 +49,7 @@ describe('GET /api/cron/follow-up-automations', () => {
             processed: 1
         }));
         expect(mocks.processDueFollowUpAutomationSteps).toHaveBeenCalledTimes(1);
-        expect(mocks.processOneMessagingAutoTagPage).toHaveBeenCalledTimes(1);
+        expect(mocks.processOneMessagingAutoTagPage).toHaveBeenCalledTimes(3);
     });
 
     it('processes follow-ups before invoking the potentially slow campaign worker', async () => {

@@ -19,6 +19,7 @@ import {
 } from './campaign-recipient-queue';
 import type { TemplateMediaType } from './facebook-templates';
 import { recordOutboundMessageEvents, type OutboundMessageEventInput } from './outbound-message-events';
+import { acquirePageDelivery, releasePageDelivery, waitForPageDeliveryBatch } from './page-delivery';
 
 type SupabaseLike = ReturnType<typeof getSupabaseAdmin>;
 
@@ -114,6 +115,8 @@ export async function sendCampaignById({
     templateMediaHeader,
     templateMediaHeaders
 }: SendCampaignByIdOptions): Promise<SendCampaignByIdResult> {
+    let pageLease: { pageId: string; owner: string; batchSize: number } | null = null;
+    let pageRateLimited = false;
     try {
         const { data: campaign } = await supabase
             .from('campaigns')
@@ -228,6 +231,18 @@ export async function sendCampaignById({
                 failed: 0
             };
         }
+
+        const delivery = await acquirePageDelivery(supabase, campaign.page_id);
+        if (!delivery.acquired) {
+            return { status: 200, body: {
+                success: true, partial: true, queued: true, retryable: true,
+                nextAttemptAt: delivery.retryAt,
+                sent: Number(campaign.sent_count || 0), failed: Number(campaign.failed_count || 0),
+                remaining: Math.max(0, Number(campaign.total_recipients || 0) - Number(campaign.sent_count || 0) - Number(campaign.failed_count || 0)),
+                message: 'Another campaign is delivering for this Page, or Meta recovery is in progress. Your recipients remain queued.'
+            } };
+        }
+        pageLease = { pageId: campaign.page_id, owner: delivery.owner, batchSize: delivery.batchSize };
 
         const effectiveTemplateMediaHeader =
             templateMediaHeader || normalizeStoredMediaHeader(campaign.template_media_header);
@@ -378,9 +393,9 @@ export async function sendCampaignById({
         let failedThisRun = 0;
         let processedThisRun = 0;
         const SEND_BATCH_SIZE = Number.isFinite(sendBatchSize)
-            ? Math.max(1, Math.min(Math.floor(sendBatchSize), 25))
-            : 25;
-        const DELAY_BETWEEN_BATCHES = Math.max(0, delayBetweenBatchesMs || 0);
+            ? Math.max(1, Math.min(Math.floor(sendBatchSize), pageLease.batchSize))
+            : pageLease.batchSize;
+        const DELAY_BETWEEN_BATCHES = Math.max(pageLease.batchSize < 10 ? 1000 : 250, delayBetweenBatchesMs || 0);
         const MAX_PROCESSING_TIME = Math.max(10000, Math.min(maxProcessingTimeMs || 240000, 270000));
         const SEND_RETRY_ATTEMPTS = Math.max(0, Math.min(sendRetryAttempts || 0, 3));
         const SEND_RETRY_DELAY = Math.max(0, Math.min(sendRetryDelayMs || 0, 5000));
@@ -586,6 +601,12 @@ export async function sendCampaignById({
                                     }
                                 }
 
+                                // Immediate retries worsen a Page-wide rate limit. Stop
+                                // this slice and let the shared recovery window expire.
+                                if (categorizeSendError(sendError) === 'rate_limited') {
+                                    pageRateLimited = true;
+                                    throw sendError;
+                                }
                                 const shouldRetry = retryAttempt < SEND_RETRY_ATTEMPTS && isRetryableSendError(sendError);
 
                                 if (!shouldRetry) {
@@ -696,9 +717,14 @@ export async function sendCampaignById({
                 const pausedStatus = shouldRetryAutomatically
                     ? (allowScheduled ? 'scheduled' : 'sending')
                     : 'draft';
-                const nextAttemptAt = shouldRetryAutomatically
+                let nextAttemptAt = shouldRetryAutomatically
                     ? new Date(Date.now() + 5 * 60 * 1000).toISOString()
                     : null;
+                if (pageRateLimited && pageLease) {
+                    const recovery = await releasePageDelivery(supabase, pageLease.pageId, pageLease.owner, true);
+                    pageLease = null;
+                    if (recovery) nextAttemptAt = recovery;
+                }
                 await supabase
                     .from('campaigns')
                     .update({
@@ -723,10 +749,11 @@ export async function sendCampaignById({
                         sent: progress.sent,
                         failed: progress.failed,
                         remaining: progress.remaining,
+                        nextAttemptAt,
                         message:
                             `Campaign paused before more recipients were consumed. ${reason} ` +
                             (shouldRetryAutomatically
-                                ? 'The background worker will retry automatically after a five-minute backoff.'
+                                ? 'The background worker will retry after the Page recovery window.'
                                 : 'Fix the page/template issue, then press Send to resume.')
                     },
                     success: false,
@@ -736,7 +763,7 @@ export async function sendCampaignById({
             }
 
             if (processedThisRun < MAX_RECIPIENTS && DELAY_BETWEEN_BATCHES > 0) {
-                await new Promise(resolve => setTimeout(resolve, DELAY_BETWEEN_BATCHES));
+                await waitForPageDeliveryBatch(DELAY_BETWEEN_BATCHES);
             }
         }
 
@@ -810,6 +837,7 @@ export async function sendCampaignById({
             failed: progress.failed
         };
     } catch (error) {
+        if (categorizeSendError(error) === 'rate_limited') pageRateLimited = true;
         console.error('Error sending campaign:', error);
         const databaseError = error as { code?: string; message?: string };
         const isStatementTimeout =
@@ -858,5 +886,10 @@ export async function sendCampaignById({
                 retryable: shouldRetryAutomatically
             }
         };
+    } finally {
+        if (pageLease) {
+            try { await releasePageDelivery(supabase, pageLease.pageId, pageLease.owner, pageRateLimited); }
+            catch (releaseError) { console.error('Page delivery lease release failed; the lease will expire:', releaseError); }
+        }
     }
 }

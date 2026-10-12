@@ -15,6 +15,7 @@ export default function SettingsPage() {
     const [origin, setOrigin] = useState('');
     const [autoTagByPage, setAutoTagByPage] = useState<Record<string, boolean>>({});
     const [autoTagErrorsByPage, setAutoTagErrorsByPage] = useState<Record<string, string>>({});
+    const [autoTagHealth, setAutoTagHealth] = useState<Record<string, { messaging_auto_tag_checked_at?: string; messaging_auto_tag_cursor?: string | null }>>({});
     const [autoTagLoading, setAutoTagLoading] = useState(true);
     const [autoTagSaving, setAutoTagSaving] = useState<string | null>(null);
     const [autoTagError, setAutoTagError] = useState<string | null>(null);
@@ -30,6 +31,7 @@ export default function SettingsPage() {
             const res = await fetch('/api/settings/messaging-auto-tag');
             if (!res.ok) throw new Error('Could not load auto-tag settings');
             const data = await res.json();
+            setAutoTagHealth(Object.fromEntries((data.pages || []).map((page: { id: string }) => [page.id, page])));
             setAutoTagByPage(Object.fromEntries((data.pages || []).map((page: { id: string; messaging_auto_tag_enabled: boolean }) =>
                 [page.id, page.messaging_auto_tag_enabled]
             )));
@@ -145,7 +147,7 @@ export default function SettingsPage() {
                     <h2 className="text-xl font-bold uppercase">Messaging lead auto-tag</h2>
                     <p className="font-mono text-xs text-gray-600 mt-2">
                         Add each Page&apos;s Paid / Availed Service tag when Messenger records an order created or a lead stage set
-                        to Qualified or Converted. Lead stage Unqualified adds the Page&apos;s Unqualified tag instead. On by default.
+                        to Qualified or Converted. Lead stage Unqualified / Not Qualified adds the Page&apos;s Not Qualified tag instead. On by default.
                         An order record does not prove payment.
                     </p>
                 </div>
@@ -155,6 +157,7 @@ export default function SettingsPage() {
                         <span>
                             <span className="font-bold block">{page.name}</span>
                             {autoTagErrorsByPage[page.id] && <span className="text-xs text-red-700">Sync needs attention: {autoTagErrorsByPage[page.id]}</span>}
+                            {autoTagHealth[page.id]?.messaging_auto_tag_checked_at && <span className="block text-xs text-gray-600 mt-1">Checked through {new Date(autoTagHealth[page.id].messaging_auto_tag_checked_at!).toLocaleString()}{autoTagHealth[page.id].messaging_auto_tag_cursor ? ' · Catching up on queued conversations' : ''}</span>}
                         </span>
                         <button
                             type="button"

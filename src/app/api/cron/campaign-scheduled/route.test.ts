@@ -309,7 +309,7 @@ describe('GET /api/cron/campaign-scheduled', () => {
     it('keeps processing later campaigns when one campaign worker throws', async () => {
         const { GET } = await loadRoute();
         const first = createCampaign({ id: 'campaign_bad', audience_mode: 'specific' });
-        const second = createCampaign({ id: 'campaign_good', audience_mode: 'specific' });
+        const second = createCampaign({ id: 'campaign_good', page_id: 'page_2', audience_mode: 'specific' });
         const supabase = createSupabaseMock({ campaignLevelCampaigns: [first, second] });
         mocks.getSupabaseAdmin.mockReturnValue(supabase);
         mocks.sendCampaignById
@@ -355,7 +355,7 @@ describe('GET /api/cron/campaign-scheduled', () => {
     it('uses both worker slots for immediate campaigns when no scheduled work is due', async () => {
         const { GET } = await loadRoute();
         const immediateCampaigns = ['first', 'second'].map(id => createCampaign({
-            id, status: 'sending', audience_mode: 'specific', scheduled_at: null
+            id, page_id: `page_${id}`, status: 'sending', audience_mode: 'specific', scheduled_at: null
         }));
         const supabase = createSupabaseMock({ campaignLevelCampaigns: [], immediateCampaigns });
         mocks.getSupabaseAdmin.mockReturnValue(supabase);
@@ -388,7 +388,7 @@ describe('GET /api/cron/campaign-scheduled', () => {
         const { GET } = await loadRoute();
         const supabase = createSupabaseMock({ campaignLevelCampaigns: [
             createCampaign({ id: 'first', audience_mode: 'specific' }),
-            createCampaign({ id: 'second', audience_mode: 'specific' })
+            createCampaign({ id: 'second', page_id: 'page_2', audience_mode: 'specific' })
         ] });
         mocks.getSupabaseAdmin.mockReturnValue(supabase);
         let finishFirst!: (result: unknown) => void;
@@ -408,5 +408,16 @@ describe('GET /api/cron/campaign-scheduled', () => {
             finishFirst({ success: true, body: {} });
         }
         expect((await response).status).toBe(200);
+    });
+    it('does not schedule overlapping campaigns for the same Page', async () => {
+        const { GET } = await loadRoute();
+        const supabase = createSupabaseMock({ campaignLevelCampaigns: [], immediateCampaigns: [
+            createCampaign({ id: 'first', status: 'sending', scheduled_at: null }),
+            createCampaign({ id: 'second', status: 'sending', scheduled_at: null })
+        ] });
+        mocks.getSupabaseAdmin.mockReturnValue(supabase);
+        mocks.sendCampaignById.mockResolvedValue({ success: true, body: { partial: true } });
+        await GET(createRequest());
+        expect(mocks.sendCampaignById).toHaveBeenCalledTimes(1);
     });
 });

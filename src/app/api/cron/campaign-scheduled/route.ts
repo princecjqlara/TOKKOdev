@@ -169,6 +169,7 @@ export async function GET(_request: NextRequest) {
         const campaignLevelCampaigns = await getDueCampaignLevelCampaigns(supabase, now, staleSendingCutoff);
         const recipientLevelCampaigns = await getDueRecipientLevelCampaigns(supabase, now, staleSendingCutoff);
         const immediateCampaigns = await getResumableImmediateCampaigns(supabase, now);
+        const seenPages = new Set<string>();
         const dueCampaigns = Array.from(
             new Map(
                 // Always give an explicitly-enabled immediate campaign the
@@ -180,7 +181,10 @@ export async function GET(_request: NextRequest) {
                     ))
                     .map((campaign) => [campaign.id, campaign])
             ).values()
-        ).slice(0, MAX_CAMPAIGNS_PER_CRON_RUN);
+        ).filter(campaign => {
+            if (seenPages.has(campaign.page_id)) return false;
+            seenPages.add(campaign.page_id); return true;
+        }).slice(0, MAX_CAMPAIGNS_PER_CRON_RUN);
 
         const results = await Promise.all(dueCampaigns.map(async (campaign) => {
             const isImmediateResume =

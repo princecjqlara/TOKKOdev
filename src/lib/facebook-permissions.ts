@@ -14,5 +14,8 @@ export const FACEBOOK_PERMISSION_LIST = [
 
 export const FACEBOOK_PERMISSION_SCOPE = FACEBOOK_PERMISSION_LIST.join(',');
 
+// Requested only from Ads Guard, so Page-only logins keep their existing scopes.
+export const FACEBOOK_ADS_PERMISSION_SCOPE = `${FACEBOOK_PERMISSION_SCOPE},ads_read`;
+
 export const FACEBOOK_REAUTH_MESSAGE =
     'Facebook could not list pages with the current login token. Refresh permissions, continue with the Facebook account that admins the page, and approve all requested Page permissions.';

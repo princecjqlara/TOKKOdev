@@ -113,8 +113,11 @@ async function readFacebookError(response: Response, endpoint: string) {
     );
 }
 
-async function fetchFacebookRead(input: string, timeoutMs: number = FACEBOOK_READ_TIMEOUT_MS): Promise<Response> {
+async function fetchFacebookRead(input: string, timeoutMs: number = FACEBOOK_READ_TIMEOUT_MS, signal?: AbortSignal): Promise<Response> {
     const controller = new AbortController();
+    const abort = () => controller.abort();
+    if (signal?.aborted) controller.abort();
+    signal?.addEventListener('abort', abort, { once: true });
     const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
 
     try {
@@ -126,6 +129,7 @@ async function fetchFacebookRead(input: string, timeoutMs: number = FACEBOOK_REA
         throw error;
     } finally {
         clearTimeout(timeoutId);
+        signal?.removeEventListener('abort', abort);
     }
 }
 
@@ -271,6 +275,7 @@ export async function getPageConversationsBatch(
         limit?: number;
         after?: string | null;
         sinceTimestamp?: string;
+        signal?: AbortSignal;
         includeMessages?: boolean;
     } = {}
 ): Promise<PageConversationBatch> {
@@ -290,7 +295,7 @@ export async function getPageConversationsBatch(
         url += `&since=${unixTimestamp}`;
     }
 
-    const response: Response = await fetchFacebookRead(url);
+    const response: Response = await fetchFacebookRead(url, FACEBOOK_READ_TIMEOUT_MS, options.signal);
 
     if (!response.ok) {
         throw await readFacebookError(response, `/${pageId}/conversations`);
@@ -306,7 +311,11 @@ export async function getPageConversationsBatch(
         };
     } = await response.json();
 
-    const rawConversations = responseData.data || [];
+    if (!Array.isArray(responseData.data)) throw new Error('Facebook conversations response is incomplete; checkpoint must be retained');
+    if (responseData.paging?.next && typeof responseData.paging.cursors?.after !== 'string') {
+        throw new Error('Facebook conversations pagination is incomplete; checkpoint must be retained');
+    }
+    const rawConversations = responseData.data;
     let conversations = rawConversations;
     let nextCursor =
         typeof responseData.paging?.cursors?.after === 'string' && responseData.paging.next
