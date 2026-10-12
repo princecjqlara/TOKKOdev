@@ -50,13 +50,15 @@ export async function processOneMessagingAutoTagPage() {
     const runStartedAt = new Date().toISOString();
 
     try {
-        const { data: tags, error: tagError } = await db.from('tags').select('id,name')
-            .eq('owner_type', 'page').eq('owner_id', current.id).eq('is_default', true);
+        const { data: tags, error: tagError } = await db.from('tags').select('id,name,is_default')
+            .eq('owner_type', 'page').eq('owner_id', current.id);
         if (tagError) throw tagError;
-        const defaultTags = new Map((tags || []).map(tag => [tag.name.toLowerCase().replace(/[^a-z]/g, ''), tag.id]));
+        const defaultTags = new Map((tags || []).filter(tag => tag.is_default)
+            .map(tag => [tag.name.toLowerCase().replace(/[^a-z]/g, ''), tag.id]));
+        const outcomeTags = new Map((tags || []).map(tag => [tag.name.toLowerCase().replace(/[^a-z]/g, ''), tag.id]));
         const paidTagId = defaultTags.get('paidavailedservice') || defaultTags.get('paidavailedservices');
-        const unqualifiedTagId = defaultTags.get('unqualified');
-        if (!paidTagId || !unqualifiedTagId) throw new Error('Default page tags are missing');
+        const unqualifiedTagId = outcomeTags.get('notqualified') || outcomeTags.get('unqualified');
+        if (!paidTagId || !unqualifiedTagId) throw new Error('Required Page tags are missing');
 
         const batch = await getPageConversationsBatch(current.fb_page_id, current.access_token, {
             limit: 10,

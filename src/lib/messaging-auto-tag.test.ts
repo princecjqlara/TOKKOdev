@@ -6,6 +6,7 @@ describe('classifyMessengerSystemMessage', () => {
         expect(classifyMessengerSystemMessage('Lead stage set to Qualified')).toBe('qualified');
         expect(classifyMessengerSystemMessage('Lead stage set to Converted')).toBe('converted');
         expect(classifyMessengerSystemMessage('Lead stage set to Unqualified')).toBe('unqualified');
+        expect(classifyMessengerSystemMessage('Lead stage set to Not Qualified')).toBe('unqualified');
         expect(classifyMessengerSystemMessage(' lead stage set to unqualified. ')).toBe('unqualified');
     });
 
