@@ -440,28 +440,25 @@ export async function POST(request: NextRequest) {
             });
             // Larger Messenger review batches can abort dependent requests.
             // Keep each Facebook request small even when the user selects 25.
-            const createdResults: Awaited<ReturnType<typeof createUtilityTemplatesBatch>> = [];
             for (let offset = 0; offset < fullTemplates.length; offset += 5) {
                 const batchResults = await createUtilityTemplatesBatch(
                     page.fb_page_id,
                     page.access_token,
                     fullTemplates.slice(offset, offset + 5)
                 );
-                createdResults.push(...batchResults);
-            }
-
-            for (const created of createdResults) {
-                const template = templatesToCreate.find((t) => t.name === created.name);
-                results.push({
-                    ...created,
-                    hasButtons: template ? hasTemplateButtons(template) : false,
-                    hasMediaHeader: template ? hasMediaHeader(template) : false,
-                    mediaHeaderType: template ? getMediaHeaderType(template) : null
-                });
+                for (const created of batchResults) {
+                    const template = templatesToCreate.find((t) => t.name === created.name);
+                    results.push({
+                        ...created,
+                        hasButtons: template ? hasTemplateButtons(template) : false,
+                        hasMediaHeader: template ? hasMediaHeader(template) : false,
+                        mediaHeaderType: template ? getMediaHeaderType(template) : null
+                    });
+                }
             }
         } catch (err) {
             const errorMessage = (err as Error).message || 'Unknown error';
-            if (isFacebookTokenError(errorMessage)) {
+            if (isFacebookTokenError(errorMessage) && !results.some(result => result.action === 'created')) {
                 return NextResponse.json(
                     {
                         error: 'Facebook Token Invalid',
@@ -474,6 +471,7 @@ export async function POST(request: NextRequest) {
 
             console.error('[SUBMIT_ALL] Failed to submit template batch:', errorMessage);
             for (const template of templatesToCreate) {
+                if (results.some(result => result.name === template.name)) continue;
                 results.push({
                     name: template.name,
                     status: 'ERROR',
@@ -498,7 +496,7 @@ export async function POST(request: NextRequest) {
                 pending,
                 errors,
                 alreadyExisted: results.filter((r) => r.action === 'already_exists').length,
-                submittedThisRequest: templatesToCreate.length,
+                submittedThisRequest: results.filter((r) => r.action === 'created').length,
                 remaining: Math.max(0, missingTemplates.length - templatesToCreate.length),
                 hasMore: missingTemplates.length > templatesToCreate.length
             },

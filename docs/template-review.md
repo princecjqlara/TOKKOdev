@@ -48,4 +48,6 @@ Review times vary. If a page token is invalid, reconnect the page before submitt
 
 The active library and message pickers exclude update-style templates. `ALL_UTILITY_TEMPLATES` retains historical parameter definitions so existing campaigns remain compatible. Selection labels show the full message text and placeholders; names stay internal as option values.
 
+On the Templates screen, **Submit Missing to All Pages** checks every connected page and submits missing text templates from the active library in groups of up to 25, using Facebook batches of five. Existing names are skipped regardless of review status. Keep the tab open while it runs. The progress table reports submissions, existing templates, failures, and remaining or unconfirmed work per page. Pages needing reconnection are included and report their errors without blocking other pages. Retry after fixing connection errors or waiting for page limits; already submitted names will be skipped on the next check. This action submits templates for approval; it does not send messages to contacts.
+
 When Facebook reports a page rate limit, the runner stops. Completed decisions and the stopping reason remain in the progress report; leave unreviewed candidates in the catalog until the page can accept more requests. Only the separate live promotion check writes the shared library.

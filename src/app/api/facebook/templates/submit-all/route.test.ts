@@ -105,4 +105,27 @@ describe('candidate review submission', () => {
         expect(payload.results[0]).toMatchObject({ action: 'error', status: 'ERROR' });
         expect(payload.results[0].error).toContain('incomplete batch');
     });
+
+    it('preserves accepted submissions when a later Facebook batch fails', async () => {
+        mocks.fetch.mockResolvedValueOnce({ ok: true, json: async () => Array.from({ length: 5 }, () => ({
+            code: 200, body: JSON.stringify({ status: 'PENDING' })
+        })) }).mockRejectedValueOnce(new Error('Temporary network failure'));
+        const candidates = TEMPLATE_CANDIDATES.slice(0, 6);
+        const response = await POST(request({ pageId: 'page-1', catalog: 'candidates', limit: 25, templateNames: candidates.map(t => t.name) }));
+        const payload = await response.json();
+        expect(payload.summary).toMatchObject({ submittedThisRequest: 5, errors: 1 });
+        expect(payload.results).toHaveLength(6);
+        expect(payload.results.filter((entry: { action: string }) => entry.action === 'created')).toHaveLength(5);
+    });
+
+    it('does not submit templates to a page the user cannot access', async () => {
+        const chain = {
+            select: vi.fn().mockReturnThis(), eq: vi.fn().mockReturnThis(),
+            single: vi.fn().mockResolvedValue({ data: null })
+        };
+        mocks.admin.mockReturnValue({ from: vi.fn().mockReturnValue(chain) });
+        expect((await POST(request({ pageId: 'other-page' }))).status).toBe(403);
+        expect(mocks.templates).not.toHaveBeenCalled();
+        expect(mocks.fetch).not.toHaveBeenCalled();
+    });
 });

@@ -13,6 +13,7 @@ import type { TemplateMediaType } from '@/lib/facebook-templates';
 import { compareTemplates, getTemplateTone, isRetiredTemplate, TEMPLATE_TONES, type TemplateTone } from '@/lib/facebook-template-order';
 import TemplateCandidateReview from '@/components/TemplateCandidateReview';
 import Pagination from '@/components/Pagination';
+import SubmitMissingTemplates from '@/components/SubmitMissingTemplates';
 
 type Page = {
     id: string;
@@ -52,11 +53,13 @@ async function readApiResponse(response: Response) {
 
 export default function TemplatesPage() {
     const [pages, setPages] = useState<Page[]>([]);
+    const [submissionPages, setSubmissionPages] = useState<Page[]>([]);
     const [selectedPageId, setSelectedPageId] = useState<string>('');
     const [templates, setTemplates] = useState<TemplateStatus[]>([]);
     const [loading, setLoading] = useState(false);
     const [submitting, setSubmitting] = useState(false);
     const [submittingMedia, setSubmittingMedia] = useState(false);
+    const [submittingAllPages, setSubmittingAllPages] = useState(false);
     const [filter, setFilter] = useState<'all' | 'system' | 'approved' | 'rejected'>('system');
     const [errorMessage, setErrorMessage] = useState<string | null>(null);
     const [mediaSampleUrl, setMediaSampleUrl] = useState(DEFAULT_MEDIA_TEMPLATE_SAMPLE_URL);
@@ -73,6 +76,7 @@ export default function TemplatesPage() {
                 const data = await res.json();
                 const pgs: Page[] = data.pages || [];
                 setPages(pgs);
+                setSubmissionPages([...pgs, ...(data.reconnectRequiredPages || [])]);
                 if (pgs.length > 0) {
                     setSelectedPageId(pgs[0].id);
                 }
@@ -127,7 +131,7 @@ export default function TemplatesPage() {
 
     // Submit all templates to current page
     const handleSubmitAll = async () => {
-        if (!selectedPageId || submitting) return;
+        if (!selectedPageId || submitting || submittingMedia || submittingAllPages) return;
         setSubmitting(true);
         setErrorMessage(null);
         try {
@@ -184,7 +188,7 @@ export default function TemplatesPage() {
     };
 
     const handleSubmitMediaAll = async () => {
-        if (!selectedPageId || submittingMedia) return;
+        if (!selectedPageId || submittingMedia || submitting || submittingAllPages) return;
         setSubmittingMedia(true);
         setErrorMessage(null);
         try {
@@ -302,10 +306,11 @@ export default function TemplatesPage() {
                     </p>
                 </div>
 
-                <div className="flex items-center gap-3 w-full md:w-auto">
+                <div className="flex flex-wrap items-center gap-3 w-full md:w-auto">
                     {/* Page Selector */}
                     <select
                         value={selectedPageId}
+                        disabled={submitting || submittingMedia || submittingAllPages}
                         onChange={(e) => { setTemplates([]); setLoading(true); setSelectedPageId(e.target.value); }}
                         className="input-wireframe h-10 w-full md:w-64"
                     >
@@ -327,15 +332,15 @@ export default function TemplatesPage() {
                     {/* Submit All */}
                     <button
                         onClick={handleSubmitAll}
-                        disabled={submitting || !selectedPageId}
+                        disabled={submitting || submittingMedia || submittingAllPages || !selectedPageId}
                         className="btn-wireframe h-10 bg-black text-white hover:bg-gray-800 px-4 whitespace-nowrap"
                     >
-                        {submitting ? 'Submitting...' : 'Submit Missing'}
+                        {submitting ? 'Submitting...' : 'Submit Missing to This Page'}
                     </button>
 
                     <button
                         onClick={handleSubmitMediaAll}
-                        disabled={submittingMedia || !selectedPageId}
+                        disabled={submittingMedia || submitting || submittingAllPages || !selectedPageId}
                         className="btn-wireframe h-10 bg-white px-4 whitespace-nowrap"
                         title="Submit duplicate image-header templates for approval"
                     >
@@ -343,6 +348,13 @@ export default function TemplatesPage() {
                     </button>
                 </div>
             </div>
+
+            <SubmitMissingTemplates
+                pages={submissionPages}
+                disabled={submitting || submittingMedia}
+                onRunningChange={setSubmittingAllPages}
+                onComplete={fetchTemplates}
+            />
 
             <div className="mb-6 border border-black bg-white p-4">
                 <div className="flex flex-col md:flex-row gap-3 md:items-end">
@@ -379,7 +391,7 @@ export default function TemplatesPage() {
                 key={selectedPageId}
                 pageId={selectedPageId}
                 templates={templates}
-                disabled={loading || Boolean(errorMessage) || submitting || submittingMedia}
+                disabled={loading || Boolean(errorMessage) || submitting || submittingMedia || submittingAllPages}
                 onRefresh={fetchTemplates}
             />
 
