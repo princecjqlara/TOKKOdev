@@ -1,7 +1,7 @@
 import { generatePersonalizedMessage } from './ai';
 import { parseCampaignMessageParts } from './campaign-message-sequence';
 import { getConversationIdForPsid, getConversationMessages, sendMessage, getPageTemplates, takeThreadControl } from './facebook';
-import { getBaseTemplateName, UTILITY_TEMPLATES as TEMPLATE_DEFS } from './facebook-templates';
+import { getBaseTemplateName, ALL_UTILITY_TEMPLATES as TEMPLATE_DEFS } from './facebook-templates';
 import { normalizeContactName } from './contact-names';
 import { replaceTemplateVariables } from './placeholders';
 import {

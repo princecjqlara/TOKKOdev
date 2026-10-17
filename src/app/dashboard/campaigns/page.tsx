@@ -16,6 +16,7 @@ import {
 } from '@/lib/facebook-templates';
 import type { TemplateMediaType } from '@/lib/facebook-templates';
 import { ensureSendableImageHeaderUrl, uploadImageHeader } from '@/lib/media-upload-client';
+import { compareTemplates, getTemplateOptionLabel, isRetiredTemplate } from '@/lib/facebook-template-order';
 
 // Map freeform wrapper values to template names
 const CAMPAIGN_ENVELOPE_MAP: Record<string, string> = {
@@ -177,6 +178,7 @@ type TemplateStatus = {
     name: string;
     status: string;
     category: string;
+    bodyText?: string;
     language: string;
     hasMediaHeader?: boolean;
     mediaHeaderType?: TemplateMediaType | null;
@@ -248,6 +250,7 @@ export default function CampaignsPage() {
     // Template picker state
     const [availableTemplates, setAvailableTemplates] = useState<TemplateStatus[]>([]);
     const [selectedTemplateName, setSelectedTemplateName] = useState<string | null>(null);
+    const [templateQuery, setTemplateQuery] = useState('');
     const [selectedTemplateLanguage, setSelectedTemplateLanguage] = useState<string>('en_US');
     const [templatesLoading, setTemplatesLoading] = useState(false);
     const [messageMode, setMessageMode] = useState<'freeform' | 'template'>('freeform');
@@ -454,7 +457,7 @@ export default function CampaignsPage() {
             if (!res.ok) {
                 throw new Error(data.message || data.detail || 'Failed to fetch templates');
             }
-            const templates = data.templates || [];
+            const templates = (data.templates || []).filter((template: TemplateStatus) => !isRetiredTemplate(template)).sort(compareTemplates);
             setAvailableTemplates(templates);
             
             // Auto-select first approved wrapper if current is not approved
@@ -469,7 +472,7 @@ export default function CampaignsPage() {
                 if (isApproved) return current;
                 
                 // If the current wrapper is not approved, we find another one
-                const allWrappers = ['msg', 'friendly_1', 'friendly_2', 'friendly_3', 'friendly_4', 'friendly_5', 'friendly_6', 'casual_1', 'casual_2', 'casual_3', 'simple_1', 'notice', 'alert'];
+                const allWrappers = ['casual_1', 'casual_2', 'casual_3', 'friendly_1', 'friendly_2', 'friendly_3', 'friendly_4', 'friendly_5', 'friendly_6', 'simple_1', 'msg', 'notice', 'alert'];
                 for (const w of allWrappers) {
                     const tName = CAMPAIGN_ENVELOPE_MAP[w];
                     if (tName && templates.some((t: any) => t.name === tName && (t.status === 'APPROVED' || t.status === 'ACTIVE'))) {
@@ -1169,7 +1172,9 @@ export default function CampaignsPage() {
         (template) => isTemplateApproved(template) && template.mediaHeaderType === 'image'
     ).length;
     const approvedTemplatesForCampaign = availableTemplates.filter(
-        (template) => isTemplateApproved(template) && (mediaTemplateRequiredForCampaign ? template.mediaHeaderType === 'image' : !template.hasMediaHeader)
+        (template) => isTemplateApproved(template) && (mediaTemplateRequiredForCampaign ? template.mediaHeaderType === 'image' : !template.hasMediaHeader) &&
+            (!templateQuery.trim() || getTemplateOptionLabel(template).toLowerCase().includes(templateQuery.trim().toLowerCase()) ||
+                template.name === selectedTemplateName || messagePartTemplates.some(selection => selection.templateName === template.name))
     );
     const messagePartTemplateStatuses = messageParts.map((part, index) => {
         if (!part.trim()) return { hasTemplate: true, isApproved: true };
@@ -1841,7 +1846,7 @@ export default function CampaignsPage() {
                                                         { value: 'casual_2', label: 'Casual (Just checking in)' },
                                                         { value: 'casual_3', label: 'Casual (Quick reminder)' },
                                                         { value: 'simple_1', label: 'Simple (Just a note)' }
-                                                    ].filter(t => isCampaignTemplateApproved(t.value));
+                                                    ].filter(t => isCampaignTemplateApproved(t.value)).sort((a, b) => a.label.localeCompare(b.label));
                                                     
                                                     const legacyWrappers = [
                                                         { value: 'msg', label: 'Standard Message ("Message from our team: [Your Text]")' },
@@ -1860,19 +1865,19 @@ export default function CampaignsPage() {
                                                             {naturalConversations.length > 0 && (
                                                                 <>
                                                                     <option disabled>────── Natural Conversations ──────</option>
-                                                                    {naturalConversations.map(t => <option key={t.value} value={t.value}>{t.label}</option>)}
+                                                                    {naturalConversations.map(t => <option key={t.value} value={t.value}>{getTemplateOptionLabel(findApprovedTemplate(CAMPAIGN_ENVELOPE_MAP[t.value], campaignMediaEnabled) || { name: '' })}</option>)}
                                                                 </>
                                                             )}
                                                             {legacyWrappers.length > 0 && (
                                                                 <>
                                                                     <option disabled>────── Legacy Wrappers ──────</option>
-                                                                    {legacyWrappers.map(t => <option key={t.value} value={t.value}>{t.label}</option>)}
+                                                                    {legacyWrappers.map(t => <option key={t.value} value={t.value}>{getTemplateOptionLabel(findApprovedTemplate(CAMPAIGN_ENVELOPE_MAP[t.value], campaignMediaEnabled) || { name: '' })}</option>)}
                                                                 </>
                                                             )}
                                                             {actionButtons.length > 0 && (
                                                                 <>
                                                                     <option disabled>────── With Action Buttons ──────</option>
-                                                                    {actionButtons.map(t => <option key={t.value} value={t.value}>{t.label}</option>)}
+                                                                    {actionButtons.map(t => <option key={t.value} value={t.value}>{getTemplateOptionLabel(findApprovedTemplate(CAMPAIGN_ENVELOPE_MAP[t.value], campaignMediaEnabled) || { name: '' })}</option>)}
                                                                 </>
                                                             )}
                                                         </>
@@ -1911,6 +1916,14 @@ export default function CampaignsPage() {
                                     {messageMode === 'template' && (
                                         <div className="border border-dashed border-black bg-white p-4 space-y-3">
                                             <label className="label-wireframe mb-0">Default Template</label>
+                                            <input
+                                                type="search"
+                                                aria-label="Search message templates"
+                                                className="input-wireframe"
+                                                placeholder="Search template wording..."
+                                                value={templateQuery}
+                                                onChange={event => setTemplateQuery(event.target.value)}
+                                            />
                                             {templatesLoading ? (
                                                 <div className="flex items-center gap-2 text-xs font-mono text-gray-500">
                                                     <div className="animate-spin w-4 h-4 border-2 border-black border-t-transparent rounded-full" />
@@ -1941,7 +1954,7 @@ export default function CampaignsPage() {
                                                         <option value="">-- Pick a template --</option>
                                                         {approvedTemplatesForCampaign.map((tmpl) => (
                                                                 <option key={`${tmpl.name}-${tmpl.language}`} value={tmpl.name}>
-                                                                    {tmpl.name.replace(/_/g, ' ')} ({tmpl.language}) — {tmpl.category}
+                                                                    {getTemplateOptionLabel(tmpl)}
                                                                 </option>
                                                         ))}
                                                     </select>
@@ -1956,7 +1969,7 @@ export default function CampaignsPage() {
                                                                     APPROVED
                                                                 </span>
                                                                 <span className="text-gray-600">
-                                                                    {selectedTemplateName.replace(/_/g, ' ')}
+                                                                    {getTemplateOptionLabel(availableTemplates.find(template => template.name === selectedTemplateName) || { name: selectedTemplateName })}
                                                                 </span>
                                                                 <span className="text-gray-400">|</span>
                                                                 <span className="text-gray-500">
@@ -1964,11 +1977,11 @@ export default function CampaignsPage() {
                                                                 </span>
                                                             </div>
                                                             {/* Show original template body */}
-                                                            {getTemplateBodyByName(selectedTemplateName) && (
+                                                            {(availableTemplates.find(t => t.name === selectedTemplateName)?.bodyText || getTemplateBodyByName(selectedTemplateName)) && (
                                                                 <div className="p-3 bg-gray-50 border border-dashed border-gray-400 rounded">
                                                                     <p className="text-[10px] font-bold uppercase text-gray-500 mb-1.5">Original Template</p>
                                                                     <p className="text-xs font-mono text-gray-700 leading-relaxed">
-                                                                        {getTemplateBodyByName(selectedTemplateName)!.split(/\{\{(\d+)\}\}/).map((part, idx) =>
+                                                                        {(availableTemplates.find(t => t.name === selectedTemplateName)?.bodyText || getTemplateBodyByName(selectedTemplateName))!.split(/\{\{(\d+)\}\}/).map((part, idx) =>
                                                                             idx % 2 === 0 ? (
                                                                                 <span key={idx}>{part}</span>
                                                                             ) : (
@@ -2033,7 +2046,7 @@ export default function CampaignsPage() {
                                                             <option value="">-- Pick a template --</option>
                                                             {approvedTemplatesForCampaign.map((tmpl) => (
                                                                 <option key={`${index}-${tmpl.name}-${tmpl.language}`} value={tmpl.name}>
-                                                                    {tmpl.name.replace(/_/g, ' ')} ({tmpl.language}) â€” {tmpl.category}
+                                                                    {getTemplateOptionLabel(tmpl)}
                                                                 </option>
                                                             ))}
                                                         </select>

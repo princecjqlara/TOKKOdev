@@ -35,6 +35,7 @@ import { UTILITY_TEMPLATES, getBaseTemplateName, getMediaTemplateName } from '@/
 import type { TemplateMediaType } from '@/lib/facebook-templates';
 import { runContactSyncToCompletion } from '@/lib/contact-sync-client';
 import { ensureSendableImageHeaderUrl, uploadImageHeader } from '@/lib/media-upload-client';
+import { compareTemplates, getTemplateOptionLabel, isRetiredTemplate } from '@/lib/facebook-template-order';
 
 // Map envelope wrapper values to template names
 const ENVELOPE_TEMPLATE_MAP: Record<string, string> = {
@@ -466,8 +467,9 @@ export default function ContactsPage() {
                             typeof template.name === 'string' &&
                             template.name.trim().length > 0 &&
                             typeof template.status === 'string' &&
-                            template.status.trim().length > 0
+                            template.status.trim().length > 0 && !isRetiredTemplate(template)
                     );
+                    templates.sort(compareTemplates);
                     setAvailableTemplates(templates);
                     const approvedTemplates = templates.filter((template: AvailableTemplate) =>
                         (template.status === 'APPROVED' || template.status === 'ACTIVE') &&
@@ -3053,7 +3055,7 @@ export default function ContactsPage() {
                                             key={`${template.name}-${template.language || 'en_US'}`}
                                             value={getApprovedTemplateOptionValue(template)}
                                         >
-                                            Template: {template.name.replace(/_/g, ' ')} ({template.language || 'en_US'})
+                                            {getTemplateOptionLabel(template)}
                                         </option>
                                     ))}
                                     {normalizedTemplateSearch && visibleApprovedTemplates.length === 0 && (
@@ -3083,7 +3085,7 @@ export default function ContactsPage() {
                                     { value: 'casual_2', label: 'Casual (Just checking in)' },
                                     { value: 'casual_3', label: 'Casual (Quick reminder)' },
                                     { value: 'simple_1', label: 'Simple (Just a note)' }
-                                ].filter(t => isTemplateApprovedForWrapper(t.value));
+                                ].filter(t => isTemplateApprovedForWrapper(t.value)).sort((a, b) => a.label.localeCompare(b.label));
                                 
                                 const legacyWrappers = [
                                     { value: 'msg', label: 'Standard Message ("Message from our team: [Your Text]")' },
@@ -3102,19 +3104,19 @@ export default function ContactsPage() {
                                         {naturalConversations.length > 0 && (
                                             <>
                                                 <option disabled>────── Natural Conversations ──────</option>
-                                                {naturalConversations.map(t => <option key={t.value} value={t.value}>{t.label}</option>)}
+                                                {naturalConversations.map(t => <option key={t.value} value={t.value}>{getTemplateOptionLabel(findApprovedTemplate(ENVELOPE_TEMPLATE_MAP[t.value], mediaTemplateRequiredForBulk) || { name: '' })}</option>)}
                                             </>
                                         )}
                                         {legacyWrappers.length > 0 && (
                                             <>
                                                 <option disabled>────── Legacy Wrappers ──────</option>
-                                                {legacyWrappers.map(t => <option key={t.value} value={t.value}>{t.label}</option>)}
+                                                {legacyWrappers.map(t => <option key={t.value} value={t.value}>{getTemplateOptionLabel(findApprovedTemplate(ENVELOPE_TEMPLATE_MAP[t.value], mediaTemplateRequiredForBulk) || { name: '' })}</option>)}
                                             </>
                                         )}
                                         {actionButtons.length > 0 && (
                                             <>
                                                 <option disabled>────── With Action Buttons ──────</option>
-                                                {actionButtons.map(t => <option key={t.value} value={t.value}>{t.label}</option>)}
+                                                {actionButtons.map(t => <option key={t.value} value={t.value}>{getTemplateOptionLabel(findApprovedTemplate(ENVELOPE_TEMPLATE_MAP[t.value], mediaTemplateRequiredForBulk) || { name: '' })}</option>)}
                                             </>
                                         )}
                                     </>
@@ -3159,7 +3161,7 @@ export default function ContactsPage() {
                                                     key={`${template.name}-${template.language || 'en_US'}`}
                                                     value={template.name}
                                                 >
-                                                    {template.name.replace(/_/g, ' ')} ({template.language || 'en_US'})
+                                                    {getTemplateOptionLabel(template)}
                                                 </option>
                                             ))}
                                             {normalizedTemplateSearch && visibleApprovedTemplates.length === 0 && (
@@ -3274,7 +3276,7 @@ export default function ContactsPage() {
                                                     key={`${index}-${template.name}-${template.language || 'en_US'}`}
                                                     value={template.name}
                                                 >
-                                                    {template.name.replace(/_/g, ' ')} ({template.language || 'en_US'})
+                                                    {getTemplateOptionLabel(template)}
                                                 </option>
                                             ))}
                                         </select>

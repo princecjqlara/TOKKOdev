@@ -1,4 +1,6 @@
 import type { UtilityTemplate, TemplateComponent } from './facebook';
+import verifiedTemplates from './facebook-templates-approved.json';
+import { compareTemplates, isRetiredTemplate } from './facebook-template-order';
 
 // Pre-defined utility templates for sending messages outside the 7-day window.
 // Mix of 1-param and 2-param templates with varied message structures.
@@ -84,7 +86,7 @@ export function buildMediaTemplateVariant(
     };
 }
 
-export const UTILITY_TEMPLATES: TemplateDefinition[] = [
+const LEGACY_UTILITY_TEMPLATES: TemplateDefinition[] = [
     // ===========================================================
     //  1-PARAM TEMPLATES — {{1}} at different positions
     // ===========================================================
@@ -2552,3 +2554,13 @@ export const UTILITY_TEMPLATES: TemplateDefinition[] = [
         ]
     }
 ];
+
+// New short templates enter this manifest only after a live approval check.
+// A page must still approve its own copy before it can be selected for sending.
+export const ALL_UTILITY_TEMPLATES: TemplateDefinition[] = [
+    ...LEGACY_UTILITY_TEMPLATES,
+    ...verifiedTemplates as TemplateDefinition[]
+].sort(compareTemplates);
+
+// Keep retired definitions for existing deliveries, but exclude them from new selections.
+export const UTILITY_TEMPLATES = ALL_UTILITY_TEMPLATES.filter(template => !isRetiredTemplate(template));

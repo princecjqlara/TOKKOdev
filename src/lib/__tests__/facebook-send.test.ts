@@ -17,6 +17,40 @@ afterEach(() => {
 });
 
 describe('getPageTemplates', () => {
+    it('reads every page when the catalog exceeds one thousand templates', async () => {
+        const firstPage = Array.from({ length: 1000 }, (_, i) => ({ name: `template_${i}` }));
+        const fetchMock = vi.fn()
+            .mockResolvedValueOnce(createJsonResponse(true, { data: firstPage, paging: { next: 'https://graph.facebook.com/next' } }))
+            .mockResolvedValueOnce(createJsonResponse(true, { data: [{ name: 'last_template' }] }));
+        vi.stubGlobal('fetch', fetchMock);
+        const templates = await getPageTemplates('page_1', 'token_1');
+        expect(templates).toHaveLength(1001);
+        expect(templates[1000].name).toBe('last_template');
+        expect(fetchMock).toHaveBeenCalledTimes(2);
+    });
+
+    it('fails on a repeated pagination cursor instead of looping or returning an incomplete list', async () => {
+        vi.stubGlobal('fetch', vi.fn().mockResolvedValue(createJsonResponse(true, {
+            data: [], paging: { next: 'https://graph.facebook.com/repeated' }
+        })));
+        await expect(getPageTemplates('page_1', 'token_1')).rejects.toThrow('repeated');
+    });
+
+    it('deduplicates overlapping pages while retaining distinct languages and the latest observed status', async () => {
+        vi.stubGlobal('fetch', vi.fn()
+            .mockResolvedValueOnce(createJsonResponse(true, {
+                data: [{ name: 'chat', language: 'en_US', status: 'APPROVED' }],
+                paging: { next: 'https://graph.facebook.com/next' }
+            }))
+            .mockResolvedValueOnce(createJsonResponse(true, {
+                data: [{ name: 'chat', language: 'en_US', status: 'REJECTED' }, { name: 'chat', language: 'es_ES', status: 'APPROVED' }]
+            })));
+        expect(await getPageTemplates('page_1', 'token_1')).toEqual([
+            { name: 'chat', language: 'en_US', status: 'REJECTED' },
+            { name: 'chat', language: 'es_ES', status: 'APPROVED' }
+        ]);
+    });
+
     it('times out a stalled template preflight request', async () => {
         vi.useFakeTimers();
         vi.stubGlobal('fetch', vi.fn((_url, init: RequestInit) => new Promise((_resolve, reject) => {

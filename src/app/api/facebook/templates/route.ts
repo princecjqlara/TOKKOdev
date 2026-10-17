@@ -3,6 +3,9 @@ import { getServerSession } from 'next-auth';
 import { authOptions } from '@/lib/auth';
 import { getSupabaseAdmin } from '@/lib/supabase';
 import { createUtilityTemplate, getPageTemplates, UTILITY_TEMPLATES, UtilityTemplate } from '@/lib/facebook';
+import { selectTemplateStarterSet } from '@/lib/facebook-template-order';
+
+export const maxDuration = 300;
 
 type BodyOnlyTemplateInput = string | { name?: string; text: string; headline?: string };
 
@@ -289,7 +292,7 @@ export async function POST(request: NextRequest) {
         } else if (Array.isArray(customTemplates) && customTemplates.length > 0) {
             templatesToCreate = customTemplates;
         } else {
-            templatesToCreate = UTILITY_TEMPLATES;
+            templatesToCreate = selectTemplateStarterSet(UTILITY_TEMPLATES);
         }
 
         if (templatesToCreate.length === 0) {
@@ -304,7 +307,9 @@ export async function POST(request: NextRequest) {
         for (const template of templatesToCreate) {
             try {
                 const fullTemplate: UtilityTemplate = {
-                    ...template,
+                    name: template.name,
+                    category: template.category,
+                    components: template.components,
                     language
                 };
 

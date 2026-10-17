@@ -968,12 +968,18 @@ export async function getPageTemplates(
     pageAccessToken: string
 ): Promise<any[]> {
     const allTemplates: any[] = [];
+    const templatePositions = new Map<string, number>();
+    const visitedUrls = new Set<string>();
     let nextUrl: string | null =
         `${FACEBOOK_GRAPH_URL}/${pageId}/message_templates` +
         `?fields=id,name,language,status,category,components` +
         `&limit=100&access_token=${pageAccessToken}`;
 
     while (nextUrl) {
+        if (visitedUrls.has(nextUrl)) {
+            throw new Error('Facebook repeated a template pagination cursor');
+        }
+        visitedUrls.add(nextUrl);
         const response: Response = await fetchFacebookRead(nextUrl);
 
         if (!response.ok) {
@@ -995,13 +1001,18 @@ export async function getPageTemplates(
         }
 
         const data: { data?: any[]; paging?: { next?: string } } = await response.json();
-        allTemplates.push(...(data.data || []));
-        nextUrl = data.paging?.next || null;
-
-        if (allTemplates.length >= 1000) {
-            console.warn(`⚠️ Template fetch reached safety limit: ${allTemplates.length}`);
-            break;
+        for (const template of data.data || []) {
+            const language = typeof template.language === 'string' ? template.language : template.language?.code || '';
+            const key = template.id ? `id:${template.id}` : template.name ? `name:${template.name}:${language}` : null;
+            const position = key ? templatePositions.get(key) : undefined;
+            if (typeof position === 'number') {
+                allTemplates[position] = template;
+            } else {
+                if (key) templatePositions.set(key, allTemplates.length);
+                allTemplates.push(template);
+            }
         }
+        nextUrl = data.paging?.next || null;
     }
 
     return allTemplates;

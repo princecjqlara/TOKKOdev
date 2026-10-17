@@ -3,6 +3,7 @@ import { getSessionFromRequest } from '@/lib/get-session';
 import { getSupabaseAdmin } from '@/lib/supabase';
 import { subscribePageToAppWebhook, getPageTemplates, createUtilityTemplate } from '@/lib/facebook';
 import { UTILITY_TEMPLATES } from '@/lib/facebook-templates';
+import { selectTemplateStarterSet } from '@/lib/facebook-template-order';
 import type { UtilityTemplate } from '@/lib/facebook';
 
 type WebhookRefreshWarning = {
@@ -110,7 +111,7 @@ export async function POST(request: NextRequest) {
             };
         }
 
-        // Fire-and-forget: auto-submit all UTILITY_TEMPLATES to the newly connected page
+        // Seed a bounded set of templates on the newly connected page.
         autoSubmitTemplates(fbPageId, accessToken, name).catch((err) =>
             console.error(`[AUTO_SUBMIT] Background template submission failed for page "${name}":`, err)
         );
@@ -131,7 +132,7 @@ export async function POST(request: NextRequest) {
 }
 
 // ---------------------------------------------------------------------------
-//  Auto-submit all UTILITY_TEMPLATES to a Facebook page (background task)
+//  Submit a small starter set to a Facebook page (background task).
 //  Skips templates that already exist on the page.
 // ---------------------------------------------------------------------------
 async function autoSubmitTemplates(fbPageId: string, accessToken: string, pageName: string) {
@@ -154,7 +155,7 @@ async function autoSubmitTemplates(fbPageId: string, accessToken: string, pageNa
     let skipped = 0;
     let failed = 0;
 
-    for (const template of UTILITY_TEMPLATES) {
+    for (const template of selectTemplateStarterSet(UTILITY_TEMPLATES)) {
         if (existingNames.has(template.name)) {
             skipped++;
             continue;

@@ -10,6 +10,9 @@ import {
     getMediaTemplateName
 } from '@/lib/facebook-templates';
 import type { TemplateMediaType } from '@/lib/facebook-templates';
+import { TEMPLATE_CANDIDATES } from '@/lib/facebook-template-candidates';
+
+export const maxDuration = 300;
 
 const SENDABLE_STATUSES = new Set(['APPROVED', 'ACTIVE']);
 const FACEBOOK_GRAPH_URL = 'https://graph.facebook.com/v21.0';
@@ -85,8 +88,8 @@ async function createUtilityTemplatesBatch(
         throw new Error(message);
     }
 
-    if (!Array.isArray(responseBody)) {
-        throw new Error('Facebook returned an unexpected batch response');
+    if (!Array.isArray(responseBody) || responseBody.length !== templates.length) {
+        throw new Error('Facebook returned an incomplete batch response. Refresh template statuses before retrying.');
     }
 
     return responseBody.map((entry, index) => {
@@ -258,7 +261,7 @@ export async function POST(request: NextRequest) {
         }
 
         const body = await request.json();
-        const { pageId, limit, templateNames, mediaVariant, sampleImageUrl, sampleMediaUrl } = body as {
+        const { pageId, limit, templateNames, mediaVariant, sampleImageUrl, sampleMediaUrl, catalog } = body as {
             pageId?: string;
             limit?: number;
             templateNames?: string[];
@@ -266,12 +269,23 @@ export async function POST(request: NextRequest) {
             mediaType?: TemplateMediaType;
             sampleImageUrl?: string;
             sampleMediaUrl?: string;
+            catalog?: 'candidates';
         };
         const mediaType = normalizeMediaType((body as { mediaType?: unknown }).mediaType);
 
         if (!pageId) {
             return NextResponse.json(
                 { error: 'Bad Request', message: 'pageId is required' },
+                { status: 400 }
+            );
+        }
+
+        if (catalog === 'candidates' && (
+            mediaVariant || !Array.isArray(templateNames) || templateNames.length === 0 || templateNames.length > 25 ||
+            templateNames.some(name => !TEMPLATE_CANDIDATES.some(candidate => candidate.name === name))
+        )) {
+            return NextResponse.json(
+                { error: 'Bad Request', message: 'Choose 1 to 25 text candidates to submit for review.' },
                 { status: 400 }
             );
         }
@@ -335,6 +349,10 @@ export async function POST(request: NextRequest) {
                     { status: 502 }
                 );
             }
+            return NextResponse.json(
+                { error: 'Facebook Template Fetch Failed', message: 'Could not check existing templates. Refresh statuses before submitting.', detail: message },
+                { status: 502 }
+            );
         }
 
         const existingNames = new Set(
@@ -347,13 +365,14 @@ export async function POST(request: NextRequest) {
             Array.isArray(templateNames) && templateNames.length > 0
                 ? new Set(templateNames.filter((name) => typeof name === 'string'))
                 : null;
+        const catalogTemplates = catalog === 'candidates' ? TEMPLATE_CANDIDATES : UTILITY_TEMPLATES;
         const sourceTemplates = candidateNameSet
-            ? UTILITY_TEMPLATES.filter(
+            ? catalogTemplates.filter(
                 (template) =>
                     candidateNameSet.has(template.name) ||
                     candidateNameSet.has(getMediaTemplateName(template.name, mediaType))
             )
-            : UTILITY_TEMPLATES;
+            : catalogTemplates;
         const defaultSampleUrl = mediaType === 'video'
             ? DEFAULT_VIDEO_TEMPLATE_SAMPLE_URL
             : DEFAULT_MEDIA_TEMPLATE_SAMPLE_URL;
@@ -412,17 +431,24 @@ export async function POST(request: NextRequest) {
 
         try {
             const fullTemplates: UtilityTemplate[] = templatesToCreate.map((template) => {
-                const { paramCount: _pc, ...templateFields } = template as any;
                 return {
-                    ...templateFields,
+                    name: template.name,
+                    category: template.category,
+                    components: template.components,
                     language: 'en_US'
                 };
             });
-            const createdResults = await createUtilityTemplatesBatch(
-                page.fb_page_id,
-                page.access_token,
-                fullTemplates
-            );
+            // Larger Messenger review batches can abort dependent requests.
+            // Keep each Facebook request small even when the user selects 25.
+            const createdResults: Awaited<ReturnType<typeof createUtilityTemplatesBatch>> = [];
+            for (let offset = 0; offset < fullTemplates.length; offset += 5) {
+                const batchResults = await createUtilityTemplatesBatch(
+                    page.fb_page_id,
+                    page.access_token,
+                    fullTemplates.slice(offset, offset + 5)
+                );
+                createdResults.push(...batchResults);
+            }
 
             for (const created of createdResults) {
                 const template = templatesToCreate.find((t) => t.name === created.name);

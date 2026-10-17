@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { RefreshCw, CheckCircle, XCircle, Clock, FileText, AlertTriangle, Image as ImageIcon } from 'lucide-react';
 import {
     DEFAULT_MEDIA_TEMPLATE_SAMPLE_URL,
@@ -10,6 +10,9 @@ import {
     isMediaTemplateName
 } from '@/lib/facebook-templates';
 import type { TemplateMediaType } from '@/lib/facebook-templates';
+import { compareTemplates, getTemplateTone, isRetiredTemplate, TEMPLATE_TONES, type TemplateTone } from '@/lib/facebook-template-order';
+import TemplateCandidateReview from '@/components/TemplateCandidateReview';
+import Pagination from '@/components/Pagination';
 
 type Page = {
     id: string;
@@ -57,6 +60,10 @@ export default function TemplatesPage() {
     const [filter, setFilter] = useState<'all' | 'system' | 'approved' | 'rejected'>('system');
     const [errorMessage, setErrorMessage] = useState<string | null>(null);
     const [mediaSampleUrl, setMediaSampleUrl] = useState(DEFAULT_MEDIA_TEMPLATE_SAMPLE_URL);
+    const [tone, setTone] = useState<TemplateTone | 'all'>('all');
+    const [search, setSearch] = useState('');
+    const [tablePage, setTablePage] = useState(1);
+    const templateRequestId = useRef<symbol | null>(null);
 
     // Fetch pages
     useEffect(() => {
@@ -90,7 +97,10 @@ export default function TemplatesPage() {
     // Fetch templates when page changes
     const fetchTemplates = useCallback(async () => {
         if (!selectedPageId) return;
+        const requestId = Symbol();
+        templateRequestId.current = requestId;
         setLoading(true);
+        setTablePage(1);
         setErrorMessage(null);
         try {
             const res = await fetch(`/api/facebook/templates/status?pageId=${selectedPageId}`);
@@ -98,18 +108,21 @@ export default function TemplatesPage() {
             if (!res.ok) {
                 throw new Error(data.message || data.detail || 'Failed to fetch templates');
             }
-            setTemplates(data.templates || []);
+            if (requestId !== templateRequestId.current) return;
+            setTemplates((data.templates || []).sort(compareTemplates));
         } catch (err) {
+            if (requestId !== templateRequestId.current) return;
             console.error('Failed to fetch templates:', err);
             setTemplates([]);
             setErrorMessage((err as Error).message);
         } finally {
-            setLoading(false);
+            if (requestId === templateRequestId.current) setLoading(false);
         }
     }, [selectedPageId]);
 
     useEffect(() => {
         fetchTemplates();
+        return () => { templateRequestId.current = null; };
     }, [fetchTemplates]);
 
     // Submit all templates to current page
@@ -232,11 +245,14 @@ export default function TemplatesPage() {
 
     // Filter templates
     const filteredTemplates = templates.filter(t => {
+        if (tone !== 'all' && getTemplateTone(t) !== tone) return false;
+        if (!`${t.name} ${t.bodyText}`.toLowerCase().includes(search.toLowerCase())) return false;
         if (filter === 'system') return isSystemTemplateName(t.name);
         if (filter === 'approved') return t.status === 'APPROVED' || t.status === 'ACTIVE';
         if (filter === 'rejected') return t.status === 'REJECTED';
         return true; // 'all'
     });
+    const visibleTemplates = filteredTemplates.slice((tablePage - 1) * 25, tablePage * 25);
 
     // Count stats
     const systemTemplates = templates.filter(t => isSystemTemplateName(t.name));
@@ -290,7 +306,7 @@ export default function TemplatesPage() {
                     {/* Page Selector */}
                     <select
                         value={selectedPageId}
-                        onChange={(e) => setSelectedPageId(e.target.value)}
+                        onChange={(e) => { setTemplates([]); setLoading(true); setSelectedPageId(e.target.value); }}
                         className="input-wireframe h-10 w-full md:w-64"
                     >
                         {pages.map((p) => (
@@ -359,6 +375,14 @@ export default function TemplatesPage() {
             )}
 
             {/* Stats Cards */}
+            <TemplateCandidateReview
+                key={selectedPageId}
+                pageId={selectedPageId}
+                templates={templates}
+                disabled={loading || Boolean(errorMessage) || submitting || submittingMedia}
+                onRefresh={fetchTemplates}
+            />
+
             <div className="grid grid-cols-2 md:grid-cols-5 gap-3 mb-6">
                 <div className="border border-black p-4 bg-white">
                     <p className="text-xs font-bold uppercase text-gray-500 mb-1">Total (System)</p>
@@ -392,7 +416,7 @@ export default function TemplatesPage() {
                 ] as const).map(({ key, label }) => (
                     <button
                         key={key}
-                        onClick={() => setFilter(key)}
+                        onClick={() => { setFilter(key); setTablePage(1); }}
                         className={`px-4 py-2 text-xs font-bold uppercase border-r border-black last:border-r-0 transition-colors ${
                             filter === key
                                 ? 'bg-black text-white'
@@ -402,6 +426,14 @@ export default function TemplatesPage() {
                         {label}
                     </button>
                 ))}
+            </div>
+
+            <div className="flex gap-3 mb-4">
+                <select aria-label="Template tone" className="input-wireframe md:w-48" value={tone} onChange={event => { setTone(event.target.value as typeof tone); setTablePage(1); }}>
+                    <option value="all">Casual to formal</option>
+                    {TEMPLATE_TONES.map(value => <option key={value} value={value}>{value[0].toUpperCase() + value.slice(1)}</option>)}
+                </select>
+                <input aria-label="Search templates" className="input-wireframe flex-1" placeholder="Search templates..." value={search} onChange={event => { setSearch(event.target.value); setTablePage(1); }} />
             </div>
 
             {/* Templates Table */}
@@ -433,7 +465,7 @@ export default function TemplatesPage() {
                             </tr>
                         </thead>
                         <tbody>
-                            {filteredTemplates.map((t, idx) => {
+                            {visibleTemplates.map((t, idx) => {
                                 const isSystem = isSystemTemplateName(t.name);
                                 return (
                                     <tr
@@ -442,10 +474,12 @@ export default function TemplatesPage() {
                                             !isSystem ? 'opacity-50' : ''
                                         }`}
                                     >
-                                        <td className="px-4 py-3 text-xs text-gray-400 font-mono">{idx + 1}</td>
+                                        <td className="px-4 py-3 text-xs text-gray-400 font-mono">{(tablePage - 1) * 25 + idx + 1}</td>
                                         <td className="px-4 py-3">{getStatusBadge(t.status)}</td>
                                         <td className="px-4 py-3">
                                             <span className="font-mono font-bold text-sm">{t.name}</span>
+                                            <span className="ml-2 text-xs capitalize text-gray-500">{getTemplateTone(t)}</span>
+                                            {isRetiredTemplate(t) && <span className="ml-2 text-xs text-gray-500">Retired from new selections</span>}
                                             {isSystem && (
                                                 <span className="ml-2 text-[10px] font-bold uppercase px-1.5 py-0.5 bg-blue-100 text-blue-700 border border-blue-300">
                                                     SYSTEM
@@ -495,12 +529,14 @@ export default function TemplatesPage() {
                 )}
             </div>
 
+            <Pagination page={tablePage} pageSize={25} total={filteredTemplates.length} onPageChange={setTablePage} />
+
             {/* Footer Info */}
             <div className="mt-4 p-3 border border-gray-300 bg-gray-50">
                 <p className="text-xs font-mono text-gray-500">
-                    <strong>Tip:</strong> Templates are automatically submitted when you connect a new page. 
+                    <strong>Tip:</strong> A starter set is submitted when you connect a new page.
                     Use &quot;Submit Missing&quot; to manually push any templates that haven&apos;t been submitted yet. 
-                    Facebook reviews templates instantly — approved ones can be used for messaging outside the 24h window.
+                    Review times vary. Refresh to verify approval on the selected page before sending.
                 </p>
             </div>
         </div>
