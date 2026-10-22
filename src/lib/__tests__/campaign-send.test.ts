@@ -30,6 +30,7 @@ function createSupabaseMock(
         stopAfterFirstBatch?: boolean;
         nextAttemptAt?: string;
         deliveryBusy?: boolean;
+        claimError?: { code?: string; message: string };
     } = {}
 ) {
     const campaignRecord = {
@@ -101,6 +102,7 @@ function createSupabaseMock(
         if (name === 'release_page_campaign_delivery') return { data: null, error: null };
         if (name === 'claim_campaign_recipients') {
             claimRpc(args);
+            if (options.claimError) return { data: null, error: options.claimError };
             const claimed = pendingRecipients.splice(0, args.p_batch_size).map(recipient => ({
                 contact_id: recipient.contact_id,
                 contact_psid: recipient.contacts.psid,
@@ -836,6 +838,50 @@ describe('sendCampaignById', () => {
             'status',
             ['draft', 'sending']
         );
+    });
+
+    it.each([
+        { code: 'PGRST000', message: 'Database unavailable' },
+        { code: 'PGRST001', message: 'Database unavailable' },
+        { code: 'PGRST002', message: 'Could not query the database for the schema cache. Retrying.' },
+        { code: 'PGRST003', message: 'Database unavailable' },
+        { message: 'Could not query the database for the schema cache. Retrying.' }
+    ])('automatically requeues a temporary database outage: $code $message', async databaseError => {
+        const supabase = createSupabaseMock('draft', {
+            remainingPendingCount: 275, claimError: databaseError
+        });
+
+        const result = await sendCampaignById({ campaignId: 'campaign_1', supabase: supabase as never });
+
+        expect(result.status).toBe(503);
+        expect(result.body.retryable).toBe(true);
+        expect(supabase.campaignUpdate).toHaveBeenLastCalledWith(expect.objectContaining({
+            status: 'sending',
+            background_delivery_enabled: true,
+            next_attempt_at: expect.any(String),
+            last_error: databaseError.message
+        }));
+        expect(sendMessage).not.toHaveBeenCalled();
+        expect(supabase.finishBatchRpc).not.toHaveBeenCalled();
+    });
+
+    it('keeps a missing database function paused for repair', async () => {
+        const databaseError = {
+            code: 'PGRST202',
+            message: 'Could not find the function public.claim_campaign_recipients in the schema cache'
+        };
+        const supabase = createSupabaseMock('draft', {
+            remainingPendingCount: 275, claimError: databaseError
+        });
+
+        const result = await sendCampaignById({ campaignId: 'campaign_1', supabase: supabase as never });
+
+        expect(result.status).toBe(500);
+        expect(result.body.retryable).toBe(false);
+        expect(supabase.campaignUpdate).toHaveBeenLastCalledWith(expect.objectContaining({
+            status: 'draft', background_delivery_enabled: false, next_attempt_at: null
+        }));
+        expect(sendMessage).not.toHaveBeenCalled();
     });
 
     it('claims every pending recipient in bounded atomic batches without a per-run cap', async () => {

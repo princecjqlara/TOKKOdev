@@ -61,11 +61,16 @@ function isRetryableInfrastructureError(error: unknown): boolean {
 
     return (
         ['40001', '40P01', '53300', '57014', '57P01', '57P02', '57P03'].includes(code) ||
+        // Supabase returns PostgREST connection failures as plain objects,
+        // without an HTTP status. PGRST002 can occur while rebuilding the
+        // schema cache; it must leave the campaign eligible for a later retry.
+        ['PGRST000', 'PGRST001', 'PGRST002', 'PGRST003'].includes(code) ||
         code.startsWith('08') ||
         record.status === 408 ||
         record.status === 429 ||
         (typeof record.status === 'number' && record.status >= 500) ||
         message.includes('statement timeout') ||
+        message.includes('could not query the database for the schema cache') ||
         message.includes('connection') ||
         message.includes('fetch failed') ||
         message.includes('network') ||
