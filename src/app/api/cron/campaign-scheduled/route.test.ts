@@ -420,4 +420,19 @@ describe('GET /api/cron/campaign-scheduled', () => {
         await GET(createRequest());
         expect(mocks.sendCampaignById).toHaveBeenCalledTimes(1);
     });
+
+    it('finds another Page behind several immediate campaigns for one Page', async () => {
+        const { GET } = await loadRoute();
+        const supabase = createSupabaseMock({ campaignLevelCampaigns: [], immediateCampaigns: [
+            createCampaign({ id: 'first', status: 'sending', scheduled_at: null }),
+            createCampaign({ id: 'same_page', status: 'sending', scheduled_at: null }),
+            createCampaign({ id: 'other_page', page_id: 'page_2', status: 'sending', scheduled_at: null })
+        ] });
+        mocks.getSupabaseAdmin.mockReturnValue(supabase);
+        mocks.sendCampaignById.mockResolvedValue({ success: true, body: { partial: true } });
+        await GET(createRequest());
+        expect(mocks.sendCampaignById.mock.calls.map(([options]) => options.campaignId)).toEqual(['first', 'other_page']);
+        const immediateQuery = supabase.campaignsSelect.mock.results[2].value;
+        expect(immediateQuery.limit).toHaveBeenCalledWith(100);
+    });
 });

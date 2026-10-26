@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { sendCampaignById } from '../campaign-send';
 import { serializeCampaignMessageSequence } from '../campaign-message-sequence';
 import { getPageTemplates, sendMessage, takeThreadControl } from '../facebook';
+import { waitForPageDeliveryBatch } from '../page-delivery';
 
 vi.mock('../facebook', () => ({
     sendMessage: vi.fn(),
@@ -30,6 +31,7 @@ function createSupabaseMock(
         stopAfterFirstBatch?: boolean;
         nextAttemptAt?: string;
         deliveryBusy?: boolean;
+        deliveryBatchSize?: number;
         claimError?: { code?: string; message: string };
     } = {}
 ) {
@@ -98,7 +100,7 @@ function createSupabaseMock(
     const claimRpc = vi.fn();
     const finishBatchRpc = vi.fn();
     const rpc = vi.fn(async (name: string, args: Record<string, any>) => {
-        if (name === 'acquire_page_campaign_delivery') return { data: [{ acquired: !options.deliveryBusy, retry_at: options.deliveryBusy ? '2026-10-13T00:01:00Z' : null, batch_size: 10 }], error: null };
+        if (name === 'acquire_page_campaign_delivery') return { data: [{ acquired: !options.deliveryBusy, retry_at: options.deliveryBusy ? '2026-10-13T00:01:00Z' : null, batch_size: options.deliveryBatchSize || 10 }], error: null };
         if (name === 'release_page_campaign_delivery') return { data: null, error: null };
         if (name === 'claim_campaign_recipients') {
             claimRpc(args);
@@ -250,10 +252,37 @@ describe('sendCampaignById', () => {
         const supabase = createSupabaseMock('draft', { deliveryBusy: true, remainingPendingCount: 200 });
         const result = await sendCampaignById({ campaignId: 'campaign_1', supabase: supabase as never });
         expect(result.status).toBe(200);
-        expect(result.body).toMatchObject({ queued: true, remaining: 200 });
+        expect(result.body).toMatchObject({ queued: true, remaining: 200, processed: 0 });
         expect(supabase.claimRpc).not.toHaveBeenCalled();
-        expect(supabase.campaignUpdate).not.toHaveBeenCalled();
+        expect(supabase.campaignUpdate).toHaveBeenCalledWith(expect.objectContaining({
+            status: 'sending', background_delivery_enabled: true,
+            next_attempt_at: '2026-10-13T00:01:00Z'
+        }));
         expect(sendMessage).not.toHaveBeenCalled();
+    });
+
+    it('preserves due-only delivery when a scheduled campaign waits for the Page', async () => {
+        const supabase = createSupabaseMock('scheduled', { deliveryBusy: true, remainingPendingCount: 200 });
+        await sendCampaignById({ campaignId: 'campaign_1', supabase: supabase as never,
+            allowScheduled: true, dueAt: '2026-10-26T08:00:00Z' });
+        expect(supabase.campaignUpdate).toHaveBeenCalledWith(expect.objectContaining({
+            status: 'scheduled', background_delivery_enabled: false
+        }));
+        expect(sendMessage).not.toHaveBeenCalled();
+    });
+
+    it('paces a recovering Page even when the caller requests no delay', async () => {
+        const supabase = createSupabaseMock('draft', {
+            deliveryBatchSize: 1,
+            messageText: serializeCampaignMessageSequence(['First', 'Second']),
+            recipients: [1, 2].map(id => ({ id: `r${id}`, contact_id: `c${id}`, contacts: { psid: `p${id}` } }))
+        });
+        vi.mocked(sendMessage).mockResolvedValue({ message_id: 'mid_recovery' });
+        const result = await sendCampaignById({ campaignId: 'campaign_1', supabase: supabase as never,
+            delayBetweenBatchesMs: 0 });
+        expect(result.sent).toBe(2);
+        expect(supabase.claimRpc).toHaveBeenCalledWith(expect.objectContaining({ p_batch_size: 1 }));
+        expect(waitForPageDeliveryBatch).toHaveBeenCalledWith(4000);
     });
 
     it('blocks an incompletely materialized campaign before any recipient is sent', async () => {

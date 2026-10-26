@@ -2,12 +2,14 @@
 
 import { useSession } from 'next-auth/react';
 
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { Plus, Send, Trash2, Users, Clock, CheckCircle, XCircle, MessageSquare, StopCircle, FileText, Calendar, Image as ImageIcon } from 'lucide-react';
 import Pagination from '@/components/Pagination';
 import Modal from '@/components/Modal';
 import { Campaign, Page, Contact, PaginatedResponse } from '@/types';
 import { getCampaignMessagePreview } from '@/lib/campaign-message-sequence';
+import { getCampaignDeliveryState, shouldContinueCampaignDelivery } from '@/lib/campaign-delivery-state';
+import { createRequestGate } from '@/lib/request-gate';
 import {
     UTILITY_TEMPLATES,
     getBaseTemplateName,
@@ -194,6 +196,7 @@ export default function CampaignsPage() {
     const [pages, setPages] = useState<Page[]>([]);
     const [selectedPageId, setSelectedPageId] = useState<string | null>(null);
     const [campaigns, setCampaigns] = useState<Campaign[]>([]);
+    const campaignRequests = useRef(createRequestGate());
     const [contacts, setContacts] = useState<Contact[]>([]);
     const [loading, setLoading] = useState(true);
 
@@ -274,15 +277,52 @@ export default function CampaignsPage() {
     const [dateFrom, setDateFrom] = useState('');
     const [dateTo, setDateTo] = useState('');
 
+    const fetchCampaigns = useCallback(async (quiet = false) => {
+        if (!selectedPageId) return;
+        const token = campaignRequests.current.next();
+        if (!quiet) setLoading(true);
+        try {
+            const params = new URLSearchParams({
+                page: page.toString(), pageSize: pageSize.toString(), pageId: selectedPageId
+            });
+            if (dateFrom) params.set('dateFrom', dateFrom);
+            if (dateTo) params.set('dateTo', dateTo);
+            const res = await fetch(`/api/campaigns?${params}`);
+            if (!res.ok) throw new Error(`Failed to refresh campaigns (HTTP ${res.status})`);
+            const data: PaginatedResponse<Campaign> = await res.json();
+            if (!campaignRequests.current.isLatest(token)) return;
+            setCampaigns(data.items || []);
+            setTotal(data.total || 0);
+        } catch (error) {
+            console.error('Error fetching campaigns:', error);
+        } finally {
+            if (campaignRequests.current.isLatest(token)) setLoading(false);
+        }
+    }, [selectedPageId, page, pageSize, dateFrom, dateTo]);
+
     useEffect(() => {
         fetchPages();
     }, []);
 
     useEffect(() => {
-        if (selectedPageId) {
-            fetchCampaigns();
-        }
-    }, [selectedPageId, page, pageSize, dateFrom, dateTo]);
+        const requests = campaignRequests.current;
+        fetchCampaigns();
+        return () => { requests.next(); };
+    }, [fetchCampaigns]);
+
+    const hasActiveCampaigns = campaigns.some(campaign =>
+        campaign.status === 'sending' || campaign.status === 'scheduled');
+    useEffect(() => {
+        if (!selectedPageId || !hasActiveCampaigns) return;
+        let refreshing = false;
+        const timer = window.setInterval(async () => {
+            if (refreshing || document.hidden) return;
+            refreshing = true;
+            try { await fetchCampaigns(true); }
+            finally { refreshing = false; }
+        }, 5000);
+        return () => window.clearInterval(timer);
+    }, [selectedPageId, hasActiveCampaigns, fetchCampaigns]);
 
     useEffect(() => {
         if (!showErrorsModal || !errorsCampaignId) return;
@@ -315,32 +355,6 @@ export default function CampaignsPage() {
             }
         } catch (error) {
             console.error('Error fetching pages:', error);
-        }
-    };
-
-    const fetchCampaigns = async () => {
-        if (!selectedPageId) return;
-
-        setLoading(true);
-        try {
-            const params = new URLSearchParams({
-                page: page.toString(),
-                pageSize: pageSize.toString(),
-                pageId: selectedPageId
-            });
-
-            if (dateFrom) params.set('dateFrom', dateFrom);
-            if (dateTo) params.set('dateTo', dateTo);
-
-            const res = await fetch(`/api/campaigns?${params}`);
-            const data: PaginatedResponse<Campaign> = await res.json();
-
-            setCampaigns(data.items || []);
-            setTotal(data.total || 0);
-        } catch (error) {
-            console.error('Error fetching campaigns:', error);
-        } finally {
-            setLoading(false);
         }
     };
 
@@ -982,14 +996,14 @@ export default function CampaignsPage() {
             let data = await response.json().catch(() => ({} as Record<string, unknown>));
 
             let remaining = Number((data as any).remaining || 0);
-            let deliveryQueuedForRetry = !response.ok && (data as any).retryable === true;
+            let deliveryQueuedForRetry = (data as any).retryable === true || (data as any).queued === true;
 
             if (!response.ok && !deliveryQueuedForRetry) {
                 const errorMessage = (data as any).message || `Failed to send campaign (HTTP ${response.status})`;
                 console.error('Error sending campaign:', errorMessage, data);
                 alert(`Failed to send campaign: ${errorMessage}`);
             } else {
-                while ((data as any).partial && !(data as any).paused && !(data as any).cancelled && remaining > 0) {
+                while (shouldContinueCampaignDelivery({ ...data, remaining })) {
                     response = await fetch(`/api/campaigns/${campaignId}/send`, {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
@@ -997,6 +1011,7 @@ export default function CampaignsPage() {
                     });
 
                     data = await response.json().catch(() => ({} as Record<string, unknown>));
+                    deliveryQueuedForRetry = (data as any).retryable === true || (data as any).queued === true;
                     if (!response.ok) {
                         if ((data as any).retryable === true) {
                             remaining = Number((data as any).remaining || remaining);
@@ -1133,9 +1148,16 @@ export default function CampaignsPage() {
         }
     };
 
-    const getStatusBadge = (status: string) => {
+    const getStatusBadge = (campaign: Campaign) => {
+        const status = getCampaignDeliveryState(campaign);
         let classes = "badge-wireframe ";
         switch (status) {
+            case 'rate_limited':
+                return <span className={classes + "bg-amber-100 text-amber-800 border-amber-800"}>FACEBOOK COOLDOWN</span>;
+            case 'retrying':
+                return <span className={classes + "bg-amber-100 text-amber-800 border-amber-800"}>RETRY QUEUED</span>;
+            case 'paused':
+                return <span className={classes + "bg-gray-200 text-black border-gray-400"}>PAUSED</span>;
             case 'draft':
                 return <span className={classes + "bg-gray-200 text-black border-gray-400"}>DRAFT</span>;
             case 'sending':
@@ -1308,7 +1330,7 @@ export default function CampaignsPage() {
                                 <div className="flex-1 space-y-3">
                                     <div className="flex items-center gap-3 flex-wrap">
                                         <h3 className="text-xl font-black uppercase tracking-tight">{campaign.name}</h3>
-                                        {getStatusBadge(campaign.status)}
+                                        {getStatusBadge(campaign)}
                                         {getLoopBadge(campaign)}
                                     </div>
                                     <p className="text-sm font-mono text-gray-600 line-clamp-2 border-l-2 border-gray-200 pl-3">
@@ -1364,9 +1386,19 @@ export default function CampaignsPage() {
                                             Exclude tags: {campaign.audience_exclude_tag_ids?.length || 0}
                                         </p>
                                     )}
-                                    {campaign.status === 'draft' && campaign.last_error && (
+                                    {(campaign.status === 'draft' || campaign.status === 'sending' || campaign.status === 'scheduled') && campaign.last_error && (
                                         <p className="text-xs font-mono text-amber-700 border-l-2 border-amber-400 pl-3">
-                                            Paused: {campaign.last_error}
+                                            {campaign.last_error}
+                                        </p>
+                                    )}
+                                    {(campaign.status === 'sending' || campaign.status === 'scheduled') && (
+                                        <p className="text-xs font-mono text-gray-600" role="status">
+                                            {Math.max(0, campaign.total_recipients - campaign.sent_count - campaign.failed_count).toLocaleString()} recipients remain.
+                                            {getCampaignDeliveryState(campaign) === 'paused'
+                                                ? ' Automatic delivery is paused. Stop this campaign to make Continue Unsent available.'
+                                                : campaign.next_attempt_at && Date.parse(campaign.next_attempt_at) > Date.now()
+                                                    ? ` Automatic retry after ${new Date(campaign.next_attempt_at).toLocaleString()}. Unsent recipients are saved.`
+                                                    : ' Progress refreshes automatically.'}
                                         </p>
                                     )}
                                 </div>

@@ -109,6 +109,7 @@ export interface Campaign {
   recurrence?: 'none' | 'daily';
   recurrence_end_at?: string | null;
   last_error?: string | null;
+  next_attempt_at?: string | null;
   background_delivery_enabled?: boolean;
 }
 

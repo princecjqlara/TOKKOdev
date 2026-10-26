@@ -11,6 +11,7 @@ const MAX_CAMPAIGNS_PER_CRON_RUN = 2;
 const MAX_RECIPIENTS_PER_CAMPAIGN_RUN = 250;
 const MAX_IMMEDIATE_RECIPIENTS_PER_CAMPAIGN_RUN = 250;
 const MAX_DUE_RECIPIENT_ROWS_TO_SCAN = 500;
+const MAX_IMMEDIATE_CAMPAIGNS_TO_SCAN = 100;
 // cron-jobs.org can stop waiting around the 30-second mark. Leave enough
 // headroom for campaign discovery and the JSON response.
 const MAX_CRON_SEND_MS = 15000;
@@ -153,7 +154,9 @@ async function getResumableImmediateCampaigns(
         .eq('background_delivery_enabled', true)
         .or(`next_attempt_at.is.null,next_attempt_at.lte.${now}`)
         .order('updated_at', { ascending: true, nullsFirst: true })
-        .limit(MAX_CAMPAIGNS_PER_CRON_RUN);
+        // Several campaigns on one Page must not occupy the entire discovery
+        // window and hide work belonging to other Pages.
+        .limit(MAX_IMMEDIATE_CAMPAIGNS_TO_SCAN);
 
     if (error) throw error;
     return (data || []) as ScheduledCampaign[];

@@ -30,6 +30,7 @@ import {
     summarizeSendErrors
 } from '@/lib/send-errors';
 import { createRequestGate } from '@/lib/request-gate';
+import { shouldContinueCampaignDelivery } from '@/lib/campaign-delivery-state';
 import { getSupabaseClient } from '@/lib/supabase';
 import { UTILITY_TEMPLATES, getBaseTemplateName, getMediaTemplateName } from '@/lib/facebook-templates';
 import type { TemplateMediaType } from '@/lib/facebook-templates';
@@ -1243,8 +1244,8 @@ export default function ContactsPage() {
                 : '';
             setBulkSendProgress(`${batchLabel}Campaign ${campaignId.slice(0, 8)}: ${sent} sent, ${failed} failed, ${remaining} pending`);
 
-            let deliveryQueuedForRetry = false;
-            while (sendData.partial && !sendData.paused && !sendData.cancelled && remaining > 0) {
+            let deliveryQueuedForRetry = sendData.retryable === true || sendData.queued === true;
+            while (shouldContinueCampaignDelivery({ ...sendData, remaining })) {
                 const response = await fetch(`/api/campaigns/${campaignId}/send`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
@@ -1257,6 +1258,7 @@ export default function ContactsPage() {
                 });
 
                 sendData = await readApiResponse(response);
+                deliveryQueuedForRetry = sendData.retryable === true || sendData.queued === true;
                 if (!response.ok) {
                     if (sendData.retryable === true) {
                         sent = Number(sendData.sent || sent);

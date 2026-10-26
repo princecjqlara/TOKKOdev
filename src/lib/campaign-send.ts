@@ -239,8 +239,23 @@ export async function sendCampaignById({
 
         const delivery = await acquirePageDelivery(supabase, campaign.page_id);
         if (!delivery.acquired) {
+            // A first send can encounter a busy Page while still a draft.
+            // Persist the handoff before asking the browser to stop; otherwise
+            // no background worker can discover and resume this campaign.
+            const { error: queueError } = await supabase
+                .from('campaigns')
+                .update({
+                    status: dueAt ? 'scheduled' : 'sending',
+                    background_delivery_enabled: !dueAt && !campaign.is_loop,
+                    next_attempt_at: delivery.retryAt,
+                    updated_at: new Date().toISOString()
+                })
+                .eq('id', campaignId)
+                .eq('status', campaign.status);
+            if (queueError) throw queueError;
             return { status: 200, body: {
                 success: true, partial: true, queued: true, retryable: true,
+                processed: 0,
                 nextAttemptAt: delivery.retryAt,
                 sent: Number(campaign.sent_count || 0), failed: Number(campaign.failed_count || 0),
                 remaining: Math.max(0, Number(campaign.total_recipients || 0) - Number(campaign.sent_count || 0) - Number(campaign.failed_count || 0)),
@@ -400,7 +415,12 @@ export async function sendCampaignById({
         const SEND_BATCH_SIZE = Number.isFinite(sendBatchSize)
             ? Math.max(1, Math.min(Math.floor(sendBatchSize), pageLease.batchSize))
             : pageLease.batchSize;
-        const DELAY_BETWEEN_BATCHES = Math.max(pageLease.batchSize < 10 ? 1000 : 250, delayBetweenBatchesMs || 0);
+        // Keep a recovery Page slow across every caller, even when the browser
+        // requests zero delay. Multi-part campaigns consume multiple API calls.
+        const DELAY_BETWEEN_BATCHES = Math.max(
+            (pageLease.batchSize < 5 ? 2000 : 1000) * Math.max(1, campaignMessageParts.length),
+            delayBetweenBatchesMs || 0
+        );
         const MAX_PROCESSING_TIME = Math.max(10000, Math.min(maxProcessingTimeMs || 240000, 270000));
         const SEND_RETRY_ATTEMPTS = Math.max(0, Math.min(sendRetryAttempts || 0, 3));
         const SEND_RETRY_DELAY = Math.max(0, Math.min(sendRetryDelayMs || 0, 5000));
