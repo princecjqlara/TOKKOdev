@@ -72,4 +72,12 @@ Required hands-on checks: manager creates an account and assigns Manawari only; 
 - TypeScript and the production build passed. The build reports existing React hook and image optimization warnings.
 - The SQL verification script passed 37 lifecycle, identity-linking, grant/revocation, and database isolation checks. Its temporary schema and fixture changes were rolled back.
 - Automatic approval review blocked starting the local HTTP test server with the reason "blocked by policy". Browser interaction, actual email delivery, and production activation have not been verified.
-- The preparation and isolation migrations have not been applied to production. Deploy this feature only after following the deployment order above; committing or pushing the code does not activate the feature.
+- At the time of these local checks, neither migration had been applied to production. See the rollout status below for subsequent changes.
+
+### Rollout status, 2026-10-27
+
+The additive preparation migration (`20261026_002`) has been applied to the configured production database in a transaction. All 41 users and 158 Page memberships were preserved, and a local backup of the original account/membership rows and columns was saved under the ignored `.vercel/backups` directory. The finalizer has not run, and account readiness remains false.
+
+The live project is `tokkobeta` under `sircjdigiworks-4427s-projects`, serving `https://tokkobeta.vercel.app`. The locally linked `tokkodev` project under `bigclicklara-2607s-projects` is a different project. Do not deploy to that substitute project or change the Facebook callback/canonical URL to work around missing access. Sign the Vercel CLI into an account with access to the live team before deploying there.
+
+Before promoting the application, verify the live email sender and `CRON_SECRET`, configure the existing external workers to send that secret, and schedule the account-mail worker. Email settings are not present in the local environment, and live environment settings could not be inspected with the currently connected Vercel account. Final database isolation still requires reviewing the shared chatbot service and verifying the deployed application. A Git push alone is not evidence of a successful production deployment.
