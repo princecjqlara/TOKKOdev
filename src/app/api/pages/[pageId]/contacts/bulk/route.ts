@@ -4,6 +4,8 @@ import { authOptions } from '@/lib/auth';
 import { getSupabaseAdmin } from '@/lib/supabase';
 import { recordPageActivity } from '@/lib/activity-history';
 import { SUPABASE_IN_FILTER_BATCH_SIZE } from '@/lib/supabase-pagination';
+import { assertContactsOnPage } from '@/lib/page-access';
+import { AccessError } from '@/lib/account-security';
 
 const CHUNK_SIZE = SUPABASE_IN_FILTER_BATCH_SIZE;
 
@@ -50,6 +52,7 @@ export async function DELETE(
             );
         }
 
+        await assertContactsOnPage(supabase, pageId, contactIds);
         const chunks: string[][] = [];
         for (let i = 0; i < contactIds.length; i += CHUNK_SIZE) {
             chunks.push(contactIds.slice(i, i + CHUNK_SIZE));
@@ -106,6 +109,7 @@ export async function DELETE(
             deletedCount
         });
     } catch (error) {
+        if (error instanceof AccessError) return NextResponse.json({ message: error.message }, { status: error.status });
         console.error('Error deleting contacts:', error);
         return NextResponse.json(
             { error: 'Failed to delete contacts', message: (error as Error).message },

@@ -75,6 +75,9 @@ function createSupabaseMock(options: {
     const contactsSelect = vi.fn().mockReturnValue({ eq: contactsEqPage });
 
     const from = vi.fn((table: string) => {
+        if (table === 'tags') return { select: () => ({ in: async (_column: string, ids: string[]) => ({
+            data: ids.map(id => ({ id, owner_type: 'page', owner_id: 'page_1', page_id: 'page_1' })), error: null
+        }) }) };
         if (table === 'user_pages') {
             return {
                 select: userPageSelect
@@ -302,7 +305,7 @@ describe('POST /api/campaigns', () => {
         }));
 
         expect(response.status).toBe(200);
-        expect(supabase.contactsIn).toHaveBeenCalledTimes(3);
-        expect(supabase.contactsIn.mock.calls.map((call) => call[1].length)).toEqual([100, 100, 5]);
+        expect(supabase.contactsIn).toHaveBeenCalledTimes(6);
+        expect(supabase.contactsIn.mock.calls.every(call => call[1].length <= 100)).toBe(true);
     });
 });

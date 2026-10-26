@@ -1,13 +1,16 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { NextRequest } from 'next/server';
+import { AccessError } from '@/lib/account-security';
 
 const mocks = vi.hoisted(() => ({
     getSessionFromRequest: vi.fn(),
     getSupabaseAdmin: vi.fn(),
     subscribePageToAppWebhook: vi.fn(),
     getPageTemplates: vi.fn(),
-    createUtilityTemplate: vi.fn()
+    createUtilityTemplate: vi.fn(),
+    verifiedFacebookPages: vi.fn()
 }));
+vi.mock('@/lib/page-managers', () => ({ verifiedFacebookPages: mocks.verifiedFacebookPages }));
 
 vi.mock('@/lib/get-session', () => ({
     getSessionFromRequest: mocks.getSessionFromRequest
@@ -80,6 +83,7 @@ describe('POST /api/facebook/connect', () => {
     beforeEach(() => {
         vi.clearAllMocks();
         mocks.getPageTemplates.mockResolvedValue([]);
+        mocks.verifiedFacebookPages.mockResolvedValue([{ id: 'fb_page_1', name: 'My Page', access_token: 'page_access_token_1', tasks: ['MANAGE'] }]);
     });
 
     it('saves the fresh page token and subscribes the page to webhook events', async () => {
@@ -109,6 +113,15 @@ describe('POST /api/facebook/connect', () => {
         expect(supabase.userPagesUpsert.mock.invocationCallOrder[0]).toBeLessThan(
             mocks.subscribePageToAppWebhook.mock.invocationCallOrder[0]
         );
+    });
+
+    it('rejects a client-supplied token when Facebook management is not verified', async () => {
+        mocks.getSessionFromRequest.mockResolvedValue({ user: { id: 'member', provider: 'credentials' } });
+        mocks.verifiedFacebookPages.mockRejectedValue(new AccessError(403, 'Facebook manager required.'));
+        const response = await POST(createRequest());
+        expect(response.status).toBe(403);
+        expect(mocks.getSupabaseAdmin).not.toHaveBeenCalled();
+        expect(mocks.subscribePageToAppWebhook).not.toHaveBeenCalled();
     });
 
     it('still saves the fresh page token when webhook subscription fails', async () => {

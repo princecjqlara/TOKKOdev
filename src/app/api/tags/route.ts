@@ -51,7 +51,7 @@ export async function GET(request: NextRequest) {
             );
         }
 
-        if (scope === 'page') {
+        if (scope === 'page' || pageId) {
             if (!pageId) {
                 return NextResponse.json(
                     { error: 'Bad Request', message: 'pageId is required for page tags' },
@@ -82,6 +82,12 @@ export async function GET(request: NextRequest) {
 
         if (scope === 'user') {
             query = query.eq('owner_type', 'user').eq('owner_id', currentUserId);
+            if (pageId) query = query.eq('page_id', pageId);
+            else {
+                const { data: memberships, error: membershipError } = await supabase.from('user_pages').select('page_id').eq('user_id', currentUserId);
+                if (membershipError) throw membershipError;
+                query = query.in('page_id', (memberships || []).map(row => row.page_id));
+            }
         } else if (scope === 'page' && pageId) {
             query = query.eq('owner_type', 'page').eq('owner_id', pageId);
         } else if (scope === 'business') {
@@ -94,6 +100,12 @@ export async function GET(request: NextRequest) {
             const businessIds = businessUsers?.map(bu => bu.business_id) || [];
             if (businessIds.length > 0) {
                 query = query.eq('owner_type', 'business').in('owner_id', businessIds);
+                if (pageId) query = query.eq('page_id', pageId);
+                else {
+                    const { data: memberships, error: membershipError } = await supabase.from('user_pages').select('page_id').eq('user_id', currentUserId);
+                    if (membershipError) throw membershipError;
+                    query = query.in('page_id', (memberships || []).map(row => row.page_id));
+                }
             } else {
                 return NextResponse.json({
                     items: [],
@@ -135,7 +147,7 @@ export async function GET(request: NextRequest) {
             }
 
             const { data: userTags } = await userTagsQuery;
-            if (userTags) allTags.push(...userTags);
+            if (userTags) allTags.push(...userTags.filter(tag => tag.page_id && accessiblePageIds.includes(tag.page_id)));
 
             // Get page tags
             if (accessiblePageIds.length > 0) {
@@ -195,7 +207,13 @@ export async function GET(request: NextRequest) {
                     .select('*')
                     .eq('owner_type', 'business')
                     .in('owner_id', businessIds);
-                if (bizTags) allTags.push(...bizTags);
+                if (bizTags) allTags.push(...bizTags.filter(tag => tag.page_id && accessiblePageIds.includes(tag.page_id)));
+            }
+
+            if (pageId) {
+                const { data: boundTags, error: boundError } = await supabase.from('tags').select('*').eq('owner_type', 'business').eq('page_id', pageId);
+                if (boundError) throw boundError;
+                if (boundTags) allTags.push(...boundTags);
             }
 
             // Remove duplicates, sort by name, and apply pagination
@@ -499,6 +517,12 @@ export async function PUT(request: NextRequest) {
             );
         }
 
+        if (existingTag.page_id && existingTag.owner_type !== 'page') {
+            const { data: scopedMembership, error: scopedError } = await supabase.from('user_pages')
+                .select('page_id').eq('user_id', currentUserId).eq('page_id', existingTag.page_id).single();
+            if (scopedError || !scopedMembership) return NextResponse.json({ message: 'You do not have access to this Page.' }, { status: 403 });
+        }
+
         // Verify permission based on owner_type
         let hasPermission = false;
         if (existingTag.owner_type === 'user' && existingTag.owner_id === currentUserId) {
@@ -729,6 +753,12 @@ export async function DELETE(request: NextRequest) {
                 { error: 'Not Found', message: 'Tag not found' },
                 { status: 404 }
             );
+        }
+
+        if (existingTag.page_id && existingTag.owner_type !== 'page') {
+            const { data: scopedMembership, error: scopedError } = await supabase.from('user_pages')
+                .select('page_id').eq('user_id', currentUserId).eq('page_id', existingTag.page_id).single();
+            if (scopedError || !scopedMembership) return NextResponse.json({ message: 'You do not have access to this Page.' }, { status: 403 });
         }
 
         // Same permission check as PUT

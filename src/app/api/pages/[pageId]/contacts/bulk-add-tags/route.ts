@@ -5,6 +5,9 @@ import { getSupabaseAdmin } from '@/lib/supabase';
 import { recordPageActivity } from '@/lib/activity-history';
 import { chunkArray } from '@/lib/chunking';
 import { SUPABASE_IN_FILTER_BATCH_SIZE } from '@/lib/supabase-pagination';
+import { canReadPageTag } from '@/lib/tag-access';
+import { assertContactsOnPage } from '@/lib/page-access';
+import { AccessError } from '@/lib/account-security';
 
 function normalizeIds(value: unknown): string[] {
     if (!Array.isArray(value)) return [];
@@ -40,22 +43,6 @@ async function getAssignableTagIds(params: {
         tags.push(...((data || []) as AssignableTag[]));
     }
 
-    const businessOwnerIds = normalizeIds(
-        tags.filter((tag) => tag.owner_type === 'business').map((tag) => tag.owner_id)
-    );
-    const accessibleBusinessIds = new Set<string>();
-
-    if (businessOwnerIds.length > 0) {
-        const { data, error } = await supabase
-            .from('business_users')
-            .select('business_id')
-            .eq('user_id', userId)
-            .in('business_id', businessOwnerIds);
-
-        if (error) throw error;
-        for (const row of data || []) accessibleBusinessIds.add(row.business_id);
-    }
-
     const sharedPersonalTagIds = tags
         .filter((tag) =>
             tag.owner_type === 'user' &&
@@ -80,24 +67,9 @@ async function getAssignableTagIds(params: {
         }
     }
 
-    return new Set(tags.filter((tag) => {
-        if (tag.owner_type === 'page') {
-            return tag.owner_id === pageId;
-        }
-
-        if (tag.owner_type === 'user') {
-            if (tag.page_id !== pageId) return false;
-            if (tag.owner_id === userId) return true;
-            if (!tag.is_shared) return false;
-
-            // No explicit recipients means the tag is shared with the full
-            // page team. Otherwise it must target the current user.
-            const recipients = shareRecipientsByTagId.get(tag.id);
-            return !recipients || recipients.has(userId);
-        }
-
-        return tag.owner_type === 'business' && accessibleBusinessIds.has(tag.owner_id);
-    }).map((tag) => tag.id));
+    return new Set(tags.filter(tag => canReadPageTag({ ...tag,
+        tag_shares: [...(shareRecipientsByTagId.get(tag.id) || [])].map(id => ({ shared_with_user_id: id }))
+    }, userId, pageId)).map(tag => tag.id));
 }
 
 // POST /api/pages/[pageId]/contacts/bulk-add-tags - Add tags to contacts
@@ -162,18 +134,9 @@ export async function POST(
             );
         }
 
+        await assertContactsOnPage(supabase, pageId, contactIds);
         // Verify contacts belong to this page
-        const validContactIds: string[] = [];
-        for (const contactIdBatch of chunkArray(contactIds, SUPABASE_IN_FILTER_BATCH_SIZE)) {
-            const { data: validContacts, error: validContactsError } = await supabase
-                .from('contacts')
-                .select('id')
-                .in('id', contactIdBatch)
-                .eq('page_id', pageId);
-
-            if (validContactsError) throw validContactsError;
-            validContactIds.push(...(validContacts || []).map((contact) => contact.id));
-        }
+        const validContactIds = contactIds;
 
         // Create contact_tags entries
         const entries = [];
@@ -226,6 +189,7 @@ export async function POST(
             addedCount: entries.length
         });
     } catch (error) {
+        if (error instanceof AccessError) return NextResponse.json({ message: error.message }, { status: error.status });
         console.error('Error adding tags to contacts:', error);
         return NextResponse.json(
             { error: 'Failed to add tags', message: (error as Error).message },

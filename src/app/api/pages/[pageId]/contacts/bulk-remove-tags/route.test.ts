@@ -35,7 +35,13 @@ function createSupabaseMock() {
         pendingContactIds = ids;
         return { eq: contactsEqPage };
     });
-    const contactsSelect = vi.fn().mockReturnValue({ in: contactsIn });
+    const contactsSelect = vi.fn().mockReturnValue({ in: contactsIn,
+        eq: () => ({ in: (_column: string, ids: string[]) => {
+            pendingContactIds = ids;
+            contactsIn(_column, ids);
+            return contactsEqPage();
+        } })
+    });
 
     let deleteContactIds: string[] = [];
     const deleteTagIn = vi.fn((_column: string, tagIds: string[]) => Promise.resolve({
@@ -50,6 +56,9 @@ function createSupabaseMock() {
     const activityInsert = vi.fn().mockResolvedValue({ error: null });
 
     const from = vi.fn((table: string) => {
+        if (table === 'tags') return { select: () => ({ in: async (_column: string, ids: string[]) => ({
+            data: ids.map(id => ({ id, owner_type: 'page', owner_id: 'page_1', page_id: 'page_1' })), error: null
+        }) }) };
         if (table === 'user_pages') return { select: userPageSelect };
         if (table === 'contacts') return { select: contactsSelect };
         if (table === 'contact_tags') return { delete: contactTagsDelete };

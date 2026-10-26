@@ -1,5 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getServerSession } from 'next-auth';
+import { canReadPageTag, assertReadableTagIds } from '@/lib/tag-access';
+import { AccessError } from '@/lib/account-security';
 import { authOptions } from '@/lib/auth';
 import { getSupabaseAdmin } from '@/lib/supabase';
 import { PaginatedResponse, Contact } from '@/types';
@@ -124,6 +126,7 @@ export async function GET(
         // causing failures on large pages (e.g., "Zeus Media") because the
         // joined response could exceed Supabase row/size limits. Tags are
         // fetched separately below for the page of contacts being returned.
+        await assertReadableTagIds(supabase, session.user.id, pageId, [...tagIds, ...excludeTagIds]);
         const tagFilterSelect = [
             tagIds.length > 0 ? 'included_tag_filter:contact_tags!inner()' : '',
             excludeTagIds.length > 0 ? 'excluded_tag_filter:contact_tags!left()' : ''
@@ -235,7 +238,7 @@ export async function GET(
         if (includeTags && pageContactIds.length > 0) {
             const { data: tagRows, error: tagError } = await supabase
                 .from('contact_tags')
-                .select('contact_id, tag_id, created_by, tags(*)')
+                .select('contact_id, tag_id, created_by, tags(*,tag_shares(shared_with_user_id))')
                 .in('contact_id', pageContactIds);
 
             if (tagError) {
@@ -250,10 +253,12 @@ export async function GET(
                     const tagsObj = tagsField && typeof tagsField === 'object' && !Array.isArray(tagsField)
                         ? (tagsField as Record<string, unknown>)
                         : Array.isArray(tagsField) ? (tagsField[0] as Record<string, unknown>) || {} : {};
+                    if (!canReadPageTag(tagsObj, session.user.id, pageId)) continue;
+                    const { tag_shares: _shares, ...safeTag } = tagsObj;
                     list.push({
                         tag_id: row.tag_id,
                         created_by: row.created_by ?? null,
-                        tags: tagsObj
+                        tags: safeTag
                     });
                     tagsByContact.set(row.contact_id, list);
                 }
@@ -328,6 +333,7 @@ export async function GET(
             total: includeCount ? count || 0 : null
         } as PaginatedResponse<Contact>);
     } catch (error) {
+        if (error instanceof AccessError) return NextResponse.json({ message: error.message }, { status: error.status });
         logError('Error fetching contacts', {
             error: (error as Error).message
         });

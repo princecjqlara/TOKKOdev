@@ -3,6 +3,7 @@ import { getServerSession } from 'next-auth';
 import { authOptions } from '@/lib/auth';
 import { getFacebookPages, isFacebookReauthRequired } from '@/lib/facebook';
 import { FACEBOOK_REAUTH_MESSAGE } from '@/lib/facebook-permissions';
+import { getFacebookServerToken } from '@/lib/server-auth-token';
 
 export const dynamic = 'force-dynamic';
 
@@ -11,7 +12,7 @@ export async function GET(request: NextRequest) {
     try {
         const session = await getServerSession(authOptions);
 
-        if (!session?.user) {
+        if (!session?.user?.id) {
             return NextResponse.json(
                 { error: 'Unauthorized', message: 'Please sign in' },
                 { status: 401 }
@@ -21,11 +22,13 @@ export async function GET(request: NextRequest) {
         // Note: Facebook pages functionality requires Facebook OAuth
         // With email/password login, this endpoint returns empty pages
         // Pages should be connected via the admin or API with stored tokens
-        if (!session.accessToken) {
+        const accessToken = await getFacebookServerToken();
+        if (!accessToken) {
             return NextResponse.json({ pages: [], message: 'No Facebook token available' });
         }
 
-        const pages = await getFacebookPages(session.accessToken);
+        const facebookPages = await getFacebookPages(accessToken);
+        const pages = facebookPages.map(({ access_token: _token, ...page }) => page);
 
         return NextResponse.json({ pages });
     } catch (error) {

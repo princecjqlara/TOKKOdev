@@ -55,6 +55,11 @@ export async function POST(request: NextRequest) {
             );
         }
 
+        const { data: recipient, error: recipientError } = await supabase.from('contacts').select('id')
+            .eq('page_id', pageId).eq('psid', recipientPsid).maybeSingle();
+        if (recipientError) throw recipientError;
+        if (!recipient) return NextResponse.json({ message: 'The recipient is not available on this Page.' }, { status: 403 });
+
         const result = await sendUtilityMessage(
             page.fb_page_id,
             page.access_token,

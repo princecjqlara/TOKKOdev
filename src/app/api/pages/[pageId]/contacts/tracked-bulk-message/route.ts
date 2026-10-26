@@ -1,5 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getServerSession } from 'next-auth';
+import { assertReadableTagIds } from '@/lib/tag-access';
+import { assertContactsOnPage } from '@/lib/page-access';
+import { AccessError } from '@/lib/account-security';
 import { authOptions } from '@/lib/auth';
 import { serializeCampaignMessageSequence } from '@/lib/campaign-message-sequence';
 import { chunkArray } from '@/lib/chunking';
@@ -603,6 +606,12 @@ export async function POST(
             ? selection.filters as Record<string, unknown>
             : {};
         const excludedContactIds = normalizeStringArray(selection.excludedContactIds);
+        await assertReadableTagIds(supabase, session.user.id, pageId, [
+            ...normalizeStringArray(selectionFilters.tagIds), ...normalizeStringArray(selectionFilters.excludeTagIds)
+        ]);
+        await assertContactsOnPage(supabase, pageId, [
+            ...(selectionMode === 'specific' ? normalizeStringArray(selection.contactIds) : []), ...excludedContactIds
+        ]);
         const slice = selection.slice && typeof selection.slice === 'object'
             ? selection.slice as Record<string, unknown>
             : null;
@@ -931,6 +940,7 @@ export async function POST(
             }
         });
     } catch (error) {
+        if (error instanceof AccessError) return NextResponse.json({ message: error.message }, { status: error.status });
         console.error('Error creating tracked bulk message:', error);
         return NextResponse.json(
             { error: 'Failed to create tracked bulk message', message: (error as Error).message },

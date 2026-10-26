@@ -14,6 +14,7 @@ vi.mock('next-auth', () => ({
 vi.mock('@/lib/auth', () => ({
     authOptions: {}
 }));
+vi.mock('@/lib/server-auth-token', () => ({ getFacebookServerToken: vi.fn().mockResolvedValue('user_access_token_1') }));
 
 vi.mock('@/lib/facebook', () => ({
     getFacebookPages: mocks.getFacebookPages,

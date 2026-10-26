@@ -14,6 +14,7 @@ vi.mock('@/lib/get-session', () => ({
 vi.mock('@/lib/supabase', () => ({
     getSupabaseAdmin: mocks.getSupabaseAdmin
 }));
+vi.mock('@/lib/page-managers', () => ({ requireFacebookPageManager: vi.fn().mockResolvedValue([]) }));
 
 vi.mock('@/lib/facebook', () => ({
     subscribePageToAppWebhook: mocks.subscribePageToAppWebhook

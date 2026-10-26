@@ -1,0 +1,13 @@
+import { headers } from 'next/headers';
+import { getToken } from 'next-auth/jwt';
+
+// Provider tokens never appear in the browser-visible session response.
+export async function getServerAuthToken() {
+    const incoming = await headers();
+    return getToken({ req: { headers: Object.fromEntries(incoming.entries()) } as any, secret: process.env.NEXTAUTH_SECRET });
+}
+export async function getFacebookServerToken(): Promise<string | null> {
+    const token = await getServerAuthToken();
+    return token?.provider === 'facebook' || (!token?.provider && token?.facebookId)
+        ? typeof token.accessToken === 'string' ? token.accessToken : null : null;
+}

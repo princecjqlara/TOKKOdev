@@ -26,6 +26,7 @@ export async function GET(_request: NextRequest) {
                 const campaignUrl = new URL('/api/cron/campaign-scheduled', _request.url);
                 const campaignResponse = await fetch(campaignUrl, {
                     method: 'GET',
+                    headers: { Authorization: `Bearer ${process.env.CRON_SECRET}` },
                     cache: 'no-store',
                     signal: AbortSignal.timeout(25_000)
                 });

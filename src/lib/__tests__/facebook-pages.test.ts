@@ -31,6 +31,24 @@ describe('conversation checkpoint safety', () => {
 });
 
 describe('getFacebookPages', () => {
+    it('rejects failed pagination instead of returning an incomplete manager list', async () => {
+        const fetchMock = vi.fn()
+            .mockResolvedValueOnce(createJsonResponse(true, { data: [{ id: 'page_1' }], paging: { next: 'https://graph.facebook.com/next' } }))
+            .mockResolvedValueOnce(createJsonResponse(false, { error: { message: 'Unavailable' } }, 503));
+        vi.stubGlobal('fetch', fetchMock);
+        await expect(getFacebookPages('token')).rejects.toThrow();
+        expect(fetchMock.mock.calls[0][1].signal).toBeInstanceOf(AbortSignal);
+        expect(fetchMock.mock.calls[1][1].signal).toBeInstanceOf(AbortSignal);
+    });
+
+    it('rejects repeated pagination instead of waiting indefinitely', async () => {
+        const next = 'https://graph.facebook.com/repeated';
+        const fetchMock = vi.fn().mockResolvedValue(createJsonResponse(true, { data: [], paging: { next } }));
+        vi.stubGlobal('fetch', fetchMock);
+        await expect(getFacebookPages('token')).rejects.toThrow('pagination could not be completed');
+        expect(fetchMock).toHaveBeenCalledTimes(2);
+    });
+
     it('classifies Facebook /me permission failures as reauthorization required', async () => {
         const fetchMock = vi.fn().mockResolvedValue(
             createJsonResponse(

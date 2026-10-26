@@ -126,6 +126,14 @@ export async function GET(request: NextRequest) {
             ?.map((up) => Array.isArray(up.pages) ? up.pages[0] : up.pages)
             .filter(Boolean) || []) as PageRecord[];
 
+        // Membership refreshes must not make a Meta request for every Page.
+        // Email members can still use stored contacts/tags when a connection
+        // needs its Facebook manager to reconnect.
+        if (request.nextUrl?.searchParams.get('membershipOnly') === '1' || session.user?.provider === 'credentials') {
+            return NextResponse.json({ pages: pageRecords.map(withoutAccessToken), reconnectRequiredPages: [] },
+                { headers: { 'Cache-Control': 'private, no-store' } });
+        }
+
         const pageStatuses = await Promise.all(
             pageRecords.map(async (page) => ({
                 page,

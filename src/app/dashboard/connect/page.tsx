@@ -2,7 +2,7 @@
 
 import { useSession, signIn } from 'next-auth/react';
 import { useEffect, useState } from 'react';
-import { FacebookPage } from '@/types';
+import { FacebookPageSummary } from '@/types';
 import { Check, Facebook, RefreshCw, AlertCircle } from 'lucide-react';
 import { runContactSyncToCompletion } from '@/lib/contact-sync-client';
 import { FACEBOOK_PERMISSION_SCOPE } from '@/lib/facebook-permissions';
@@ -10,7 +10,7 @@ import { getFacebookConnectErrorMessage, isFacebookReauthMessage } from '@/lib/f
 
 export default function ConnectPage() {
     const { data: session } = useSession();
-    const [facebookPages, setFacebookPages] = useState<FacebookPage[]>([]);
+    const [facebookPages, setFacebookPages] = useState<FacebookPageSummary[]>([]);
     const [loading, setLoading] = useState(true);
     const [connecting, setConnecting] = useState<string | null>(null);
     const [connectedPages, setConnectedPages] = useState<Set<string>>(new Set());
@@ -24,7 +24,7 @@ export default function ConnectPage() {
     }, [session]);
 
     const fetchFacebookPages = async () => {
-        if (!session?.user) {
+        if (!session?.user?.id || session.user.provider !== 'facebook') {
             setLoading(false);
             return;
         }
@@ -61,7 +61,7 @@ export default function ConnectPage() {
         }
     };
 
-    const handleConnect = async (page: FacebookPage) => {
+    const handleConnect = async (page: FacebookPageSummary) => {
         setConnecting(page.id);
         setError(null);
         setSuccess(null);
@@ -71,9 +71,7 @@ export default function ConnectPage() {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
-                    fbPageId: page.id,
-                    name: page.name,
-                    accessToken: page.access_token
+                    fbPageId: page.id
                 })
             });
 
@@ -133,7 +131,7 @@ export default function ConnectPage() {
     };
 
     // Show connected pages from database
-    if (!session?.user) {
+    if (!session?.user?.id || session.user.provider !== 'facebook') {
         return (
             <div className="max-w-[600px] mx-auto p-8 mt-12">
                 <div className="wireframe-card text-center py-12">
@@ -142,7 +140,7 @@ export default function ConnectPage() {
                         Connect Facebook
                     </h1>
                     <p className="font-mono text-sm text-gray-500 mb-8 max-w-sm mx-auto">
-                        Please sign in to view connected pages.
+                        Your Facebook Page manager connects and reconnects Pages. Your assigned Pages are available from the workspace.
                     </p>
                 </div>
             </div>

@@ -1,5 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getServerSession } from 'next-auth';
+import { assertContactsOnPage } from '@/lib/page-access';
+import { assertReadableTagIds } from '@/lib/tag-access';
+import { AccessError } from '@/lib/account-security';
 import { authOptions } from '@/lib/auth';
 import { normalizeCampaignMessageParts, serializeCampaignMessageSequence } from '../../../lib/campaign-message-sequence';
 import { getNextPhilippinesScheduledAtIso, getPhilippinesDatePartsFromDateString, getPhilippinesScheduledAtIso } from '@/lib/philippines-time';
@@ -259,7 +262,12 @@ export async function POST(request: NextRequest) {
         // Best time campaigns are 'scheduled', regular campaigns are 'draft'
         const campaignStatus = isLoop || useBestTime || scheduledAt ? 'scheduled' : 'draft';
         const shouldMaterializeRecipientsNow = audienceMode !== 'dynamic' || !scheduledAt;
-        const normalizedContactIds = Array.isArray(contactIds) ? contactIds : [];
+        const normalizedContactIds = normalizeStringArray(contactIds);
+        await assertReadableTagIds(supabase, session.user.id, pageId, [
+            ...audienceIncludeTagIds, ...audienceExcludeTagIds,
+            ...(typeof rawSelectedTagId === 'string' && rawSelectedTagId.trim() ? [rawSelectedTagId.trim()] : [])
+        ]);
+        await assertContactsOnPage(supabase, pageId, normalizedContactIds);
 
         if (
             rawSelectAll === true &&
@@ -439,6 +447,7 @@ export async function POST(request: NextRequest) {
 
         return NextResponse.json({ campaign });
     } catch (error) {
+        if (error instanceof AccessError) return NextResponse.json({ message: error.message }, { status: error.status });
         console.error('Error creating campaign:', error);
         return NextResponse.json(
             { error: 'Failed to create campaign', message: (error as Error).message },

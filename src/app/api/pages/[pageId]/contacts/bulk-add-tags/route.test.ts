@@ -51,7 +51,13 @@ function createSupabaseMock(tagRows = [
         pendingContactIds = contactIds;
         return { eq: contactsEqPage };
     });
-    const contactsSelect = vi.fn().mockReturnValue({ in: contactsIn });
+    const contactsSelect = vi.fn().mockReturnValue({ in: contactsIn,
+        eq: () => ({ in: (_column: string, ids: string[]) => {
+            pendingContactIds = ids;
+            contactsIn(_column, ids);
+            return contactsEqPage();
+        } })
+    });
 
     const upsert = vi.fn().mockResolvedValue({ error: null });
     const activityInsert = vi.fn().mockResolvedValue({ error: null });

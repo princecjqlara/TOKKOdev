@@ -2,7 +2,7 @@
 
 import { useSession, signOut } from 'next-auth/react';
 import { useRouter, usePathname } from 'next/navigation';
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
 import {
     LayoutDashboard,
@@ -36,26 +36,57 @@ export default function DashboardLayout({
     const [pages, setPages] = useState<Page[]>([]);
     const [selectedPage, setSelectedPage] = useState<Page | null>(null);
     const [showPageDropdown, setShowPageDropdown] = useState(false);
+    const [pagesLoaded, setPagesLoaded] = useState(false);
+    const membershipSnapshot = useRef<string | null>(null);
 
     useEffect(() => {
         // Only redirect if we're sure the user is unauthenticated (not loading)
-        if (status === 'unauthenticated') {
-            router.push('/');
+        if (status === 'unauthenticated' || status === 'authenticated' && !session?.user?.id) {
+            router.push('/login');
         }
-    }, [status, router]);
+    }, [status, session, router]);
 
     useEffect(() => {
         // Fetch pages when session is available
-        if (status === 'authenticated' && session) {
+        if (status === 'authenticated' && session?.user?.id) {
             fetchPages();
         }
     }, [status, session]);
 
+    useEffect(() => {
+        if (!session?.user?.id) return;
+        let inFlight = false;
+        const refresh = async () => {
+            if (inFlight || document.hidden) return;
+            inFlight = true;
+            try {
+                const response = await fetch('/api/pages?membershipOnly=1');
+                if (response.status === 401) { window.location.replace('/login'); return; }
+                if (!response.ok) return;
+                const data = await response.json();
+                const snapshot = (data.pages || []).map((page: Page) => page.id).sort().join(',');
+                if (membershipSnapshot.current !== null && membershipSnapshot.current !== snapshot) {
+                    // Remount every Page screen so revoked data/selections do not
+                    // linger in another screen's independent local state.
+                    window.location.replace('/dashboard'); return;
+                }
+                membershipSnapshot.current = snapshot;
+            } finally { inFlight = false; }
+        };
+        const timer = window.setInterval(() => { void refresh().catch(() => {}); }, 15000);
+        const onFocus = () => { void refresh().catch(() => {}); };
+        window.addEventListener('focus', onFocus);
+        return () => { window.clearInterval(timer); window.removeEventListener('focus', onFocus); };
+    }, [session?.user?.id]);
+
     const fetchPages = async () => {
         try {
             const res = await fetch('/api/pages');
+            if (!res.ok) throw new Error('Could not load assigned Pages.');
             const data = await res.json();
             setPages(data.pages || []);
+            membershipSnapshot.current = [...(data.pages || []), ...(data.reconnectRequiredPages || [])].map((page: Page) => page.id).sort().join(',');
+            setPagesLoaded(true);
             if (data.pages?.length > 0 && !selectedPage) {
                 setSelectedPage(data.pages[0]);
             }
@@ -74,7 +105,7 @@ export default function DashboardLayout({
     }
 
     // Only show content if authenticated, otherwise redirect will happen
-    if (status !== 'authenticated' || !session) {
+    if (status !== 'authenticated' || !session?.user?.id) {
         return (
             <div className="min-h-screen flex items-center justify-center bg-[#0a0a0f]">
                 <div className="text-center">
@@ -99,6 +130,7 @@ export default function DashboardLayout({
         { href: '/dashboard/welcome', icon: Hand, label: 'Welcome' },
         { href: '/dashboard/settings', icon: Settings, label: 'Settings' },
     ];
+    if (session.user.provider === 'facebook') navItems.push({ href: '/dashboard/team', icon: Users, label: 'Team Access' });
 
     // Add admin nav item if user is admin
     // const isAdmin = (session?.user as any)?.role === 'admin';
@@ -155,14 +187,14 @@ export default function DashboardLayout({
                                         No pages connected
                                     </div>
                                 )}
-                                <Link
+                                {session.user.provider === 'facebook' && <Link
                                     href="/dashboard/connect"
                                     className="flex items-center gap-2 px-3 py-2 text-sm text-black hover:bg-[#f0f0f0] border-t-2 border-black"
                                     onClick={() => setShowPageDropdown(false)}
                                 >
                                     <Plus className="w-4 h-4" />
                                     Connect New Page
-                                </Link>
+                                </Link>}
                             </div>
                         )}
                     </div>
@@ -233,7 +265,9 @@ export default function DashboardLayout({
             {/* Main Content */}
             <main className="flex-1 overflow-auto bg-white">
                 <div className="p-4 md:p-6 lg:p-8">
-                    {children}
+                    {pagesLoaded && !pages.length && session.user.provider === 'credentials'
+                        ? <div className="border-2 border-black p-6"><h1 className="text-2xl font-black">No Pages assigned</h1><p className="mt-3">Your account is ready. Ask your Facebook Page manager to assign a Page. Its contacts, tags, campaigns, and other Page features will appear here.</p></div>
+                        : children}
                 </div>
             </main>
         </div>

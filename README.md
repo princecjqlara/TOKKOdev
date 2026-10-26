@@ -116,6 +116,8 @@ src/
 
 ## Deployment
 
+For manager-created email accounts and assigned-Page access, follow [the account rollout guide](docs/page-member-accounts.md). Deploy the preparation migration before application code, configure account emails and authenticated cron callers, then finalize database isolation to enable the feature.
+
 ### Vercel Deployment
 
 1. Push your code to GitHub (already done)

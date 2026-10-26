@@ -1,5 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getSessionFromRequest } from '@/lib/get-session';
+import { assertContactsOnPage } from '@/lib/page-access';
+import { AccessError } from '@/lib/account-security';
 import { getSupabaseAdmin } from '@/lib/supabase';
 import {
     createUtilityTemplate,
@@ -442,6 +444,7 @@ export async function POST(request: NextRequest) {
         }
 
         // Get page access token
+        await assertContactsOnPage(supabase, pageId, contactIds);
         const { data: page } = await supabase
             .from('pages')
             .select('fb_page_id, access_token')
@@ -1408,6 +1411,7 @@ export async function POST(request: NextRequest) {
                 : {})
         });
     } catch (error) {
+        if (error instanceof AccessError) return NextResponse.json({ message: error.message }, { status: error.status });
         console.error('Error sending messages:', error);
         return NextResponse.json(
             { error: 'Failed to send messages', message: (error as Error).message },

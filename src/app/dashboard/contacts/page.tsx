@@ -31,7 +31,6 @@ import {
 } from '@/lib/send-errors';
 import { createRequestGate } from '@/lib/request-gate';
 import { shouldContinueCampaignDelivery } from '@/lib/campaign-delivery-state';
-import { getSupabaseClient } from '@/lib/supabase';
 import { UTILITY_TEMPLATES, getBaseTemplateName, getMediaTemplateName } from '@/lib/facebook-templates';
 import type { TemplateMediaType } from '@/lib/facebook-templates';
 import { runContactSyncToCompletion } from '@/lib/contact-sync-client';
@@ -393,9 +392,6 @@ export default function ContactsPage() {
         (bulkMediaEnabled && bulkDeliveryMode !== 'now') ||
         (bulkMediaEnabled && !bulkMediaUrl.trim()) ||
         (bulkDeliveryMode === 'best_time_next_day' ? !scheduledMessagesComplete : !messagePart1.trim());
-    const realtimeRefreshTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-    const realtimeFallbackIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
-    const realtimeSubscribeTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
     const webhookRefreshAttemptedRef = useRef<Set<string>>(new Set());
     const contactsRequestGateRef = useRef(createRequestGate());
     const syncingRef = useRef(false);
@@ -609,94 +605,16 @@ export default function ContactsPage() {
 
     useEffect(() => {
         if (!selectedPageId) return;
-
-        const supabase = getSupabaseClient();
-        const stopFallbackPolling = () => {
-            if (realtimeFallbackIntervalRef.current) {
-                clearInterval(realtimeFallbackIntervalRef.current);
-                realtimeFallbackIntervalRef.current = null;
-            }
+        let refreshing = false;
+        const refresh = async () => {
+            if (refreshing || document.hidden) return;
+            refreshing = true;
+            try { await fetchContacts({ silent: true }); }
+            finally { refreshing = false; }
         };
-
-        const startFallbackPolling = () => {
-            if (realtimeFallbackIntervalRef.current) {
-                return;
-            }
-
-            void fetchContacts({ silent: true });
-            realtimeFallbackIntervalRef.current = setInterval(() => {
-                void fetchContacts({ silent: true });
-            }, 30000);
-        };
-
-        realtimeSubscribeTimeoutRef.current = setTimeout(() => {
-            console.warn('Realtime subscription not ready; enabling contacts refresh fallback.');
-            startFallbackPolling();
-        }, 30000);
-
-        const channel = supabase
-            .channel(`contacts-page-${selectedPageId}`)
-            .on(
-                'postgres_changes',
-                {
-                    event: '*',
-                    schema: 'public',
-                    table: 'contacts',
-                    filter: `page_id=eq.${selectedPageId}`
-                },
-                (payload) => {
-                    console.log('[CONTACTS_REALTIME] postgres_changes event received', {
-                        pageId: selectedPageId,
-                        eventType: payload.eventType,
-                        table: payload.table,
-                        schema: payload.schema
-                    });
-
-                    if (realtimeRefreshTimerRef.current) {
-                        clearTimeout(realtimeRefreshTimerRef.current);
-                    }
-
-                    realtimeRefreshTimerRef.current = setTimeout(() => {
-                        void fetchContacts({ silent: true });
-                        realtimeRefreshTimerRef.current = null;
-                    }, 250);
-                }
-            )
-            .subscribe((status) => {
-                console.log('[CONTACTS_REALTIME] subscription status', {
-                    pageId: selectedPageId,
-                    status
-                });
-
-                if (status === 'SUBSCRIBED') {
-                    if (realtimeSubscribeTimeoutRef.current) {
-                        clearTimeout(realtimeSubscribeTimeoutRef.current);
-                        realtimeSubscribeTimeoutRef.current = null;
-                    }
-                    stopFallbackPolling();
-                    return;
-                }
-
-                if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT' || status === 'CLOSED') {
-                    startFallbackPolling();
-                }
-            });
-
-        return () => {
-            if (realtimeRefreshTimerRef.current) {
-                clearTimeout(realtimeRefreshTimerRef.current);
-                realtimeRefreshTimerRef.current = null;
-            }
-
-            if (realtimeSubscribeTimeoutRef.current) {
-                clearTimeout(realtimeSubscribeTimeoutRef.current);
-                realtimeSubscribeTimeoutRef.current = null;
-            }
-
-            stopFallbackPolling();
-
-            void supabase.removeChannel(channel);
-        };
+        const interval = setInterval(() => { void refresh(); }, 15000);
+        window.addEventListener('focus', refresh);
+        return () => { clearInterval(interval); window.removeEventListener('focus', refresh); };
     }, [selectedPageId, fetchContacts]);
 
     const fetchTags = async () => {

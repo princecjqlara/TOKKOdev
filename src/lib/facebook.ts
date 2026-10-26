@@ -137,13 +137,14 @@ async function fetchFacebookRead(input: string, timeoutMs: number = FACEBOOK_REA
 // /me/accounts returns all pages the user manages, including business pages
 export async function getFacebookPages(userAccessToken: string): Promise<FacebookPage[]> {
     try {
+        const deadline = Date.now() + 30_000;
         const pagesUrl = new URL(`${FACEBOOK_GRAPH_URL}/me/accounts`);
         pagesUrl.searchParams.set('fields', 'id,name,access_token,category,picture,tasks');
         pagesUrl.searchParams.set('limit', '100');
         pagesUrl.searchParams.set('access_token', userAccessToken);
 
         // Fetch all pages - this includes regular pages and business pages the user manages
-        const response = await fetch(pagesUrl);
+        const response = await fetch(pagesUrl, { signal: AbortSignal.timeout(10_000) });
 
         if (!response.ok) {
             throw await readFacebookError(response, '/me/accounts');
@@ -154,22 +155,17 @@ export async function getFacebookPages(userAccessToken: string): Promise<Faceboo
 
         // Handle pagination if there are more than 100 pages
         let nextUrl = data.paging?.next;
+        const seenUrls = new Set<string>([pagesUrl.toString()]);
         while (nextUrl) {
-            try {
-                const nextResponse = await fetch(nextUrl);
-                if (nextResponse.ok) {
-                    const nextData = await nextResponse.json();
-                    if (nextData.data) {
-                        pages.push(...nextData.data);
-                    }
-                    nextUrl = nextData.paging?.next;
-                } else {
-                    break;
-                }
-            } catch (paginationError) {
-                console.warn('Error fetching paginated pages:', paginationError);
-                break;
-            }
+            if (seenUrls.has(nextUrl) || seenUrls.size >= 100) throw new Error('Facebook Page pagination could not be completed.');
+            const remainingMs = deadline - Date.now();
+            if (remainingMs <= 0) throw new Error('Facebook Page lookup timed out.');
+            seenUrls.add(nextUrl);
+            const nextResponse = await fetch(nextUrl, { signal: AbortSignal.timeout(Math.min(10_000, remainingMs)) });
+            if (!nextResponse.ok) throw await readFacebookError(nextResponse, '/me/accounts');
+            const nextData = await nextResponse.json();
+            if (nextData.data) pages.push(...nextData.data);
+            nextUrl = nextData.paging?.next;
         }
 
         console.log(`Fetched ${pages.length} Facebook pages (including business pages if available)`);

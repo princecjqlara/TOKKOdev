@@ -4,6 +4,7 @@ import { NextRequest } from 'next/server';
 const mocks = vi.hoisted(() => ({ session: vi.fn(), accounts: vi.fn(), report: vi.fn() }));
 vi.mock('next-auth', () => ({ getServerSession: mocks.session }));
 vi.mock('@/lib/auth', () => ({ authOptions: {} }));
+vi.mock('@/lib/server-auth-token', () => ({ getFacebookServerToken: vi.fn().mockResolvedValue('own-token') }));
 vi.mock('@/lib/meta-ads', async importOriginal => ({
     ...await importOriginal<typeof import('@/lib/meta-ads')>(), getMetaAdAccounts: mocks.accounts, getMetaAdsReport: mocks.report
 }));

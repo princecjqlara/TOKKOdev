@@ -2,6 +2,8 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getSessionFromRequest } from '@/lib/get-session';
 import { getSupabaseAdmin } from '@/lib/supabase';
 import { subscribePageToAppWebhook } from '@/lib/facebook';
+import { requireFacebookPageManager } from '@/lib/page-managers';
+import { AccessError } from '@/lib/account-security';
 
 function isReconnectRequiredError(error: unknown) {
     const message = ((error as Error).message || '').toLowerCase();
@@ -69,6 +71,7 @@ export async function POST(
         }
 
         const { pageId } = await params;
+        await requireFacebookPageManager(session, [pageId]);
         const supabase = getSupabaseAdmin();
 
         const { data: userPage } = await supabase
@@ -154,6 +157,7 @@ export async function POST(
             message: 'Page webhook subscription refreshed'
         });
     } catch (error) {
+        if (error instanceof AccessError) return NextResponse.json({ message: error.message }, { status: error.status });
         logError('Unhandled error re-subscribing page webhook', {
             error: (error as Error).message
         });

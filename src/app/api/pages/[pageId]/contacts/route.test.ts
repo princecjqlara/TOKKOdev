@@ -56,6 +56,7 @@ function createSupabaseMock(options?: {
                         color: '#000000',
                         owner_type: 'user',
                         owner_id: 'user_2',
+                        is_shared: true,
                         page_id: 'page_1',
                         created_at: '2026-01-01T00:00:00.000Z'
                     }
@@ -136,6 +137,9 @@ function createSupabaseMock(options?: {
     });
 
     const from = vi.fn((table: string) => {
+        if (table === 'tags') return { select: () => ({ in: async (_column: string, ids: string[]) => ({
+            data: ids.map(id => ({ id, owner_type: 'page', owner_id: 'page_1', page_id: 'page_1' })), error: null
+        }) }) };
         if (table === 'user_pages') {
             return {
                 select: userPageSelect

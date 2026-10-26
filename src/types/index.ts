@@ -28,7 +28,6 @@ export interface Page {
   id: string;
   fb_page_id: string;
   name: string;
-  access_token: string;
   business_id: string | null;
   created_at: string;
   updated_at: string;
@@ -184,12 +183,15 @@ export interface FacebookPage {
   name: string;
   access_token: string;
   category?: string;
+  tasks?: string[];
   picture?: {
     data: {
       url: string;
     };
   };
 }
+
+export type FacebookPageSummary = Omit<FacebookPage, 'access_token'>;
 
 export interface FacebookConversation {
   id: string;

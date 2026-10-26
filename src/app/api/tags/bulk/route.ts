@@ -59,13 +59,16 @@ export async function DELETE(request: NextRequest) {
         // Filter to only tags user has permission to delete
         const allowedTagIds = tags
             .filter(tag => {
-                if (tag.owner_type === 'user' && tag.owner_id === session.user.id) return true;
+                if (tag.owner_type === 'user' && tag.owner_id === session.user.id) return !tag.page_id || accessiblePageIds.includes(tag.page_id);
                 if (tag.owner_type === 'page' && accessiblePageIds.includes(tag.owner_id)) return true;
                 if (tag.owner_type === 'business' && accessibleBusinessIds.includes(tag.owner_id)) return true;
                 return false;
             })
             .map(tag => tag.id);
 
+        if (allowedTagIds.length !== new Set(tagIds).size) {
+            return NextResponse.json({ message: 'Every selected tag must be available to your account.' }, { status: 403 });
+        }
         const allowedTags = tags.filter(tag => allowedTagIds.includes(tag.id));
 
         if (allowedTags.some(tag => tag.is_default)) {

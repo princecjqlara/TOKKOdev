@@ -5,6 +5,8 @@ import { subscribePageToAppWebhook, getPageTemplates, createUtilityTemplate } fr
 import { UTILITY_TEMPLATES } from '@/lib/facebook-templates';
 import { selectTemplateStarterSet } from '@/lib/facebook-template-order';
 import type { UtilityTemplate } from '@/lib/facebook';
+import { verifiedFacebookPages } from '@/lib/page-managers';
+import { AccessError } from '@/lib/account-security';
 
 type WebhookRefreshWarning = {
     code: 'WEBHOOK_SUBSCRIPTION_FAILED';
@@ -39,7 +41,11 @@ export async function POST(request: NextRequest) {
         });
 
         const body = await request.json();
-        const { fbPageId, name, accessToken } = body;
+        const { fbPageId } = body;
+        const facebookPage = (await verifiedFacebookPages(session)).find(page => page.id === fbPageId);
+        if (!facebookPage?.access_token) throw new AccessError(403, 'You must manage this Facebook Page to connect it.');
+        const name = facebookPage.name;
+        const accessToken = facebookPage.access_token;
 
         if (!fbPageId || !name || !accessToken) {
             return NextResponse.json(
@@ -93,7 +99,8 @@ export async function POST(request: NextRequest) {
             .from('user_pages')
             .upsert({
                 user_id: userId,
-                page_id: pageId
+                page_id: pageId,
+                grant_source: 'facebook'
             }, {
                 onConflict: 'user_id,page_id'
             });
@@ -123,6 +130,7 @@ export async function POST(request: NextRequest) {
             message: warning?.message || 'Page connected successfully'
         });
     } catch (error) {
+        if (error instanceof AccessError) return NextResponse.json({ message: error.message }, { status: error.status });
         console.error('Error connecting Facebook page:', error);
         return NextResponse.json(
             { error: 'Failed to connect page', message: (error as Error).message },

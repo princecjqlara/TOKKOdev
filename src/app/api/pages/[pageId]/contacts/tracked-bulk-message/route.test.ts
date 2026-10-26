@@ -55,7 +55,7 @@ function createSupabaseMock() {
     }));
     const contactsNeq = vi.fn().mockReturnValue({ in: contactsIn });
     const contactsNot = vi.fn().mockReturnValue({ neq: contactsNeq });
-    const contactsEq = vi.fn().mockReturnValue({ not: contactsNot });
+    const contactsEq = vi.fn().mockReturnValue({ not: contactsNot, in: contactsIn });
     const contactsSelect = vi.fn().mockReturnValue({ eq: contactsEq });
 
     const campaignSingle = vi.fn().mockResolvedValue({
@@ -88,6 +88,9 @@ function createSupabaseMock() {
     const pageSelect = vi.fn().mockReturnValue({ eq: pageEq });
 
     const from = vi.fn((table: string) => {
+        if (table === 'tags') return { select: () => ({ in: async (_column: string, ids: string[]) => ({
+            data: ids.map(id => ({ id, owner_type: 'page', owner_id: 'page_1', page_id: 'page_1' })), error: null
+        }) }) };
         if (table === 'user_pages') {
             return {
                 select: userPageSelect
@@ -213,6 +216,7 @@ function createBestTimeSupabaseMock() {
 
                     return {
                         eq: () => ({
+                            in: async (_column: string, ids: string[]) => ({ data: ids.map(id => ({ id })), error: null }),
                             not: () => ({
                                 neq: () => ({
                                     in: (_column: string, contactIds: string[]) => Promise.resolve({
@@ -497,8 +501,8 @@ describe('POST /api/pages/[pageId]/contacts/tracked-bulk-message', () => {
 
         expect(response.status).toBe(200);
         expect(body.recipients).toBe(205);
-        expect(supabase.contactsIn).toHaveBeenCalledTimes(3);
-        expect(supabase.contactsIn.mock.calls.map((call) => call[1].length)).toEqual([100, 100, 5]);
+        expect(supabase.contactsIn).toHaveBeenCalledTimes(6);
+        expect(supabase.contactsIn.mock.calls.every(call => call[1].length <= 100)).toBe(true);
     });
 
     it('materializes very large campaigns in a few large database batches', async () => {

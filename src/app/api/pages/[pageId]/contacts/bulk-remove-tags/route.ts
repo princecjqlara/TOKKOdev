@@ -5,6 +5,9 @@ import { getSupabaseAdmin } from '@/lib/supabase';
 import { recordPageActivity } from '@/lib/activity-history';
 import { chunkArray } from '@/lib/chunking';
 import { SUPABASE_IN_FILTER_BATCH_SIZE } from '@/lib/supabase-pagination';
+import { assertReadableTagIds } from '@/lib/tag-access';
+import { assertContactsOnPage } from '@/lib/page-access';
+import { AccessError } from '@/lib/account-security';
 
 function normalizeIds(value: unknown): string[] {
     if (!Array.isArray(value)) return [];
@@ -58,20 +61,9 @@ export async function POST(
         }
 
         // Verify contacts belong to this page before removing tags
-        const validContactIds: string[] = [];
-        for (const contactIdBatch of chunkArray(contactIds, SUPABASE_IN_FILTER_BATCH_SIZE)) {
-            const { data: validContacts, error: validContactsError } = await supabase
-                .from('contacts')
-                .select('id')
-                .in('id', contactIdBatch)
-                .eq('page_id', pageId);
-
-            if (validContactsError) throw validContactsError;
-            validContactIds.push(...(validContacts || []).map((contact) => contact.id));
-        }
-        if (!validContactIds.length) {
-            return NextResponse.json({ success: true, removedCount: 0 });
-        }
+        await assertReadableTagIds(supabase, session.user.id, pageId, tagIds);
+        await assertContactsOnPage(supabase, pageId, contactIds);
+        const validContactIds = contactIds;
 
         // Delete contact_tags entries only for verified contacts
         let removedCount = 0;
@@ -113,6 +105,7 @@ export async function POST(
             removedCount
         });
     } catch (error) {
+        if (error instanceof AccessError) return NextResponse.json({ message: error.message }, { status: error.status });
         console.error('Error removing tags from contacts:', error);
         return NextResponse.json(
             { error: 'Failed to remove tags', message: (error as Error).message },

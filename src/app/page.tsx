@@ -1,17 +1,16 @@
 'use client';
 
-import { useSession, signIn } from 'next-auth/react';
+import { useSession } from 'next-auth/react';
 import { useRouter } from 'next/navigation';
 import { useEffect } from 'react';
 import { Square, ArrowRight, LayoutGrid, Users, MessageSquare, X } from 'lucide-react';
-import { FACEBOOK_PERMISSION_SCOPE } from '@/lib/facebook-permissions';
 
 export default function HomePage() {
   const { data: session, status } = useSession();
   const router = useRouter();
 
   useEffect(() => {
-    if (status === 'authenticated' && session) {
+    if (status === 'authenticated' && session?.user?.id) {
       router.push('/dashboard');
     }
   }, [status, session, router]);
@@ -25,14 +24,7 @@ export default function HomePage() {
   }
 
   const handleLogin = () => {
-    signIn(
-      'facebook',
-      { callbackUrl: '/dashboard' },
-      {
-        auth_type: 'rerequest',
-        scope: FACEBOOK_PERMISSION_SCOPE
-      }
-    );
+    router.push('/login');
   };
 
   return (
