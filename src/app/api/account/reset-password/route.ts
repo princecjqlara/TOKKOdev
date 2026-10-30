@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getSupabaseAdmin } from '@/lib/supabase';
-import { accountErrorResponse, assertSameOrigin, encryptMailToken, newAccountToken, normalizeEmail } from '@/lib/account-security';
+import { AccessError, accountErrorResponse, assertSameOrigin, encryptMailToken, newAccountToken, normalizeEmail } from '@/lib/account-security';
 import { takeAccountRateLimit } from '@/lib/account-auth';
 import { requireAccountMail } from '@/lib/account-mail';
 
@@ -9,6 +9,7 @@ export async function POST(request: NextRequest) {
         assertSameOrigin(request);
         requireAccountMail();
         const body = await request.json();
+        if (!body || typeof body !== 'object' || Array.isArray(body)) throw new AccessError(400, 'Enter a valid email address.');
         const email = normalizeEmail(body.email);
         const ip = request.headers.get('x-forwarded-for')?.split(',')[0].trim() || 'unknown';
         await takeAccountRateLimit(`reset-ip:${ip}`, 20, 3600);

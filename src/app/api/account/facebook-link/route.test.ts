@@ -13,6 +13,11 @@ beforeEach(() => { vi.clearAllMocks(); vi.stubEnv('NEXTAUTH_URL', 'https://tokko
     mocks.ready.mockResolvedValue(true); mocks.token.mockResolvedValue({ provider: 'facebook', facebookId: 'verified-subject', pendingFacebookLinkAt: Date.now() }); });
 afterEach(() => { vi.unstubAllEnvs(); });
 describe('explicit Facebook identity confirmation', () => {
+    it.each(['POST', 'PUT'])('rejects an empty %s payload without a database operation', async method => {
+        const handler = method === 'POST' ? POST : PUT;
+        expect((await handler(request(method, null))).status).toBe(400);
+        expect(mocks.db).not.toHaveBeenCalled();
+    });
     it.each([null, { provider: 'credentials', id: 'member' }, { provider: 'facebook', id: 'active-user', facebookId: 'verified-subject', pendingFacebookLinkAt: Date.now() },
         { provider: 'facebook', facebookId: 'verified-subject', pendingFacebookLinkAt: Date.now() - 16 * 60 * 1000 }])('denies missing, active, or expired pending identity: %j', async token => {
         mocks.token.mockResolvedValue(token);

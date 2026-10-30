@@ -17,4 +17,11 @@ describe('account expiry boundaries', () => {
         expect(() => parseAccountExpiry('2099-01-01T08:00:00')).toThrow();
         expect(() => parseAccountExpiry('')).toThrow();
     });
+    it.each(['2099-02-29T00:00:00Z', '2100-02-29T00:00:00Z', '2099-02-31T08:00:00+08:00', '2099-04-31T00:00:00Z', '2099-01-01T24:00:00Z'])('rejects deadlines that JavaScript would silently normalize: %s', value => {
+        expect(() => parseAccountExpiry(value)).toThrow();
+    });
+    it('accepts real leap days and timezone offsets that cross a calendar boundary', () => {
+        expect(parseAccountExpiry('2400-02-29T00:00:00Z')).toBe('2400-02-29T00:00:00.000Z');
+        expect(parseAccountExpiry('2099-03-01T00:30:00+08:00')).toBe('2099-02-28T16:30:00.000Z');
+    });
 });

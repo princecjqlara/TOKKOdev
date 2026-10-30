@@ -147,6 +147,15 @@ describe('manager-only account and Page assignment endpoints', () => {
         const response = await POST(request()); expect(response.status).toBe(200);
         expect((await response.json()).message).toContain('queued for retry');
     });
+    it('reports a saved account successfully when the immediate mail-queue request throws', async () => {
+        const rpc = vi.fn().mockResolvedValue({ data: { pending: true, deliveryId: 'mail-id' }, error: null });
+        mocks.db.mockReturnValue({ rpc });
+        mocks.mail.mockRejectedValueOnce({ code: '08000', message: 'Mail queue unavailable' });
+        const response = await POST(request());
+        expect(response.status).toBe(200);
+        expect(await response.json()).toMatchObject({ success: true, pending: true, message: expect.stringContaining('queued for retry') });
+        expect(rpc).toHaveBeenCalledTimes(1);
+    });
     it('prevents provisioning before database isolation is finalized or email is configured', async () => {
         mocks.ready.mockResolvedValue(false);
         expect((await POST(request())).status).toBe(503); expect(mocks.db).not.toHaveBeenCalled();

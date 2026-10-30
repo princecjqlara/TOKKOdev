@@ -81,7 +81,13 @@ export async function POST(request: NextRequest) {
         if (error?.code === '42501') throw new AccessError(403, passwordHash ? 'An initial password can only be set for a new account or your own pending invitation. Choose Assign an existing account to grant Page access.' : 'You can only set expiry for email accounts you created. Leave expiry off to assign an existing account.');
         if (error?.code === '22023') throw new AccessError(400, error.message?.includes('Existing active account required') ? 'Choose an active existing account, or create a new account first.' : 'Account details changed or the account has expired. Refresh, renew its expiry if needed, and try again.');
         if (error) throw error;
-        const delivered = data.deliveryId ? await processAccountMail(data.deliveryId) : true;
+        let delivered = true;
+        if (data.deliveryId) {
+            // The account and outbox are already committed. An immediate mail
+            // failure must not turn a successful creation into a failed request.
+            try { delivered = await processAccountMail(data.deliveryId); }
+            catch { delivered = false; }
+        }
         return NextResponse.json({ success: true, pending: data.pending,
             message: data.passwordCreated ? 'Account created with the chosen password. The member can sign in with their email and password.' : data.pending ? delivered ? 'Account created. A password setup email has been sent.' : 'Account saved. The setup email is queued for retry.' : 'Page access assigned. The existing account can sign in as usual.' },
             { headers: { 'Cache-Control': 'no-store' } });

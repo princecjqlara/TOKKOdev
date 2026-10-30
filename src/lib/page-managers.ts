@@ -17,7 +17,8 @@ async function verifyFacebookIdentity(session: Session) {
         p_name: session.user.name || null, p_image: session.user.image || null, p_legacy_id: session.user.id
     });
     const row = Array.isArray(data) ? data[0] : data;
-    if (error || row?.user_id !== session.user.id) throw new AccessError(403, 'Your Facebook account identity could not be verified. Sign in again.');
+    if (error) throw new AccessError(503, 'Facebook account verification is temporarily unavailable. Please retry.');
+    if (row?.user_id !== session.user.id) throw new AccessError(403, 'Your Facebook account identity could not be verified. Sign in again.');
 }
 
 /** Facebook app users are parents; team-created identities remain subaccounts. */

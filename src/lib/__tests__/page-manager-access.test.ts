@@ -16,10 +16,16 @@ function database(pageRows: { id: string; fb_page_id: string; grant_source?: str
         if (table === 'tokko_page_managers') return { upsert };
         throw Error(`Unexpected ${table}`);
     });
-    return { from, upsert, rpc: vi.fn(async (name: string) => ({ data: name === 'tokko_is_parent_user' ? parent : [{ user_id: 'manager' }], error: null })) };
+    return { from, upsert, rpc: vi.fn().mockImplementation(async (name: string) => ({ data: name === 'tokko_is_parent_user' ? parent : [{ user_id: 'manager' }], error: null })) };
 }
 beforeEach(() => { vi.clearAllMocks(); mocks.token.mockResolvedValue('server-only-token'); mocks.facebook.mockResolvedValue([{ id: 'fb-a', tasks: ['MANAGE'] }]); });
 describe('verified Facebook manager authority', () => {
+    it('treats an unavailable identity service as temporary instead of asking an authorized parent to sign in again', async () => {
+        const db = database([{ id: 'a', fb_page_id: 'fb-a' }]); mocks.db.mockReturnValue(db);
+        db.rpc.mockResolvedValueOnce({ data: null, error: { code: '08000' } });
+        await expect(requireTeamPageAdministrator(session, ['a'])).rejects.toMatchObject({ status: 503 });
+        expect(db.upsert).not.toHaveBeenCalled(); expect(mocks.facebook).not.toHaveBeenCalled();
+    });
     it('requires actual management tasks, not messaging tasks or a Facebook-shaped role', () => {
         expect(hasFacebookManagementTask({ tasks: ['MESSAGING', 'ADVERTISE'] })).toBe(false);
         expect(hasFacebookManagementTask({ tasks: ['MANAGE'] })).toBe(true);

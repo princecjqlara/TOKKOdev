@@ -18,7 +18,9 @@ async function pendingIdentity() {
 export async function POST(request: NextRequest) {
     try {
         assertSameOrigin(request); const subject = await pendingIdentity(); requireAccountMail();
-        const body = await request.json(); const email = normalizeEmail(body.email);
+        const body = await request.json();
+        if (!body || typeof body !== 'object' || Array.isArray(body)) throw new AccessError(400, 'Enter a valid email address.');
+        const email = normalizeEmail(body.email);
         await takeAccountRateLimit(`facebook-link:${subject}`, 5, 3600);
         await takeAccountRateLimit(`facebook-link-email:${email}`, 3, 3600);
         const token = newAccountToken();
@@ -35,6 +37,7 @@ export async function PUT(request: NextRequest) {
         assertSameOrigin(request); const subject = await pendingIdentity();
         await takeAccountRateLimit(`facebook-link-confirm:${subject}`, 10, 900);
         const body = await request.json();
+        if (!body || typeof body !== 'object' || Array.isArray(body)) throw new AccessError(400, 'This verification link is invalid or expired.');
         if (typeof body.token !== 'string' || !/^[A-Za-z0-9_-]{43}$/.test(body.token)) throw new AccessError(400, 'This verification link is invalid or expired.');
         const { data, error } = await getSupabaseAdmin().rpc('tokko_confirm_facebook_link', { p_hash: digest(body.token), p_subject: subject });
         if (error) throw error;

@@ -7,6 +7,7 @@ export async function POST(request: NextRequest) {
     try {
         assertSameOrigin(request);
         const body = await request.json();
+        if (!body || typeof body !== 'object' || Array.isArray(body)) throw new AccessError(400, 'Enter a valid password link and password.');
         const ip = request.headers.get('x-forwarded-for')?.split(',')[0].trim() || 'unknown';
         await takeAccountRateLimit(`password-ip:${ip}`, 20, 900);
         if (typeof body.token !== 'string' || !/^[A-Za-z0-9_-]{43}$/.test(body.token)) throw new AccessError(400, 'This password link is invalid or expired.');
