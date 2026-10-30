@@ -34,4 +34,30 @@ describe('email account identity and live session validation', () => {
         mocks.db.mockReturnValue(database({ ...user, is_active: false }));
         expect(await getActiveAccount('member', 2, 'facebook')).toBeNull();
     });
+    it('rejects expired accounts on login and on subsequent requests from existing sessions', async () => {
+        mocks.db.mockReturnValue(database({ ...user, expires_at: new Date(Date.now() - 1000).toISOString() }));
+        expect(await authenticateEmail({ email: user.email, password: 'test-password' })).toBeNull();
+        expect(await getActiveAccount('member', 2, 'credentials')).toBeNull();
+        expect(await getActiveAccount('member', 2, 'facebook')).toBeNull();
+    });
+    it.each([null, new Date(Date.now() + 86400_000).toISOString()])('allows unlimited or renewed accounts with expiry %s', async expires_at => {
+        mocks.db.mockReturnValue(database({ ...user, expires_at }));
+        expect(await authenticateEmail({ email: user.email, password: 'test-password' })).toBeTruthy();
+        expect(await getActiveAccount('member', 2, 'credentials')).toBeTruthy();
+    });
+    it('keeps existing Facebook login working before the optional expiry column is installed', async () => {
+        const select = vi.fn((columns: string) => ({ eq: () => ({ maybeSingle: async () => columns.includes('expires_at')
+            ? { data: null, error: { code: '42703', message: 'column users.expires_at does not exist' } }
+            : { data: user, error: null } }) }));
+        mocks.db.mockReturnValue({ from: () => ({ select }) });
+        expect(await getActiveAccount('member', 2, 'facebook')).toBeTruthy();
+        expect(select).toHaveBeenCalledTimes(2);
+        expect(await getActiveAccount('member', 1, 'facebook')).toBeNull();
+    });
+    it.each([{ code: '08000', message: 'Connection failed' }, { code: '42703', message: 'column users.session_version does not exist' }])('denies unrelated database errors without a compatibility retry: %j', async error => {
+        const select = vi.fn(() => ({ eq: () => ({ maybeSingle: async () => ({ data: null, error }) }) }));
+        mocks.db.mockReturnValue({ from: () => ({ select }) });
+        await expect(getActiveAccount('member', 2, 'facebook')).rejects.toMatchObject({ status: 503 });
+        expect(select).toHaveBeenCalledTimes(1);
+    });
 });

@@ -1,6 +1,7 @@
 'use client';
 
 import { signIn, useSession } from 'next-auth/react';
+import { facebookSignInCallback } from '@/lib/facebook-signin';
 import { useEffect, useMemo, useState } from 'react';
 import { ExternalLink, RefreshCw, ShieldCheck } from 'lucide-react';
 import AdsGuard from '@/components/AdsGuard';
@@ -80,7 +81,7 @@ export default function AdsGuardPage() {
 
     const connect = async () => {
         setConnecting(true);
-        try { await signIn('facebook', { callbackUrl: '/dashboard/ads' }, { scope: FACEBOOK_ADS_PERMISSION_SCOPE, auth_type: 'rerequest' }); }
+        try { await signIn('facebook', { callbackUrl: facebookSignInCallback('/dashboard/ads') }, { scope: FACEBOOK_ADS_PERMISSION_SCOPE, auth_type: 'rerequest' }); }
         catch { setConnecting(false); setAccountsError('Facebook connection did not complete. Please try again.'); }
     };
 

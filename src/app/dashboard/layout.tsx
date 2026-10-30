@@ -24,6 +24,7 @@ import {
     ShieldCheck
 } from 'lucide-react';
 import { Page } from '@/types';
+import { facebookSignInCallback } from '@/lib/facebook-signin';
 
 export default function DashboardLayout({
     children,
@@ -41,10 +42,11 @@ export default function DashboardLayout({
 
     useEffect(() => {
         // Only redirect if we're sure the user is unauthenticated (not loading)
-        if (status === 'unauthenticated' || status === 'authenticated' && !session?.user?.id) {
-            router.push('/login');
+        if (status === 'unauthenticated') router.replace('/login');
+        else if (status === 'authenticated' && !session?.user?.id) {
+            router.replace(session?.signInProvider === 'facebook' || session?.requiresFacebookVerification ? facebookSignInCallback(pathname) : '/login');
         }
-    }, [status, session, router]);
+    }, [status, session, router, pathname]);
 
     useEffect(() => {
         // Fetch pages when session is available
@@ -61,7 +63,7 @@ export default function DashboardLayout({
             inFlight = true;
             try {
                 const response = await fetch('/api/pages?membershipOnly=1');
-                if (response.status === 401) { window.location.replace('/login'); return; }
+                if (response.status === 401) { window.location.replace(session.signInProvider === 'facebook' ? facebookSignInCallback(window.location.pathname) : '/login'); return; }
                 if (!response.ok) return;
                 const data = await response.json();
                 const snapshot = (data.pages || []).map((page: Page) => page.id).sort().join(',');
@@ -77,7 +79,7 @@ export default function DashboardLayout({
         const onFocus = () => { void refresh().catch(() => {}); };
         window.addEventListener('focus', onFocus);
         return () => { window.clearInterval(timer); window.removeEventListener('focus', onFocus); };
-    }, [session?.user?.id]);
+    }, [session?.user?.id, session?.signInProvider]);
 
     const fetchPages = async () => {
         try {

@@ -1,6 +1,6 @@
 # Email accounts and assigned-page access
 
-Status: core implementation is present in the repository, with manager-only provisioning, assigned-Page operations, account setup/recovery, invitation delivery, and isolation migrations. Production activation remains gated on email configuration, authenticated cron callers, compatible shared-database consumers, and the isolation finalizer. See `docs/page-member-accounts.md` for the implemented flows and deployment order. Account provisioning is restricted to verified Facebook Page managers, following the clarified requirement.
+Status: core implementation is present in the repository, with Page administrator provisioning, assigned-Page operations, account setup/recovery, invitation delivery, and isolation migrations. The October 30 requirement expands team administration to original Facebook users on their existing `legacy`/`facebook` assignments and adds optional creator-managed email account expiry. The design below records the earlier manager-only requirement; see `docs/page-member-accounts.md` for the current implemented flows and deployment order. Production activation remains gated on email configuration, authenticated cron callers, compatible shared-database consumers, and the isolation finalizer.
 
 ## Requested behavior
 

@@ -6,6 +6,7 @@ import { FacebookPageSummary } from '@/types';
 import { Check, Facebook, RefreshCw, AlertCircle } from 'lucide-react';
 import { runContactSyncToCompletion } from '@/lib/contact-sync-client';
 import { FACEBOOK_PERMISSION_SCOPE } from '@/lib/facebook-permissions';
+import { facebookSignInCallback } from '@/lib/facebook-signin';
 import { getFacebookConnectErrorMessage, isFacebookReauthMessage } from '@/lib/facebook-errors';
 
 export default function ConnectPage() {
@@ -122,7 +123,7 @@ export default function ConnectPage() {
         setRequiresReauth(false);
         signIn(
             'facebook',
-            { callbackUrl: '/dashboard/connect' },
+            { callbackUrl: facebookSignInCallback('/dashboard/connect') },
             {
                 auth_type: 'rerequest',
                 scope: FACEBOOK_PERMISSION_SCOPE

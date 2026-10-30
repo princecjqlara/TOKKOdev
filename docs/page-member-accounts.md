@@ -1,6 +1,6 @@
 # Page member accounts
 
-Tokko supports Facebook sign-in and email/password sign-in. Only a verified Facebook Page manager can create another person's account or change Page assignments. Assigned email users have operational access to their assigned Pages, including pre-existing Page tags, tag creation/editing, bulk tagging, contact filters, campaigns, templates, messages, exports, history, welcome messages, and follow-ups. Team administration and Facebook reconnection remain manager operations.
+Tokko supports Facebook sign-in and email/password sign-in. Original Facebook users can create another person's account and change assignments for their existing Pages. An original assignment is a server-stored `legacy` or `facebook` Page connection, used with a signed Facebook identity. Delegated membership alone does not permit account administration. A delegated user with independent Facebook `MANAGE` permission can still verify that authority. Assigned email users have operational access to their assigned Pages, including pre-existing Page tags, tag creation/editing, bulk tagging, contact filters, campaigns, templates, messages, exports, history, welcome messages, and follow-ups. Facebook reconnection continues to require live Facebook management verification.
 
 ## Configure before enabling
 
@@ -21,7 +21,7 @@ Configure every external cron job to send `Authorization: Bearer <CRON_SECRET>`.
 
 1. Back up and rehearse against a staging copy. Audit normalized duplicate emails/Facebook identities; the preparation migration rejects collisions instead of merging users.
 2. Run `database/migration_page_member_accounts.sql` in a transaction. It adds account state, provider identity binding, invitation/outbox tables, audit records, rate limits, and transactional functions. New account entry points remain disabled.
-3. Configure the environment and authenticated cron callers. Deploy the application code. Verify existing Facebook sign-in, Page features, signed Messenger media uploads, and workers. Contact updates now use authorized API refresh rather than anonymous database realtime.
+3. Run `database/migration_team_account_expiry.sql` and `database/migration_facebook_signin_recovery.sql` in a transaction before deploying this version. They preserve existing unlimited account lifetimes, add original Facebook assignment authority, install transactional optional expiry, and allow eligible original Facebook accounts to recover their provider binding. Configure the environment and authenticated cron callers. Deploy the application code. Verify existing Facebook sign-in, Page features, signed Messenger media uploads, and workers. Contact updates now use authorized API refresh rather than anonymous database realtime.
 4. Review **all consumers of the shared Supabase database**, including the separate chatbot service. They must use authorized server handlers/service credentials, not anonymous direct reads of Page data. The finalizer locks down every public-schema application table and administrative RPC, including chatbot tables. Keep all four existing media/export buckets private and remove broad end-user storage policies; the readiness guard rejects public buckets or storage policies that could bypass Page checks.
 5. Run `database/migration_page_member_isolation.sql` in a transaction. It enables RLS, revokes direct anonymous/authenticated table and view access and administrative RPC execution, retires the known default admin password, and enables the account feature. It preserves existing users, memberships, contacts, tags, and campaigns.
 6. Verify database readiness with `SELECT public.tokko_accounts_ready();`, then test manager provisioning and a separate assigned email user before opening access more widely.
@@ -30,13 +30,23 @@ Do not deploy the new authentication code before the preparation migration; sess
 
 ## Manager and member flows
 
-- A Page manager signs in with Facebook and opens **Team Access**. Tokko checks the current Facebook `MANAGE` task for each selected Page and the caller's Tokko membership.
+- An original Facebook user signs in with Facebook and opens **Team Access**. Tokko validates their provider identity and original Page assignments. Independently verified Facebook managers can also administer their assigned Pages. The screen provides refresh, reconnect, and Page connection actions; a failed lookup is shown separately from an empty Page list.
 - Enter the person's name/email and select explicit Pages. The account, memberships, audit rows, and encrypted invitation delivery are saved in one transaction. Repeat network submissions use an idempotency key.
 - New recipients follow an expiring setup link and choose a password of at least 12 characters. The link is held in the URL fragment and removed from browser history once read. It is never returned to the manager or written to logs.
 - Existing accounts keep their password, identity, and other Page assignments. Their existing sign-in method continues to work; matching email alone never links Facebook and password identities.
 - Members sign in with email, use assigned Pages normally, and cannot provision accounts or assign access. An account with no assignments sees a no-Pages screen.
 - Pending members can be reinvited from their Page's member list. Reissuing the same Page context expires the prior link. Delivery retries do not recreate the account or restore revoked grants.
 - **Revoke this Page** removes only delegated access for that Page. Other assignments and account credentials remain unchanged. Independent Facebook-derived access is not removable through a delegated-member endpoint.
+
+## Optional account expiry
+
+Account creation defaults to **no expiry**. Enable **Set an expiry date** to choose a local date/time or use the 7/30/90-day shortcuts. The browser sends an absolute timestamp, and the account and expiry are committed in one transaction. Omitting expiry when assigning an existing account or resending an invitation preserves its existing deadline.
+
+Only an email account's creator can change its account-wide expiry, while they still administer one of its assigned Pages. Another Page manager cannot expire someone else's entire account; independent Facebook identities are also protected. The member list shows active, awaiting setup, or expired status and the local expiry time. **Edit expiry** / **Renew account** can extend the deadline or remove it. Turning expiry off and saving removes the deadline without changing passwords or assignments.
+
+Expired accounts cannot sign in or authorize subsequent requests from existing sessions. Password setup/reset does not remove expiry. A renewal restores access subject to the existing account activation, session-version, and Page-membership checks. No expiry cron job is required. Previously authorized in-flight work and previously downloaded data remain outside this revocation boundary.
+
+Existing installations must apply `migration_team_account_expiry.sql` before deploying the new session validation code. The migration does not enable account readiness or bypass email/isolation prerequisites.
 
 Newly issued sessions validate current account status/session version on protected requests. Page membership is read from the database on each operation, so revocation is effective for subsequent API requests. The workspace refreshes memberships periodically and on focus, remounting when assignments change. Requests already authorized/in flight, previously downloaded data, and already issued expiring file capabilities cannot be retroactively recalled.
 
@@ -48,7 +58,13 @@ Personal tags retain their privacy and explicit sharing rules. Assignment to a P
 
 ## Facebook identity compatibility
 
-Provider identity is keyed by Facebook subject, not email. Existing signed Facebook sessions can bind a legacy account that lacks `facebook_id` through that same verified subject. A logged-out legacy account with an email collision enters a pending session with **no account or Page access**. The login screen offers an explicit verification link sent to the existing account's email. The person must redeem it in the same browser while the matching recent Facebook sign-in is present, then sign in through Facebook again. This preserves the existing user ID, password, and memberships. The link expires after 15 minutes and cannot set/reset a password or be redeemed by a different Facebook subject. Already bound or inactive accounts cannot be linked through this path. Never resolve a collision by overwriting another account's password or provider identity.
+Provider identity is keyed by Facebook subject. Existing signed Facebook sessions can bind a legacy account that lacks `facebook_id` through that same verified subject. Older versions created many Facebook users with email only; a fresh Facebook login can now recover an eligible legacy account when the server independently verifies Facebook `MANAGE` permission for **every** existing Page assignment. The recovery transaction requires an active, unexpired original legacy account with at least one Page, no password/email-login credentials, no creator/invitation, and no existing provider binding. It rejects delegated assignments, partial Page proof, already bound identities, and email-only matches. It preserves the existing account ID and Page memberships and does not depend on email-account feature activation.
+
+Legacy Facebook sign-ins without an email used a reserved `fb_<subject>@facebook.local` address. These can recover through the exact authenticated Facebook subject, including accounts with no Pages. Another subject cannot claim that reserved address; the same account-state and credential protections apply.
+
+**Continue with Facebook** returns to `/facebook-signin`, which checks the resulting session and returns the user to the requested workspace screen. OAuth errors remain on a Facebook retry screen. Dashboard guards route incomplete Facebook sessions to this screen instead of email sign-in. A database error is shown as a service problem; inactive/expired accounts remain denied. A narrowly scoped compatibility check permits existing sign-ins when only the optional `expires_at` column is not installed yet; other database failures still deny access.
+
+If independent Page proof cannot establish a legacy binding, the session has **no account or Page access** and proceeds to the dedicated `/verify-facebook` confirmation screen. This offers an explicit one-time verification link sent to the existing account's email, rather than requesting an email password. The person must redeem it in the same browser while the matching recent Facebook sign-in is present, then sign in through Facebook again. This preserves the existing user ID, password, and memberships. The link expires after 15 minutes and cannot set/reset a password or be redeemed by a different Facebook subject. Already bound or inactive accounts cannot be linked through this path. Never resolve a collision by overwriting another account's password or provider identity.
 
 ## Operational limits
 

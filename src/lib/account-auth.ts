@@ -1,5 +1,6 @@
 import { getSupabaseAdmin } from './supabase';
 import { AccessError, digest, normalizeEmail, verifyAccountPassword } from './account-security';
+import { accountHasExpired } from './account-expiry';
 
 export async function takeAccountRateLimit(bucket: string, limit: number, seconds: number) {
     const { data, error } = await getSupabaseAdmin().rpc('tokko_take_auth_limit', {
@@ -26,15 +27,25 @@ export async function authenticateEmail(credentials: Record<string, unknown> | u
     const user = Array.isArray(rows) ? rows[0] : rows;
     if (error) throw new AccessError(503, 'Sign-in is temporarily unavailable.');
     const matches = await verifyAccountPassword(credentials?.password, user?.password_hash);
-    if (!matches || !user?.is_active || !user.email_login_enabled || !user.email_verified_at) return null;
+    if (!matches || !user?.is_active || !user.email_login_enabled || !user.email_verified_at || accountHasExpired(user.expires_at)) return null;
     return { id: user.id as string, name: user.name, email: user.email, image: user.image, sessionVersion: Number(user.session_version) };
 }
 
 export async function getActiveAccount(id: string, version: number, provider: string) {
-    const { data, error } = await getSupabaseAdmin().from('users')
-        .select('id,is_active,session_version,email_login_enabled,email_verified_at')
+    const db = getSupabaseAdmin();
+    let { data, error } = await db.from('users')
+        .select('id,is_active,session_version,email_login_enabled,email_verified_at,expires_at')
         .eq('id', id).maybeSingle();
-    if (error || !data?.is_active || Number(data.session_version) !== version) return null;
+    // The optional expiry migration may follow a Facebook-only deployment.
+    // Retry only this specific missing column; all other DB failures deny access.
+    if (error?.code === '42703' && /column (?:users\.)?expires_at does not exist/.test(error.message || '')) {
+        const legacy = await db.from('users').select('id,is_active,session_version,email_login_enabled,email_verified_at')
+            .eq('id', id).maybeSingle();
+        data = legacy.data ? { ...legacy.data, expires_at: null } : null;
+        error = legacy.error;
+    }
+    if (error) throw new AccessError(503, 'Sign-in is temporarily unavailable.');
+    if (!data?.is_active || Number(data.session_version) !== version || accountHasExpired(data.expires_at)) return null;
     if (provider === 'credentials' && (!data.email_login_enabled || !data.email_verified_at || !await accountsReady())) return null;
     return data;
 }

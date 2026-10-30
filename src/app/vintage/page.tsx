@@ -4,6 +4,7 @@ import { useSession, signIn, signOut } from 'next-auth/react';
 import { useEffect, useState, useRef } from 'react';
 import { FacebookPage } from '@/types';
 import { runContactSyncToCompletion } from '@/lib/contact-sync-client';
+import { facebookSignInCallback } from '@/lib/facebook-signin';
 
 // Types for local state
 interface Contact {
@@ -114,7 +115,7 @@ export default function VintagePage() {
     };
 
     const handleLogin = () => {
-        signIn('facebook', { callbackUrl: '/vintage' });
+        signIn('facebook', { callbackUrl: facebookSignInCallback('/vintage') });
     };
 
     // Connect a selected Page

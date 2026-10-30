@@ -4,6 +4,7 @@ import { signIn } from 'next-auth/react';
 import { Facebook, Loader2 } from 'lucide-react';
 import { useState } from 'react';
 import { FACEBOOK_PERMISSION_SCOPE } from '@/lib/facebook-permissions';
+import { facebookSignInCallback } from '@/lib/facebook-signin';
 
 interface FacebookConnectButtonProps {
     onSuccess?: () => void;
@@ -16,9 +17,9 @@ export default function FacebookConnectButton({ onSuccess }: FacebookConnectButt
         setLoading(true);
         try {
             // Redirect to Facebook OAuth - NextAuth will handle the redirect
-            signIn(
+            await signIn(
                 'facebook',
-                { callbackUrl: '/dashboard' },
+                { callbackUrl: facebookSignInCallback() },
                 {
                     auth_type: 'rerequest',
                     scope: FACEBOOK_PERMISSION_SCOPE
