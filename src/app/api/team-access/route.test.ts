@@ -1,12 +1,13 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { NextRequest } from 'next/server';
 import { AccessError } from '@/lib/account-security';
-const mocks = vi.hoisted(() => ({ session: vi.fn(), db: vi.fn(), manager: vi.fn(), pages: vi.fn(), ready: vi.fn(), rate: vi.fn(), mail: vi.fn(), mailConfig: vi.fn() }));
+const mocks = vi.hoisted(() => ({ session: vi.fn(), db: vi.fn(), manager: vi.fn(), pages: vi.fn(), ready: vi.fn(), rate: vi.fn(), mail: vi.fn(), mailConfig: vi.fn(), hash: vi.fn() }));
 vi.mock('@/lib/get-session', () => ({ getSessionFromRequest: mocks.session }));
 vi.mock('@/lib/supabase', () => ({ getSupabaseAdmin: mocks.db }));
 vi.mock('@/lib/page-managers', () => ({ requireTeamPageAdministrator: mocks.manager, teamAdministrationPages: mocks.pages }));
 vi.mock('@/lib/account-auth', () => ({ accountsReady: mocks.ready, takeAccountRateLimit: mocks.rate }));
 vi.mock('@/lib/account-mail', () => ({ processAccountMail: mocks.mail, requireAccountMail: mocks.mailConfig, accountMailConfigured: () => true }));
+vi.mock('@/lib/account-security', async original => ({ ...await original<typeof import('@/lib/account-security')>(), hashAccountPassword: mocks.hash }));
 import { GET, POST, PATCH, DELETE } from './route';
 
 const page = '11111111-1111-4111-8111-111111111111';
@@ -21,9 +22,68 @@ beforeEach(() => {
     vi.clearAllMocks(); vi.stubEnv('NEXTAUTH_URL', 'https://tokko.example'); vi.stubEnv('NEXTAUTH_SECRET', 'test-secret-only');
     mocks.session.mockResolvedValue({ user: { id: 'manager', provider: 'facebook', facebookId: 'verified-fb' } });
     mocks.manager.mockResolvedValue([]); mocks.ready.mockResolvedValue(true); mocks.mail.mockResolvedValue(true);
+    mocks.mailConfig.mockReset();
+    mocks.hash.mockImplementation(async password => {
+        if (typeof password !== 'string' || password.length < 12) throw new AccessError(400, 'Use at least 12 characters.');
+        return 'scrypt-v1$server-generated-hash';
+    });
 });
 afterEach(() => { vi.unstubAllEnvs(); });
 describe('manager-only account and Page assignment endpoints', () => {
+    it('supports multiple Pages, duplicate Page selections, and temporary deletion without a changing retry fingerprint', async () => {
+        const secondPage='44444444-4444-4444-8444-444444444444';
+        const rpc=vi.fn().mockResolvedValue({data:{passwordCreated:true,pending:false},error:null}); mocks.db.mockReturnValue({rpc});
+        const body={name:'Team Member',email:'temporary@example.com',password:'A team password 123!',setupMethod:'password',pageIds:[page,secondPage,page],lifetimeDays:7,deleteAfterExpiry:true};
+        expect((await POST(request('POST',body))).status).toBe(200);
+        expect((await POST(request('POST',body))).status).toBe(200);
+        expect(rpc).toHaveBeenCalledWith('tokko_save_subaccount',expect.objectContaining({p_pages:[page,secondPage],p_lifetime_days:7,p_delete_after_expiry:true}));
+        expect(rpc.mock.calls[0][1].p_fingerprint).toBe(rpc.mock.calls[1][1].p_fingerprint);
+    });
+    it('lets the parent extend a temporary account or cancel scheduled deletion',async()=>{
+        const rpc=vi.fn().mockResolvedValue({data:true,error:null});mocks.db.mockReturnValue({rpc});
+        expect((await PATCH(request('PATCH',{userId:account,pageId:page,lifetimeDays:30,deleteAfterExpiry:true}))).status).toBe(200);
+        expect(rpc).toHaveBeenCalledWith('tokko_set_subaccount_lifetime',expect.objectContaining({p_lifetime_days:30,p_delete_after_expiry:true}));
+        expect((await PATCH(request('PATCH',{userId:account,pageId:page,expiresAt:null,deleteAfterExpiry:false}))).status).toBe(200);
+        expect(rpc).toHaveBeenLastCalledWith('tokko_set_subaccount_lifetime',expect.objectContaining({p_expiry_set:true,p_expires_at:null,p_delete_after_expiry:false}));
+    });
+    it('creates a password account without requiring or sending email and keeps credentials out of its response', async () => {
+        const rpc = vi.fn().mockResolvedValue({ data: { passwordCreated: true, pending: false }, error: null }); mocks.db.mockReturnValue({ rpc });
+        mocks.mailConfig.mockImplementation(() => { throw new AccessError(503, 'Mail unavailable'); });
+        const response = await POST(request('POST', { name: 'Member', email: 'member@example.com', pageIds: [page], setupMethod: 'password', password: 'An initial password 123!' }));
+        expect(response.status).toBe(200);
+        expect(rpc).toHaveBeenCalledWith('tokko_save_subaccount', expect.objectContaining({ p_setup_method: 'password', p_password: 'scrypt-v1$server-generated-hash', p_expiry_set: false }));
+        expect(rpc.mock.calls[0][1].p_encrypted).toBe('');
+        expect(mocks.mailConfig).not.toHaveBeenCalled(); expect(mocks.mail).not.toHaveBeenCalled();
+        expect(JSON.stringify(await response.json())).not.toMatch(/initial password 123|scrypt-v1|p_hash|p_password/);
+    });
+    it('uses a stable secret-keyed password fingerprint for retries and detects changed passwords', async () => {
+        const rpc = vi.fn().mockResolvedValue({ data: { passwordCreated: true, pending: false }, error: null }); mocks.db.mockReturnValue({ rpc });
+        const body = { name: 'Member', email: 'member@example.com', pageIds: [page], setupMethod: 'password', password: 'An initial password 123!' };
+        await POST(request('POST', body)); await POST(request('POST', body)); await POST(request('POST', { ...body, password: 'A different password 123!' }));
+        expect(rpc.mock.calls[0][1].p_fingerprint).toBe(rpc.mock.calls[1][1].p_fingerprint);
+        expect(rpc.mock.calls[0][1].p_fingerprint).not.toBe(rpc.mock.calls[2][1].p_fingerprint);
+    });
+    it('rejects overwriting existing credentials and rejects weak initial passwords', async () => {
+        const rpc = vi.fn().mockResolvedValue({ data: null, error: { code: '42501' } }); mocks.db.mockReturnValue({ rpc });
+        const body = { name: 'Member', email: 'member@example.com', pageIds: [page], setupMethod: 'password', password: 'An initial password 123!' };
+        expect((await POST(request('POST', body))).status).toBe(403);
+        rpc.mockClear();
+        expect((await POST(request('POST', { ...body, password: 'short' }))).status).toBe(400);
+        expect(rpc).not.toHaveBeenCalled();
+    });
+    it('assigns an existing account without mail or password changes and refuses unknown accounts', async () => {
+        const rpc = vi.fn().mockResolvedValue({ data: { pending: false }, error: null }); mocks.db.mockReturnValue({ rpc });
+        const body = { name: 'Member', email: 'member@example.com', pageIds: [page], setupMethod: 'existing' };
+        expect((await POST(request('POST', body))).status).toBe(200);
+        expect(rpc).toHaveBeenCalledWith('tokko_save_subaccount', expect.objectContaining({ p_setup_method: 'existing', p_encrypted: '' }));
+        expect(mocks.hash).not.toHaveBeenCalled(); expect(mocks.mailConfig).not.toHaveBeenCalled();
+        rpc.mockResolvedValue({ data: null, error: { code: '22023', message: 'Existing active account required' } });
+        expect((await POST(request('POST', body))).status).toBe(400);
+    });
+    it.each([null, { setupMethod: 'unknown' }, { setupMethod: 'email', password: 'An initial password 123!' }])('rejects invalid setup data without account side effects: %j', async body => {
+        expect((await POST(request('POST', body))).status).toBe(400);
+        expect(mocks.db).not.toHaveBeenCalled(); expect(mocks.hash).not.toHaveBeenCalled();
+    });
     it('rejects unauthenticated provisioning before accessing the database', async () => {
         mocks.session.mockResolvedValue(null);
         expect((await POST(request())).status).toBe(401); expect(mocks.db).not.toHaveBeenCalled();
@@ -37,7 +97,7 @@ describe('manager-only account and Page assignment endpoints', () => {
         const rpc = vi.fn().mockResolvedValue({ data: { userId: account, pending: true, deliveryId: 'mail-id' }, error: null }); mocks.db.mockReturnValue({ rpc });
         const response = await POST(request()); const body = await response.json();
         expect(response.status).toBe(200); expect(body.pending).toBe(true);
-        expect(rpc).toHaveBeenCalledWith('tokko_provision_member_with_expiry', expect.objectContaining({ p_email: 'member@example.com', p_actor: 'manager', p_pages: [page], p_request: requestId, p_expiry_set: false, p_expires_at: null }));
+        expect(rpc).toHaveBeenCalledWith('tokko_save_subaccount', expect.objectContaining({ p_setup_method: 'email', p_email: 'member@example.com', p_actor: 'manager', p_pages: [page], p_request: requestId, p_expiry_set: false, p_expires_at: null }));
         expect(JSON.stringify(body)).not.toMatch(/token|password_hash|encrypted|mail-id/);
         expect(mocks.mail).toHaveBeenCalledWith('mail-id');
     });
@@ -80,7 +140,7 @@ describe('manager-only account and Page assignment endpoints', () => {
         const rpc = vi.fn().mockResolvedValue({ data: { pending: false }, error: null }); mocks.db.mockReturnValue({ rpc });
         const expiresAt = new Date(Date.now() + 86400_000).toISOString();
         expect((await POST(request('POST', { name: 'Member', email: 'member@example.com', pageIds: [page], expiresAt }))).status).toBe(200);
-        expect(rpc).toHaveBeenCalledWith('tokko_provision_member_with_expiry', expect.objectContaining({ p_expiry_set: true, p_expires_at: expiresAt }));
+        expect(rpc).toHaveBeenCalledWith('tokko_save_subaccount', expect.objectContaining({ p_expiry_set: true, p_expires_at: expiresAt }));
         const fingerprint = rpc.mock.calls[0][1].p_fingerprint;
         await POST(request('POST', { name: 'Member', email: 'member@example.com', pageIds: [page] }));
         expect(rpc.mock.calls[1][1].p_fingerprint).not.toBe(fingerprint);
@@ -93,9 +153,9 @@ describe('manager-only account and Page assignment endpoints', () => {
         const rpc = vi.fn().mockResolvedValue({ data: true, error: null }); mocks.db.mockReturnValue({ rpc });
         const expiresAt = new Date(Date.now() + 86400_000).toISOString();
         expect((await PATCH(request('PATCH', { userId: account, pageId: page, expiresAt }))).status).toBe(200);
-        expect(rpc).toHaveBeenCalledWith('tokko_set_member_expiry', { p_actor: 'manager', p_pages: [page], p_user: account, p_expires_at: expiresAt });
+        expect(rpc).toHaveBeenCalledWith('tokko_set_subaccount_lifetime', expect.objectContaining({ p_actor: 'manager', p_pages: [page], p_user: account, p_expires_at: expiresAt }));
         expect((await PATCH(request('PATCH', { userId: account, pageId: page, expiresAt: null }))).status).toBe(200);
-        expect(rpc).toHaveBeenLastCalledWith('tokko_set_member_expiry', expect.objectContaining({ p_expires_at: null }));
+        expect(rpc).toHaveBeenLastCalledWith('tokko_set_subaccount_lifetime', expect.objectContaining({ p_expires_at: null }));
     });
     it('denies expiry changes by another manager, email users, or a caller without Page authority', async () => {
         const rpc = vi.fn().mockResolvedValue({ data: false, error: null }); mocks.db.mockReturnValue({ rpc });

@@ -1,4 +1,4 @@
-import { createCipheriv, createDecipheriv, createHash, randomBytes, scrypt, timingSafeEqual } from 'node:crypto';
+import { createCipheriv, createDecipheriv, createHash, createHmac, randomBytes, scrypt, timingSafeEqual } from 'node:crypto';
 
 export class AccessError extends Error {
     constructor(public status: number, message: string) { super(message); this.name = 'AccessError'; }
@@ -14,6 +14,12 @@ export function normalizeEmail(value: unknown): string {
 
 export function digest(value: string): string { return createHash('sha256').update(value).digest('hex'); }
 export function newAccountToken() { const token = randomBytes(32).toString('base64url'); return { token, hash: digest(token) }; }
+
+// Stable across retries without storing a plain password or an offline verifier.
+export function accountPasswordFingerprint(password: string) {
+    if (!process.env.NEXTAUTH_SECRET) throw new Error('NEXTAUTH_SECRET is required.');
+    return createHmac('sha256', process.env.NEXTAUTH_SECRET).update('tokko-member-password-v1:').update(password).digest('hex');
+}
 
 function derive(password: string, salt: string): Promise<Buffer> {
     return new Promise((resolve, reject) => scrypt(password, salt, 64,

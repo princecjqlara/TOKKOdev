@@ -1,6 +1,7 @@
 'use client';
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
+import PasswordInput from '@/components/PasswordInput';
 
 export default function SetupPasswordPage() {
     const [token, setToken] = useState('');
@@ -28,8 +29,8 @@ export default function SetupPasswordPage() {
         <h1 className="text-2xl font-black">Choose your Tokko password</h1>
         {!done && (token ? <form onSubmit={submit} className="space-y-4">
             <p className="text-sm text-gray-600">Use at least 12 characters. Only Pages assigned by your manager will be available.</p>
-            <label className="block font-bold text-sm">New password<input className="input-wireframe mt-2" type="password" autoComplete="new-password" required minLength={12} value={password} onChange={e => setPassword(e.target.value)} /></label>
-            <label className="block font-bold text-sm">Confirm password<input className="input-wireframe mt-2" type="password" autoComplete="new-password" required minLength={12} value={confirmation} onChange={e => setConfirmation(e.target.value)} /></label>
+            <label className="block font-bold text-sm">New password<PasswordInput disabled={busy} className="input-wireframe mt-2" autoComplete="new-password" required minLength={12} value={password} onChange={e => setPassword(e.target.value)} /></label>
+            <label className="block font-bold text-sm">Confirm password<PasswordInput disabled={busy} className="input-wireframe mt-2" autoComplete="new-password" required minLength={12} value={confirmation} onChange={e => setConfirmation(e.target.value)} /></label>
             <button className="btn-wireframe-dark" disabled={busy}>{busy ? 'Saving…' : 'Save password'}</button>
         </form> : <p>Open the complete setup or reset link from your email. If it has expired, request a new link.</p>)}
         {message && <p role="status" className="text-sm">{message}</p>}

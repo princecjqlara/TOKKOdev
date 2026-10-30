@@ -5,6 +5,7 @@ import { useEffect, useState } from 'react';
 import { Page } from '@/types';
 import { User, Shield, Link as LinkIcon, CheckCircle, RefreshCw } from 'lucide-react';
 import Link from 'next/link';
+import AccountPasswordSettings from '@/components/AccountPasswordSettings';
 
 export default function SettingsPage() {
     const { data: session } = useSession();
@@ -116,6 +117,8 @@ export default function SettingsPage() {
                     Manage profile and connections
                 </p>
             </div>
+
+            {session?.accountType === 'subaccount' && <AccountPasswordSettings />}
 
             {/* Profile Section */}
             <div className="wireframe-card mb-6">

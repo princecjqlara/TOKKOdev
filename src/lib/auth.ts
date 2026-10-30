@@ -5,7 +5,6 @@ import { getSupabaseAdmin } from './supabase';
 import { FACEBOOK_PERMISSION_SCOPE } from './facebook-permissions';
 import { authenticateEmail, getActiveAccount } from './account-auth';
 import { getServerAuthToken } from './server-auth-token';
-import { recoverLegacyFacebookLogin } from './facebook-login-recovery';
 
 export const authOptions: NextAuthOptions = {
     providers: [
@@ -30,6 +29,7 @@ export const authOptions: NextAuthOptions = {
                     token.id = user.id; token.sessionVersion = user.sessionVersion; token.provider = 'credentials';
                     delete token.accessToken; delete token.facebookId;
                     delete token.pendingFacebookLinkAt;
+                    delete token.authenticationError;
                 } else if (account.provider === 'facebook') {
                     // Reuse an existing signed binding for this same Facebook subject.
                     const previous = await getServerAuthToken();
@@ -38,33 +38,25 @@ export const authOptions: NextAuthOptions = {
                         p_subject: account.providerAccountId, p_email: user.email || null,
                         p_name: user.name || null, p_image: user.image || null, p_legacy_id: legacyId || null
                     });
-                    let row = error ? null : Array.isArray(data) ? data[0] : data;
-                    const emailCollision = error?.code === '28000' && error.message === 'Identity requires explicit reconciliation';
-                    const subjectEmailCollision = !user.email && error?.code === '23505';
-                    if (emailCollision || subjectEmailCollision) {
-                        row = await recoverLegacyFacebookLogin({ subject: account.providerAccountId, email: user.email,
-                            name: user.name, image: user.image, accessToken: account.access_token });
-                        if (!row && emailCollision) {
-                            // Keep the verified OAuth identity in an HTTP-only
-                            // pending session. It grants no Tokko account access.
-                            delete token.id;
-                            delete token.sessionVersion;
-                            token.provider = 'facebook'; token.facebookId = account.providerAccountId;
-                            token.accessToken = account.access_token; token.pendingFacebookLinkAt = Date.now();
-                            return token;
-                        }
+                    if (error?.code === '28000' && ['Subaccounts use email and password', 'Account inactive or expired'].includes(error.message)) {
+                        delete token.id; delete token.sessionVersion; delete token.pendingFacebookLinkAt;
+                        token.provider = 'facebook'; token.facebookId = account.providerAccountId;
+                        token.authenticationError = error.message === 'Subaccounts use email and password' ? 'subaccount_credentials_required' : 'account_unavailable';
+                        return token;
                     }
+                    const row = error ? null : Array.isArray(data) ? data[0] : data;
                     if (!row?.user_id) throw new Error('Facebook sign-in is temporarily unavailable.');
                     token.id = row.user_id; token.sessionVersion = Number(row.version); token.provider = 'facebook';
                     token.facebookId = account.providerAccountId; token.accessToken = account.access_token;
                     delete token.pendingFacebookLinkAt;
+                    delete token.authenticationError;
                 }
             }
             return token;
         },
         async session({ session, token }) {
             const provider = token.provider || (token.facebookId ? 'facebook' : 'credentials');
-            let active; let authenticationError: Session['authenticationError'];
+            let active; let authenticationError: Session['authenticationError'] = token.authenticationError;
             try {
                 active = token.id && await getActiveAccount(token.id, Number(token.sessionVersion || 0), provider);
                 if (token.id && !active) authenticationError = 'account_unavailable';
@@ -72,8 +64,9 @@ export const authOptions: NextAuthOptions = {
             return { ...session, user: { ...session.user, id: active ? token.id : undefined,
                 facebookId: active && provider === 'facebook' ? token.facebookId : undefined,
                 provider: active ? provider : undefined }, accountActive: Boolean(active),
+                accountType: active ? !active.created_by && (active.account_kind === 'facebook' || provider === 'facebook' && active.account_kind === 'legacy') ? 'parent' : 'subaccount' : undefined,
                 signInProvider: provider, authenticationError,
-                requiresFacebookVerification: Boolean(token.pendingFacebookLinkAt && Date.now() - token.pendingFacebookLinkAt < 15 * 60 * 1000) };
+                requiresFacebookVerification: false };
         }
     },
     pages: { signIn: '/login', error: '/facebook-signin' },
@@ -88,7 +81,8 @@ declare module 'next-auth' {
         accountActive?: boolean;
         requiresFacebookVerification?: boolean;
         signInProvider?: string;
-        authenticationError?: 'service_unavailable' | 'account_unavailable';
+        authenticationError?: 'service_unavailable' | 'account_unavailable' | 'subaccount_credentials_required';
+        accountType?: 'parent' | 'subaccount';
         /** @deprecated Provider tokens are server-only. */
         accessToken?: string;
         user: { id?: string; name?: string | null; email?: string | null; image?: string | null;
@@ -96,5 +90,5 @@ declare module 'next-auth' {
     }
 }
 declare module 'next-auth/jwt' {
-    interface JWT { id?: string; accessToken?: string; facebookId?: string; provider?: string; sessionVersion?: number; pendingFacebookLinkAt?: number; }
+    interface JWT { id?: string; accessToken?: string; facebookId?: string; provider?: string; sessionVersion?: number; pendingFacebookLinkAt?: number; authenticationError?: 'account_unavailable' | 'subaccount_credentials_required'; }
 }

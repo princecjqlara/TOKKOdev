@@ -132,7 +132,7 @@ export default function DashboardLayout({
         { href: '/dashboard/welcome', icon: Hand, label: 'Welcome' },
         { href: '/dashboard/settings', icon: Settings, label: 'Settings' },
     ];
-    if (session.user.provider === 'facebook') navItems.push({ href: '/dashboard/team', icon: Users, label: 'Team Access' });
+    if (session.user.provider === 'facebook' && session.accountType === 'parent') navItems.push({ href: '/dashboard/team', icon: Users, label: 'Team Subaccounts' });
 
     // Add admin nav item if user is admin
     // const isAdmin = (session?.user as any)?.role === 'admin';

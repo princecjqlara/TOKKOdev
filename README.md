@@ -116,7 +116,7 @@ src/
 
 ## Deployment
 
-For manager-created email accounts and assigned-Page access, follow [the account rollout guide](docs/page-member-accounts.md). Deploy the preparation migration before application code, configure account emails and authenticated cron callers, then finalize database isolation to enable the feature.
+For original Facebook parent users and their email/password team subaccounts, follow [the account rollout guide](docs/page-member-accounts.md). Subaccounts support overlapping multi-Page access and optional scheduled deletion. Apply the account migrations before application code, configure authenticated workers, and finalize shared-database isolation before enabling production subaccounts. Email delivery is optional for parent-created initial-password accounts.
 
 ### Vercel Deployment
 

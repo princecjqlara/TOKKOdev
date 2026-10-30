@@ -1,6 +1,6 @@
 # Email accounts and assigned-page access
 
-Status: core implementation is present in the repository, with Page administrator provisioning, assigned-Page operations, account setup/recovery, invitation delivery, and isolation migrations. The October 30 requirement expands team administration to original Facebook users on their existing `legacy`/`facebook` assignments and adds optional creator-managed email account expiry. The design below records the earlier manager-only requirement; see `docs/page-member-accounts.md` for the current implemented flows and deployment order. Production activation remains gated on email configuration, authenticated cron callers, compatible shared-database consumers, and the isolation finalizer.
+Status: superseded by the October 31 clarification. Original users admitted through Facebook Developer invitations are parent users. They create email/password team subaccounts with overlapping multi-Page assignments and an optional deadline for actual account deletion. Original Facebook users retain Facebook sign-in without a Page MANAGE or email verification prerequisite. The design below records the earlier requirements; see `docs/page-member-accounts.md` for the current model, applied database updates, cleanup schedule, and remaining production isolation prerequisite.
 
 ## Requested behavior
 

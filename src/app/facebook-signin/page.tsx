@@ -34,7 +34,7 @@ export default function FacebookSignInPage() {
             {loading ? <p role="status">Checking your Facebook account and opening your workspace…</p> : <>
                 <p role="alert">{facebookSignInMessage(error, error ? undefined : session?.authenticationError)}</p>
                 <button className="btn-wireframe-dark w-full justify-center" disabled={busy} onClick={() => void retry()}>{busy ? 'Connecting…' : 'Continue with Facebook'}</button>
-                <Link href="/login" className="block text-sm underline">Choose another sign-in method</Link>
+                <Link href="/login?method=email" className="block text-sm underline">Sign in to a team subaccount</Link>
             </>}
         </div>
     </main>;

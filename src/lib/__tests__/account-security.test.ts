@@ -1,8 +1,16 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { assertSameOrigin, decryptMailToken, digest, encryptMailToken, hashAccountPassword, newAccountToken, normalizeEmail, verifyAccountPassword } from '../account-security';
+import { accountPasswordFingerprint, assertSameOrigin, decryptMailToken, digest, encryptMailToken, hashAccountPassword, newAccountToken, normalizeEmail, verifyAccountPassword } from '../account-security';
 
 afterEach(() => { vi.unstubAllEnvs(); });
 describe('account credential safety', () => {
+    it('binds retry fingerprints to the server secret without storing an unkeyed password verifier', () => {
+        vi.stubEnv('NEXTAUTH_SECRET', 'first-test-secret');
+        const first = accountPasswordFingerprint('A password for account creation');
+        expect(first).toBe(accountPasswordFingerprint('A password for account creation'));
+        expect(first).not.toBe(digest('A password for account creation'));
+        vi.stubEnv('NEXTAUTH_SECRET', 'second-test-secret');
+        expect(first).not.toBe(accountPasswordFingerprint('A password for account creation'));
+    });
     it('normalizes email without letting Facebook fallback addresses become password accounts', () => {
         expect(normalizeEmail('  Person+team@Example.COM ')).toBe('person+team@example.com');
         expect(() => normalizeEmail('fb_123@facebook.local')).toThrow();

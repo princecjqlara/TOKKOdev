@@ -20,36 +20,27 @@ async function verifyFacebookIdentity(session: Session) {
     if (error || row?.user_id !== session.user.id) throw new AccessError(403, 'Your Facebook account identity could not be verified. Sign in again.');
 }
 
-/** Original Page connections may administer Tokko members without a new Meta lookup. */
+/** Facebook app users are parents; team-created identities remain subaccounts. */
 export async function teamAdministrationPages(session: Session) {
     await verifyFacebookIdentity(session);
+    const { data: isParent, error: parentError } = await getSupabaseAdmin().rpc('tokko_is_parent_user', {
+        p_user: session.user.id, p_subject: session.user.facebookId
+    });
+    if (parentError) throw parentError;
+    if (isParent !== true) throw new AccessError(403, 'Only original Facebook users can create and manage team subaccounts.');
     const { data, error } = await getSupabaseAdmin().from('user_pages')
         .select('grant_source,pages(id,fb_page_id,name)').eq('user_id', session.user.id!);
     if (error) throw error;
-    const originals = (data || []).flatMap(row => {
+    return (data || []).flatMap(row => {
         const page = Array.isArray(row.pages) ? row.pages[0] : row.pages;
-        return page && ['legacy', 'facebook'].includes(row.grant_source) ? [{ ...page, authoritySource: 'original' as const }] : [];
+        return page ? [{ ...page, authoritySource: 'original' as const }] : [];
     });
-    const delegated = (data || []).filter(row => row.grant_source === 'delegated');
-    if (!delegated.length) return originals;
-    try {
-        const verified = await verifiedFacebookPages(session);
-        return [...originals, ...delegated.flatMap(row => {
-            const page = Array.isArray(row.pages) ? row.pages[0] : row.pages;
-            return page && verified.some(fb => fb.id === page.fb_page_id) ? [{ ...page, authoritySource: 'facebook' as const }] : [];
-        })];
-    } catch (error) {
-        if (originals.length) return originals;
-        throw error;
-    }
 }
 
 export async function requireTeamPageAdministrator(session: Session, pageIds: string[]) {
     const availablePages = await teamAdministrationPages(session);
     if (!pageIds.length || pageIds.some(id => !availablePages.some(page => page.id === id))) {
-        // Delegated access alone never enables account administration. A user
-        // with separate Facebook management can still verify that authority.
-        return requireFacebookPageManager(session, pageIds);
+        throw new AccessError(403, 'Only assign Pages that are available in your Tokko account.');
     }
     const records = availablePages.filter(page => pageIds.includes(page.id));
     const { error } = await getSupabaseAdmin().from('tokko_page_managers').upsert(records.map(page => ({

@@ -15,11 +15,17 @@ export function facebookSignInCallback(next: unknown = '/dashboard'): string {
 
 export function facebookSignInDestination(session: Session | null, next: unknown): string | null {
     if (session?.user?.id && (session.user.provider === 'facebook' || session.signInProvider === 'facebook')) return facebookReturnPath(next);
-    if (session?.requiresFacebookVerification) return `/verify-facebook?${new URLSearchParams({ next: facebookReturnPath(next) })}`;
     return null;
 }
 
+export function loginDestination(session: Session | null, method: unknown): string | null {
+    if (session?.user?.id) return '/dashboard';
+    if (method === 'email') return null;
+    return session?.signInProvider === 'facebook' ? facebookSignInCallback() : null;
+}
+
 export function facebookSignInMessage(error: string | null, accountError?: Session['authenticationError']): string {
+    if (accountError === 'subaccount_credentials_required') return 'Team subaccounts sign in with the email and password supplied by their parent user. Original Facebook users should continue with their original Facebook account.';
     if (accountError === 'service_unavailable' || error === 'Configuration') return 'Facebook sign-in is temporarily unavailable. Retry, or ask the Tokko administrator to check the sign-in service.';
     if (accountError === 'account_unavailable') return 'Facebook confirmed your identity, but this Tokko account is inactive or expired. Contact your Page administrator to restore access.';
     if (error === 'AccessDenied') return 'Facebook sign-in was not approved. Continue with Facebook again and approve the requested permissions.';
