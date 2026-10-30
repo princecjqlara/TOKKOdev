@@ -1,5 +1,6 @@
--- FINALIZER. First deploy the compatible application, configure account email
--- and CRON_SECRET, and update every cron caller's Authorization header.
+-- FINALIZER. First deploy the compatible application and review shared clients.
+-- Password creation/assignment need no email sender. Configure email only for
+-- invitations/recovery, and CRON_SECRET for HTTP workers if using those workers.
 -- No user identities, Page grants, contacts, tags, or campaigns are deleted.
 DO $$
 DECLARE r RECORD;
