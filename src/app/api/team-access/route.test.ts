@@ -1,12 +1,12 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { NextRequest } from 'next/server';
 import { AccessError } from '@/lib/account-security';
-const mocks = vi.hoisted(() => ({ session: vi.fn(), db: vi.fn(), manager: vi.fn(), pages: vi.fn(), ready: vi.fn(), rate: vi.fn(), mail: vi.fn(), mailConfig: vi.fn(), hash: vi.fn() }));
+const mocks = vi.hoisted(() => ({ session: vi.fn(), db: vi.fn(), manager: vi.fn(), pages: vi.fn(), ready: vi.fn(), rate: vi.fn(), mail: vi.fn(), mailConfig: vi.fn(), mailAvailable: vi.fn(), hash: vi.fn() }));
 vi.mock('@/lib/get-session', () => ({ getSessionFromRequest: mocks.session }));
 vi.mock('@/lib/supabase', () => ({ getSupabaseAdmin: mocks.db }));
 vi.mock('@/lib/page-managers', () => ({ requireTeamPageAdministrator: mocks.manager, teamAdministrationPages: mocks.pages }));
 vi.mock('@/lib/account-auth', () => ({ accountsReady: mocks.ready, takeAccountRateLimit: mocks.rate }));
-vi.mock('@/lib/account-mail', () => ({ processAccountMail: mocks.mail, requireAccountMail: mocks.mailConfig, accountMailConfigured: () => true }));
+vi.mock('@/lib/account-mail', () => ({ processAccountMail: mocks.mail, requireAccountMail: mocks.mailConfig, accountMailConfigured: mocks.mailAvailable }));
 vi.mock('@/lib/account-security', async original => ({ ...await original<typeof import('@/lib/account-security')>(), hashAccountPassword: mocks.hash }));
 import { GET, POST, PATCH, DELETE } from './route';
 
@@ -22,7 +22,7 @@ beforeEach(() => {
     vi.clearAllMocks(); vi.stubEnv('NEXTAUTH_URL', 'https://tokko.example'); vi.stubEnv('NEXTAUTH_SECRET', 'test-secret-only');
     mocks.session.mockResolvedValue({ user: { id: 'manager', provider: 'facebook', facebookId: 'verified-fb' } });
     mocks.manager.mockResolvedValue([]); mocks.ready.mockResolvedValue(true); mocks.mail.mockResolvedValue(true);
-    mocks.mailConfig.mockReset();
+    mocks.mailConfig.mockReset(); mocks.mailAvailable.mockReturnValue(true);
     mocks.hash.mockImplementation(async password => {
         if (typeof password !== 'string' || password.length < 12) throw new AccessError(400, 'Use at least 12 characters.');
         return 'scrypt-v1$server-generated-hash';
@@ -30,6 +30,22 @@ beforeEach(() => {
 });
 afterEach(() => { vi.unstubAllEnvs(); });
 describe('manager-only account and Page assignment endpoints', () => {
+    it('keeps password creation and existing-account assignment available when invitation email is unavailable', async () => {
+        mocks.mailAvailable.mockReturnValue(false);
+        mocks.mailConfig.mockImplementation(() => { throw new AccessError(503, 'Sender missing'); });
+        mocks.pages.mockResolvedValue([{ id: page, name: 'Team Page' }]);
+        const rpc = vi.fn().mockResolvedValue({ data: { passwordCreated: true, pending: false }, error: null });
+        mocks.db.mockReturnValue({ rpc });
+        const status = await GET(request('GET'));
+        expect(await status.json()).toMatchObject({ ready: true, emailConfigured: false, canManageAccounts: true, pages: [{ id: page }] });
+        const body = { name: 'Member', email: 'member@example.com', pageIds: [page] };
+        expect((await POST(request('POST', { ...body, setupMethod: 'password', password: 'A member password 123!' }))).status).toBe(200);
+        expect((await POST(request('POST', { ...body, setupMethod: 'existing' }))).status).toBe(200);
+        expect(mocks.mailConfig).not.toHaveBeenCalled(); expect(mocks.mail).not.toHaveBeenCalled();
+        rpc.mockClear();
+        expect((await POST(request('POST', { ...body, setupMethod: 'email' }))).status).toBe(503);
+        expect(rpc).not.toHaveBeenCalled();
+    });
     it.each([true, false])('lists the assigned members through the membership relationship when provisioning readiness is %s', async ready => {
         mocks.ready.mockResolvedValue(ready);
         const expiresAt = '2026-12-01T00:00:00Z';

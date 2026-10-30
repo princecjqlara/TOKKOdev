@@ -76,7 +76,9 @@ export default function TeamAccessPage() {
             if (!response.ok) throw Error(data.message || 'Could not load Page access.');
             if (signal?.aborted) return;
             const nextPages: TeamPage[] = data.pages || [];
-            setPages(nextPages); setReady(Boolean(data.ready)); setEmailConfigured(Boolean(data.emailConfigured));
+            const canSendEmail = Boolean(data.emailConfigured);
+            setPages(nextPages); setReady(Boolean(data.ready)); setEmailConfigured(canSendEmail);
+            if (!canSendEmail) setSetupMethod(previous => previous === 'email' ? 'password' : previous);
             setPageId(previous => nextPages.some(page => page.id === previous) ? previous : nextPages[0]?.id || '');
             setSelected(previous => {
                 const kept = previous.filter(id => nextPages.some(page => page.id === id));
@@ -157,6 +159,14 @@ export default function TeamAccessPage() {
         } catch { setMessage('Could not update account expiry. Please retry.'); }
         finally { setBusy(false); }
     }
+    function preparePendingAccount(member: Member, method: 'password' | 'email') {
+        setName(member.name || 'Team member'); setEmail(member.email); setSelected([pageId]);
+        setHasExpiry(false); setExpiryDate(''); requestId.current = null;
+        setSetupMethod(method); setPassword(''); setConfirmation('');
+        setMessage(method === 'password'
+            ? 'Set and confirm an initial password in the account form, then save. The existing Page assignments and lifetime will be preserved.'
+            : 'Use Create account / assign access to resend this invitation. The current expiry will be preserved.');
+    }
     if (status === 'loading') return <p>Loading team access…</p>;
     if (session?.user.provider !== 'facebook' || session.accountType === 'subaccount') return <div className="border-2 border-black p-6"><h1 className="text-2xl font-black">Team subaccounts</h1><p className="mt-4">Your parent user creates subaccounts and assigns their Pages. Use your assigned Pages through the workspace. Original Facebook users continue with Facebook to manage their team.</p></div>;
 
@@ -172,18 +182,17 @@ export default function TeamAccessPage() {
         {loadError && <p role="alert" className="border border-red-700 p-4 text-red-700">{loadError}</p>}
         {loading ? <p>Loading your Facebook Page access…</p> : !loadError && !pages.length ? <p>No Pages available for team administration. Connect a Page you manage, then refresh Page access.</p> : pages.length > 0 && <>
             {!ready && <p role="status" className="border border-amber-600 bg-amber-50 p-4">Team account access is awaiting administrator setup.</p>}
-            {ready && !emailConfigured && <p role="status" className="border border-amber-600 bg-amber-50 p-4">Email invitations are unavailable until the administrator configures the sender. You can set an initial password or assign an existing account.</p>}
             <form onSubmit={invite} className="border-2 border-black p-6 space-y-4">
                 <h2 className="font-bold text-xl">Create or assign an account</h2>
                 <label className="block font-bold text-sm">Name<input required maxLength={100} className="input-wireframe mt-2" value={name} disabled={busy} onChange={event => { setName(event.target.value); requestId.current = null; }} /></label>
                 <label className="block font-bold text-sm">Email<input required type="email" className="input-wireframe mt-2" value={email} disabled={busy} onChange={event => { setEmail(event.target.value); requestId.current = null; }} /></label>
                 <label className="block font-bold text-sm">Account setup<select className="input-wireframe mt-2" value={setupMethod} disabled={busy} onChange={event => {
                     setSetupMethod(event.target.value as 'password' | 'email' | 'existing'); setPassword(''); setConfirmation(''); requestId.current = null;
-                }}><option value="password">Set an initial password</option><option value="email" disabled={!emailConfigured}>Send a password setup email</option><option value="existing">Assign an existing account</option></select></label>
+                }}><option value="password">Set an initial password</option>{emailConfigured && <option value="email">Send a password setup email</option>}<option value="existing">Assign an existing account</option></select></label>
                 {setupMethod === 'password' && <>
                     <label className="block font-bold text-sm">Initial password<PasswordInput required minLength={12} disabled={busy} autoComplete="new-password" className="input-wireframe mt-2" value={password} onChange={event => { setPassword(event.target.value); requestId.current = null; }} /></label>
                     <label className="block font-bold text-sm">Confirm password<PasswordInput required minLength={12} disabled={busy} autoComplete="new-password" className="input-wireframe mt-2" value={confirmation} onChange={event => setConfirmation(event.target.value)} /></label>
-                    <p className="text-sm text-gray-600">Use at least 12 characters and share the initial password privately. The member can change it in Settings. Existing account passwords cannot be replaced here.</p>
+                    <p className="text-sm text-gray-600">Use at least 12 characters and share the initial password privately. The member can sign in immediately with their email and password; no invitation email is needed. They can change their password in Settings. Existing account passwords cannot be replaced here.</p>
                 </>}
                 <fieldset disabled={busy}><legend className="font-bold mb-2">Pages to assign</legend>{pages.map(page => <label key={page.id} className="flex gap-2 py-2"><input type="checkbox" checked={selected.includes(page.id)} onChange={event => {
                     setSelected(previous => event.target.checked ? [...previous, page.id] : previous.filter(id => id !== page.id)); requestId.current = null;
@@ -204,11 +213,8 @@ export default function TeamAccessPage() {
                         <div><strong>{member.name || member.email}</strong><p className="text-sm">{member.email} · {member.parent ? 'Facebook parent · ' : ''}{accountHasExpired(member.expiresAt) ? 'Expired' : member.pending ? 'Awaiting password setup' : member.active ? 'Active' : 'Inactive'}</p>
                             <p className="text-sm text-gray-600">{member.expiresAt ? `${member.deleteAfterExpiry ? 'Scheduled deletion' : 'Access deadline'}: ${new Date(member.expiresAt).toLocaleString()}` : 'Permanent account'}</p></div>
                         <div className="flex flex-wrap gap-2">
-                            {member.pending && member.canRevoke && <button className="btn-wireframe" disabled={busy || !ready || !emailConfigured} onClick={() => {
-                                setName(member.name || 'Team member'); setEmail(member.email); setSelected([pageId]); setHasExpiry(false); setExpiryDate(''); requestId.current = null;
-                                setSetupMethod('email'); setPassword(''); setConfirmation('');
-                                setMessage('Use Create account / assign access to resend this invitation. The current expiry will be preserved.');
-                            }}>Resend invitation</button>}
+                            {member.pending && member.canManageExpiry && <button className="btn-wireframe" disabled={busy || !ready} onClick={() => preparePendingAccount(member, 'password')}>Set initial password</button>}
+                            {member.pending && member.canRevoke && emailConfigured && <button className="btn-wireframe" disabled={busy || !ready} onClick={() => preparePendingAccount(member, 'email')}>Resend invitation</button>}
                             {member.canManageExpiry && <button className="btn-wireframe" disabled={busy || !ready} onClick={() => {
                                 setEditing(member); setEditHasExpiry(Boolean(member.expiresAt)); setEditExpiryDate(member.expiresAt ? localDateTime(new Date(member.expiresAt)) : '');
                                 setEditLifetimeMode('date'); setEditLifetimeDays('7'); setEditDeleteAfterExpiry(member.deleteAfterExpiry);
