@@ -63,6 +63,8 @@ The login compatibility fix does not depend on password-subaccount activation. T
 
 ## Verification
 
+`node --env-file=.env.local scripts/verify-page-access.mjs` runs read-only PostgREST checks across every stored Page and account. It exercises the application's member/team/history relationship queries and assigned-Page selectors, verifies all memberships without truncating paginated results, and checks bounded reads of contacts, Page tags, campaigns, history, and manager records. Its output contains counts and error codes rather than emails or access tokens. This checks database queries and assignment integrity; live OAuth, credential login, and outbound delivery still need separate verification.
+
 Run the Node suite with `node node_modules/vitest/vitest.mjs run --maxWorkers=2 --minWorkers=1`, type checking with `node node_modules/typescript/bin/tsc --noEmit`, and a production build with `node node_modules/next/dist/bin/next build`.
 
 `node --env-file=.env.local scripts/verify-page-member-accounts.mjs` exercises the real SQL in a fresh temporary schema, within one transaction that is rolled back. It does not install production cron jobs or modify production user rows. Checks cover original Facebook restoration, parent/subaccount authority, multi-Page overlapping assignments, password protection, retry-safe lifetimes, expiry denial, deletion, shared-data preservation, and anonymous access denial.

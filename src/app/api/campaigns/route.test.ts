@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import type { NextRequest } from 'next/server';
+import { NextRequest } from 'next/server';
 import { parseCampaignMessageParts, parseCampaignMessageSequence } from '../../../lib/campaign-message-sequence';
 
 const mocks = vi.hoisted(() => ({
@@ -19,7 +19,7 @@ vi.mock('@/lib/supabase', () => ({
     getSupabaseAdmin: mocks.getSupabaseAdmin
 }));
 
-import { POST } from './route';
+import { GET, POST } from './route';
 
 function createRequest(body: Record<string, unknown>): NextRequest {
     return new Request('http://localhost:3000/api/campaigns', {
@@ -30,6 +30,72 @@ function createRequest(body: Record<string, unknown>): NextRequest {
         body: JSON.stringify(body)
     }) as NextRequest;
 }
+
+describe('GET /api/campaigns Page isolation', () => {
+    beforeEach(() => {
+        vi.clearAllMocks();
+        mocks.getServerSession.mockResolvedValue({ user: { id: 'user_1' } });
+    });
+
+    function listingDatabase(pageIds = ['page_1', 'page_2'], accessError: unknown = null) {
+        let records = [
+            { id: 'campaign_1', page_id: 'page_1' },
+            { id: 'campaign_2', page_id: 'page_2' },
+            { id: 'campaign_3', page_id: 'unassigned' }
+        ];
+        type ListingQuery = {
+            select(): ListingQuery;
+            in(column: string, ids: string[]): ListingQuery;
+            eq(column: string, id: string): ListingQuery;
+            order(): ListingQuery;
+            range(start: number, end: number): Promise<{ data: typeof records; count: number; error: null }>;
+        };
+        const query: ListingQuery = {
+            select: vi.fn(() => query),
+            in: vi.fn((_column: string, ids: string[]) => { records = records.filter(row => ids.includes(row.page_id)); return query; }),
+            eq: vi.fn((_column: string, id: string) => { records = records.filter(row => row.page_id === id); return query; }),
+            order: vi.fn(() => query),
+            range: vi.fn(async (start: number, end: number) => ({ data: records.slice(start, end + 1), count: records.length, error: null }))
+        };
+        const from = vi.fn((table: string) => {
+            if (table === 'user_pages') return { select: () => ({ eq: async () => ({ data: pageIds.map(page_id => ({ page_id })), error: accessError }) }) };
+            if (table === 'campaigns') return query;
+            throw Error(`Unexpected table: ${table}`);
+        });
+        mocks.getSupabaseAdmin.mockReturnValue({ from });
+        return { from };
+    }
+
+    it.each(['', 'page_1', 'page_2'])('returns only the requested assigned Pages: %s', async pageId => {
+        listingDatabase();
+        const response = await GET(new NextRequest(`http://localhost:3000/api/campaigns?pageId=${pageId}`));
+        expect(response.status).toBe(200);
+        const expected = [{ id: 'campaign_1', page_id: 'page_1' }, { id: 'campaign_2', page_id: 'page_2' }].filter(row => !pageId || row.page_id === pageId);
+        expect(await response.json()).toMatchObject({ items: expected, total: expected.length });
+    });
+
+    it.each([{ pageIds: [] }, { pageIds: ['page_1'] }])('rejects a specific unassigned Page without returning other Pages: %j', async ({ pageIds }) => {
+        const { from } = listingDatabase(pageIds);
+        const response = await GET(new NextRequest('http://localhost:3000/api/campaigns?pageId=unassigned'));
+        expect(response.status).toBe(403);
+        expect(from).not.toHaveBeenCalledWith('campaigns');
+    });
+
+    it('reports an assignment lookup failure instead of showing an empty campaign list', async () => {
+        const { from } = listingDatabase([], { code: '08000', message: 'Database unavailable' });
+        const response = await GET(new NextRequest('http://localhost:3000/api/campaigns'));
+        expect(response.status).toBe(500);
+        expect(from).not.toHaveBeenCalledWith('campaigns');
+    });
+
+    it('returns an empty list for an account with no Pages when no specific Page was requested', async () => {
+        const { from } = listingDatabase([]);
+        const response = await GET(new NextRequest('http://localhost:3000/api/campaigns'));
+        expect(response.status).toBe(200);
+        expect(await response.json()).toMatchObject({ items: [], total: 0 });
+        expect(from).not.toHaveBeenCalledWith('campaigns');
+    });
+});
 
 function createSupabaseMock(options: {
     contactBestTimes?: Record<string, number | null>;

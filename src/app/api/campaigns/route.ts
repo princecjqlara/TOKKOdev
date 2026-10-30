@@ -66,12 +66,20 @@ export async function GET(request: NextRequest) {
         const supabase = getSupabaseAdmin();
 
         // Get user's accessible pages
-        const { data: userPages } = await supabase
+        const { data: userPages, error: accessError } = await supabase
             .from('user_pages')
             .select('page_id')
             .eq('user_id', session.user.id);
 
+        if (accessError) throw accessError;
         const accessiblePageIds = userPages?.map(up => up.page_id) || [];
+
+        if (pageId && !accessiblePageIds.includes(pageId)) {
+            return NextResponse.json(
+                { error: 'Forbidden', message: 'You do not have access to this page' },
+                { status: 403 }
+            );
+        }
 
         if (accessiblePageIds.length === 0) {
             return NextResponse.json({
@@ -88,7 +96,7 @@ export async function GET(request: NextRequest) {
             .in('page_id', accessiblePageIds)
             .order('created_at', { ascending: false });
 
-        if (pageId && accessiblePageIds.includes(pageId)) {
+        if (pageId) {
             query = query.eq('page_id', pageId);
         }
 
