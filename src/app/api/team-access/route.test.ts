@@ -30,6 +30,30 @@ beforeEach(() => {
 });
 afterEach(() => { vi.unstubAllEnvs(); });
 describe('manager-only account and Page assignment endpoints', () => {
+    it.each([true, false])('lists the assigned members through the membership relationship when provisioning readiness is %s', async ready => {
+        mocks.ready.mockResolvedValue(ready);
+        const expiresAt = '2026-12-01T00:00:00Z';
+        const rows = [
+            { user_id: 'manager', grant_source: 'original', users: { id: 'manager', name: 'Parent', email: 'parent@example.com', is_active: true, account_kind: 'facebook', created_by: null, facebook_id: 'verified-fb', expires_at: null, delete_after_expiry: false } },
+            { user_id: account, grant_source: 'delegated', users: [{ id: account, name: 'Member', email: 'member@example.com', is_active: true, account_kind: 'email', created_by: 'manager', facebook_id: null, expires_at: expiresAt, delete_after_expiry: true }] }
+        ];
+        const from = vi.fn((table: string) => ({
+            select: vi.fn((columns: string) => ({ eq: vi.fn().mockResolvedValue(
+                table === 'tokko_page_managers' ? { data: [{ user_id: 'manager' }], error: null } :
+                columns.includes('users:users!user_pages_user_id_fkey(') ? { data: rows, error: null } :
+                { data: null, error: { code: 'PGRST201', message: 'Multiple user relationships' } }
+            ) }))
+        }));
+        mocks.db.mockReturnValue({ from });
+        const response = await GET(new NextRequest(`https://tokko.example/api/team-access?pageId=${page}`));
+        expect(response.status).toBe(200);
+        expect(mocks.manager).toHaveBeenCalledWith(expect.anything(), [page]);
+        expect(response.headers.get('Cache-Control')).toBe('no-store');
+        expect(await response.json()).toEqual({ ready, members: [
+            { id: 'manager', name: 'Parent', email: 'parent@example.com', pending: false, active: true, parent: true, expiresAt: null, deleteAfterExpiry: false, canManageExpiry: false, canRevoke: false },
+            { id: account, name: 'Member', email: 'member@example.com', pending: false, active: true, parent: false, expiresAt, deleteAfterExpiry: true, canManageExpiry: true, canRevoke: true }
+        ] });
+    });
     it('supports multiple Pages, duplicate Page selections, and temporary deletion without a changing retry fingerprint', async () => {
         const secondPage='44444444-4444-4444-8444-444444444444';
         const rpc=vi.fn().mockResolvedValue({data:{passwordCreated:true,pending:false},error:null}); mocks.db.mockReturnValue({rpc});

@@ -51,7 +51,10 @@ function createSupabaseMock() {
         ],
         error: null
     });
-    const membersSelect = vi.fn().mockReturnValue({ eq: membersEqPage });
+    const membersSelect = vi.fn((columns: string) => ({
+        eq: columns.includes('users:users!user_pages_user_id_fkey(') ? membersEqPage :
+            vi.fn().mockResolvedValue({ data: null, error: { code: 'PGRST201', message: 'Multiple user relationships' } })
+    }));
 
     const from = vi.fn((table: string) => {
         if (table === 'user_pages') {

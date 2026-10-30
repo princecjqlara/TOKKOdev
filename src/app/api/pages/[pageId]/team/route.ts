@@ -43,7 +43,7 @@ export async function GET(
 
         const { data: members, error } = await supabase
             .from('user_pages')
-            .select('user_id, users(id, name, email)')
+            .select('user_id, users:users!user_pages_user_id_fkey(id, name, email)')
             .eq('page_id', pageId);
 
         if (error) throw error;

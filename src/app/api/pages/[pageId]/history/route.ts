@@ -161,7 +161,7 @@ export async function GET(
         const [campaignResult, auditResult, teamResult] = await Promise.all([
             includeCampaigns ? campaignQuery : Promise.resolve({ data: [], error: null, count: 0 }),
             includeAudits ? auditQuery : Promise.resolve({ data: [], error: null, count: 0 }),
-            supabase.from('user_pages').select('user_id, users(id, name, email, image)').eq('page_id', pageId)
+            supabase.from('user_pages').select('user_id, users:users!user_pages_user_id_fkey(id, name, email, image)').eq('page_id', pageId)
         ]);
 
         if (campaignResult.error) throw campaignResult.error;

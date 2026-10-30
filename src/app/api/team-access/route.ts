@@ -22,7 +22,7 @@ export async function GET(request: NextRequest) {
         if (pageId) {
             if (!validUuid(pageId)) throw new AccessError(400, 'Choose a valid Page.');
             await requireTeamPageAdministrator(session, [pageId]);
-            const { data, error } = await db.from('user_pages').select('user_id,grant_source,users(id,name,email,is_active,account_kind,created_by,facebook_id,expires_at,delete_after_expiry)').eq('page_id', pageId);
+            const { data, error } = await db.from('user_pages').select('user_id,grant_source,users:users!user_pages_user_id_fkey(id,name,email,is_active,account_kind,created_by,facebook_id,expires_at,delete_after_expiry)').eq('page_id', pageId);
             if (error) throw error;
             const { data: managers, error: managerError } = await db.from('tokko_page_managers').select('user_id').eq('page_id', pageId);
             if (managerError) throw managerError;
