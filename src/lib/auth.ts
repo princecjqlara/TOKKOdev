@@ -5,6 +5,7 @@ import { getSupabaseAdmin } from './supabase';
 import { FACEBOOK_PERMISSION_SCOPE } from './facebook-permissions';
 import { authenticateEmail, getActiveAccount } from './account-auth';
 import { getServerAuthToken } from './server-auth-token';
+import { needsSubaccountProfile } from './subaccount-profile';
 
 export const authOptions: NextAuthOptions = {
     providers: [
@@ -58,15 +59,17 @@ export const authOptions: NextAuthOptions = {
             const provider = token.provider || (token.facebookId ? 'facebook' : 'credentials');
             let active; let authenticationError: Session['authenticationError'] = token.authenticationError;
             try {
-                active = token.id && await getActiveAccount(token.id, Number(token.sessionVersion || 0), provider);
+                active = token.id ? await getActiveAccount(token.id, Number(token.sessionVersion || 0), provider) : null;
                 if (token.id && !active) authenticationError = 'account_unavailable';
             } catch { authenticationError = 'service_unavailable'; }
-            return { ...session, user: { ...session.user, id: active ? token.id : undefined,
+            const requiresProfileCompletion = Boolean(active && needsSubaccountProfile(active));
+            return { ...session, user: { ...session.user, id: active && !requiresProfileCompletion ? token.id : undefined,
+                name: active?.name ?? session.user?.name,
                 facebookId: active && provider === 'facebook' ? token.facebookId : undefined,
                 provider: active ? provider : undefined }, accountActive: Boolean(active),
                 accountType: active ? !active.created_by && (active.account_kind === 'facebook' || provider === 'facebook' && active.account_kind === 'legacy') ? 'parent' : 'subaccount' : undefined,
                 signInProvider: provider, authenticationError,
-                requiresFacebookVerification: false };
+                requiresFacebookVerification: false, requiresProfileCompletion };
         }
     },
     pages: { signIn: '/login', error: '/facebook-signin' },
@@ -79,6 +82,7 @@ declare module 'next-auth' {
     interface User { sessionVersion?: number; }
     interface Session {
         accountActive?: boolean;
+        requiresProfileCompletion?: boolean;
         requiresFacebookVerification?: boolean;
         signInProvider?: string;
         authenticationError?: 'service_unavailable' | 'account_unavailable' | 'subaccount_credentials_required';

@@ -11,6 +11,14 @@ function database(record: unknown = user, ready = true) {
 }
 beforeEach(() => { vi.clearAllMocks(); mocks.compare.mockResolvedValue(true); });
 describe('email account identity and live session validation', () => {
+    it('preserves legacy account access while the additive profile migration is being installed', async () => {
+        const select = vi.fn((columns: string) => ({ eq: () => ({ maybeSingle: async () => columns.includes('profile_required')
+            ? { data: null, error: { code: '42703', message: 'column users.profile_required does not exist' } }
+            : { data: user, error: null } }) }));
+        mocks.db.mockReturnValue({ from: () => ({ select }) });
+        expect(await getActiveAccount('member', 2, 'facebook')).toBeTruthy();
+        expect(select).toHaveBeenCalledTimes(2);
+    });
     it('authenticates an activated member without Facebook credentials or password data in its return value', async () => {
         const db = database(); mocks.db.mockReturnValue(db);
         const result = await authenticateEmail({ email: ' Member@Example.com ', password: 'entered-password' }, 'test-ip');

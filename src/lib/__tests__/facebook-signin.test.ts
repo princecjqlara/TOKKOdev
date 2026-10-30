@@ -3,6 +3,11 @@ import type { Session } from 'next-auth';
 import { facebookReturnPath, facebookSignInCallback, facebookSignInDestination, facebookSignInMessage, loginDestination } from '../facebook-signin';
 
 describe('Facebook sign-in completion routing', () => {
+    it('routes an incomplete subaccount to its profile before opening the workspace', () => {
+        const session = { user: { provider: 'credentials' }, accountActive: true, requiresProfileCompletion: true } as Session;
+        expect(loginDestination(session, 'email')).toBe('/complete-profile');
+        expect(facebookSignInDestination(session, '/dashboard/team')).toBe('/complete-profile');
+    });
     it('does not loop back into Facebook when someone explicitly chooses team email sign-in',()=>{
         const oldFacebookSession={user:{},signInProvider:'facebook',requiresFacebookVerification:false} as Session;
         expect(loginDestination(oldFacebookSession,null)).toBe('/facebook-signin?next=%2Fdashboard');

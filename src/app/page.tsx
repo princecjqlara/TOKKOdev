@@ -10,7 +10,9 @@ export default function HomePage() {
   const router = useRouter();
 
   useEffect(() => {
-    if (status === 'authenticated' && session?.user?.id) {
+    if (status === 'authenticated' && session?.requiresProfileCompletion) {
+      router.replace('/complete-profile');
+    } else if (status === 'authenticated' && session?.user?.id) {
       router.push('/dashboard');
     }
   }, [status, session, router]);

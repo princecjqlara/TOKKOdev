@@ -14,11 +14,13 @@ export function facebookSignInCallback(next: unknown = '/dashboard'): string {
 }
 
 export function facebookSignInDestination(session: Session | null, next: unknown): string | null {
+    if (session?.requiresProfileCompletion) return '/complete-profile';
     if (session?.user?.id && (session.user.provider === 'facebook' || session.signInProvider === 'facebook')) return facebookReturnPath(next);
     return null;
 }
 
 export function loginDestination(session: Session | null, method: unknown): string | null {
+    if (session?.requiresProfileCompletion) return '/complete-profile';
     if (session?.user?.id) return '/dashboard';
     if (method === 'email') return null;
     return session?.signInProvider === 'facebook' ? facebookSignInCallback() : null;

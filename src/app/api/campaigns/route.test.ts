@@ -36,6 +36,12 @@ describe('GET /api/campaigns Page isolation', () => {
         vi.clearAllMocks();
         mocks.getServerSession.mockResolvedValue({ user: { id: 'user_1' } });
     });
+    it('denies workspace requests from an authenticated subaccount with an incomplete first-login profile', async () => {
+        mocks.getServerSession.mockResolvedValue({ user: { provider: 'credentials' }, accountActive: true, requiresProfileCompletion: true });
+        const response = await GET(new NextRequest('http://localhost:3000/api/campaigns'));
+        expect(response.status).toBe(401);
+        expect(mocks.getSupabaseAdmin).not.toHaveBeenCalled();
+    });
 
     function listingDatabase(pageIds = ['page_1', 'page_2'], accessError: unknown = null) {
         let records = [

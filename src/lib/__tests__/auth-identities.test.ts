@@ -8,6 +8,21 @@ const callback = () => ({ token: {}, user: { id: 'facebook-subject', email: 'exi
     account: { provider: 'facebook', providerAccountId: 'facebook-subject', access_token: 'secret-facebook-token' } });
 beforeEach(() => { vi.clearAllMocks(); mocks.previous.mockResolvedValue(null); mocks.active.mockResolvedValue({ id: 'stable-user', created_by: null, account_kind: 'facebook' }); });
 describe('provider identity binding and session redaction', () => {
+    it('withholds workspace identity until a new subaccount finishes its first-login details', async () => {
+        const input = { session: { user: { name: 'Invited Name' } }, token: { id: 'member', provider: 'credentials', sessionVersion: 1 } };
+        mocks.active.mockResolvedValue({ id: 'member', name: 'Member Name', phone_number: '+639123456789', created_by: 'parent', account_kind: 'email', profile_required: true, profile_completed_at: null });
+        const first = await authOptions.callbacks!.session!(input as any);
+        expect(first).toMatchObject({ accountActive: true, requiresProfileCompletion: true, accountType: 'subaccount', user: { id: undefined, name: 'Member Name' } });
+        expect(JSON.stringify(first)).not.toMatch(/phone_number|639123456789/);
+        mocks.active.mockResolvedValue({ id: 'member', name: 'Confirmed Name', created_by: 'parent', account_kind: 'email', profile_required: true, profile_completed_at: '2026-10-31T00:00:00Z' });
+        const next = await authOptions.callbacks!.session!(input as any);
+        expect(next).toMatchObject({ requiresProfileCompletion: false, user: { id: 'member', name: 'Confirmed Name' } });
+    });
+    it('never requires first-login details for an original Facebook parent', async () => {
+        mocks.active.mockResolvedValue({ id: 'parent', account_kind: 'facebook', created_by: null, profile_required: true });
+        const session = await authOptions.callbacks!.session!({ session: { user: {} }, token: { id: 'parent', provider: 'facebook' } } as any);
+        expect(session).toMatchObject({ requiresProfileCompletion: false, user: { id: 'parent' } });
+    });
     it('keeps the verified database ID rather than treating provider IDs as account IDs', async () => {
         mocks.rpc.mockResolvedValue({ data: [{ user_id: 'stable-user', version: 3 }], error: null });
         const token = await authOptions.callbacks!.jwt!(callback() as any);

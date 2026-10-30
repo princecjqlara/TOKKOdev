@@ -1,6 +1,6 @@
 'use client';
 import { useEffect, useState } from 'react';
-import { signIn, useSession } from 'next-auth/react';
+import { getSession, signIn, useSession } from 'next-auth/react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { FACEBOOK_PERMISSION_SCOPE } from '@/lib/facebook-permissions';
@@ -30,7 +30,11 @@ export default function LoginPage() {
         try {
             const result = await signIn('credentials', { email, password, redirect: false });
             if (result?.error || !result?.ok) setError('Unable to sign in. Check your email and password, activate your account, or try again later.');
-            else router.replace('/dashboard');
+            else {
+                const current = await getSession();
+                if (!current?.accountActive) setError('Your sign-in could not be confirmed. Please retry.');
+                else router.replace(loginDestination(current, 'email') || '/dashboard');
+            }
         } catch { setError('Sign-in is temporarily unavailable. Please retry.'); }
         finally { setBusy(false); }
     }

@@ -301,6 +301,36 @@ try {
     assert.equal(await scalar("SELECT u.account_kind value FROM contact_bot_permission_events e JOIN users u ON u.id=e.actor_id WHERE e.id=$1",[eventId]),'system'); checks++;
     assert.deepEqual(await scalar(`SELECT ${schema}.tokko_delete_expired_subaccounts(100) value`),{deleted:0,failed:0}); checks++;
 
+    // New subaccounts complete name/phone once; existing active accounts and
+    // original Facebook parents retain their normal login behavior.
+    await db.query(migration('database/migration_subaccount_first_login_profile.sql'));
+    assert.equal(await scalar('SELECT profile_required value FROM users WHERE id=$1',[oldOriginal]),false); checks++;
+    assert.equal(await scalar('SELECT profile_required value FROM users WHERE id=$1',[setup.result.userId]),false); checks++;
+    assert.equal(await scalar("SELECT count(*)::int value FROM users WHERE account_kind='invited' AND NOT is_active AND NOT profile_required"),0); checks++;
+    const profileRequest=randomUUID(), profileEmail=`profile-${randomUUID()}@example.test`;
+    const profileMember=await scalar(`SELECT ${schema}.tokko_save_subaccount($1,ARRAY[$2]::uuid[],$3,'Initial member name',$4,'profile-request','password',$5,'','scrypt-v1$profile-test',FALSE,NULL,NULL,NULL) value`,[oldOriginal,pageA,profileEmail,profileRequest,randomUUID()]);
+    assert.equal(await scalar('SELECT profile_required AND profile_completed_at IS NULL value FROM users WHERE id=$1',[profileMember.userId]),true); checks++;
+    const profileVersion=await scalar('SELECT session_version value FROM users WHERE id=$1',[profileMember.userId]);
+    await denied(`SELECT ${schema}.tokko_complete_subaccount_profile($1,$2,'Member','bad-phone')`,[profileMember.userId,profileVersion],'22023');
+    assert.equal(await scalar(`SELECT ${schema}.tokko_complete_subaccount_profile($1,$2,'Confirmed member','+639123456789') value`,[profileMember.userId,profileVersion+1]),false); checks++;
+    await db.query("UPDATE users SET expires_at=now()-interval '1 day' WHERE id=$1",[profileMember.userId]);
+    assert.equal(await scalar(`SELECT ${schema}.tokko_complete_subaccount_profile($1,$2,'Confirmed member','+639123456789') value`,[profileMember.userId,profileVersion]),false); checks++;
+    await db.query('UPDATE users SET expires_at=NULL WHERE id=$1',[profileMember.userId]);
+    assert.equal(await scalar(`SELECT ${schema}.tokko_complete_subaccount_profile($1,$2,'Confirmed member','+639123456789') value`,[profileMember.userId,profileVersion]),true); checks++;
+    assert.equal(await scalar('SELECT name value FROM users WHERE id=$1',[profileMember.userId]),'Confirmed member'); checks++;
+    assert.equal(await scalar('SELECT phone_number value FROM users WHERE id=$1',[profileMember.userId]),'+639123456789'); checks++;
+    assert.equal(await scalar('SELECT profile_completed_at IS NOT NULL value FROM users WHERE id=$1',[profileMember.userId]),true); checks++;
+    assert.equal(await scalar(`SELECT ${schema}.tokko_complete_subaccount_profile($1,$2,'Retry name','+12125551234') value`,[profileMember.userId,profileVersion]),true); checks++;
+    assert.equal(await scalar('SELECT name value FROM users WHERE id=$1',[profileMember.userId]),'Confirmed member'); checks++;
+    assert.equal(await scalar(`SELECT ${schema}.tokko_complete_subaccount_profile($1,0,'Parent','+639123456789') value`,[oldOriginal]),false); checks++;
+    const futureParent=randomUUID();
+    await db.query("INSERT INTO users(id,name,account_kind,facebook_id) VALUES($1,'New parent','facebook',$2)",[futureParent,`fb-${futureParent}`]);
+    assert.equal(await scalar('SELECT profile_required value FROM users WHERE id=$1',[futureParent]),false); checks++;
+    const pendingProfile=await provision(oldOriginal,[pageA],`profile-invited-${randomUUID()}@example.test`);
+    assert.equal(await scalar('SELECT profile_required value FROM users WHERE id=$1',[pendingProfile.result.userId]),true); checks++;
+    assert.equal(await scalar(`SELECT ${schema}.tokko_set_account_password($1,'scrypt-v1$profile-invite') value`,[pendingProfile.hash]),true); checks++;
+    assert.equal(await scalar('SELECT profile_required AND profile_completed_at IS NULL value FROM users WHERE id=$1',[pendingProfile.result.userId]),true); checks++;
+
     await db.query(`GRANT USAGE ON SCHEMA ${schema} TO anon,authenticated`);
     await db.query('SET LOCAL ROLE anon');
     await denied(`SELECT * FROM ${schema}.users`);
@@ -311,6 +341,7 @@ try {
     await denied(`SELECT ${schema}.tokko_set_own_password('${manager}','fb-manager',2,NULL,'scrypt-v1$forged')`);
     await denied(`SELECT ${schema}.tokko_provision_member_with_password('${manager}',ARRAY['${pageA}']::uuid[],'forged-password@example.test','Forged','${randomUUID()}','forged','hash','scrypt-v1$forged',FALSE,NULL)`);
     await denied(`SELECT ${schema}.tokko_delete_expired_subaccounts(100)`);
+    await denied(`SELECT ${schema}.tokko_complete_subaccount_profile('${profileMember.userId}',${profileVersion},'Forged','+639123456789')`);
     await db.query('RESET ROLE');
     await db.query('SET LOCAL ROLE authenticated');
     await denied(`INSERT INTO ${schema}.user_pages(user_id,page_id) VALUES('${member}','${foreign}')`);

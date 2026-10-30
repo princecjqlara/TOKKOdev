@@ -13,6 +13,16 @@ Page assignments are many-to-many: one subaccount may have multiple Pages, and s
 5. The member uses contacts, Page tags, bulk tagging, campaigns, templates, messages, exports, history, welcome messages, and follow-ups for its assigned Pages. Personal tags keep their existing privacy rules. Ads Guard still requires separate Facebook advertising credentials.
 6. Members can change an existing password in Settings by entering their current password, or use email recovery when a sender is configured. Saving a password invalidates existing sessions and setup/reset links. Parent users keep their original Facebook sign-in.
 
+## First sign-in for new subaccounts
+
+New team subaccounts confirm their name and phone number at `/complete-profile` after signing in and before entering the workspace. The parent-supplied name is prefilled. Phone numbers are stored with a country code; Philippine mobile numbers beginning with `09` are normalized to `+63`. This is format validation, not SMS verification. The number is available only through the member's own authenticated profile endpoint and is not included in public session data or Page member lists.
+
+This step is required once. An incomplete account has a valid authenticated session for onboarding but receives no operational user ID, so Page APIs deny requests until completion. Saving uses the signed-in user's ID and current session version, rechecks account activity/expiry, and cannot change permissions or another user's details. Completion refreshes the session by returning to the workspace. Retries preserve the first saved details.
+
+Original Facebook parent accounts never receive this prompt. Existing active accounts keep their current access; existing pending invitations and newly created subaccounts complete it on their first sign-in. Apply `database/migration_subaccount_first_login_profile.sql` after the existing account migrations and before deploying the updated app. It adds only profile fields, a new-subaccount trigger, and a service-only save function; it preserves Page grants, passwords, sessions, and the account activation flag.
+
+The profile migration was applied to the configured database on 2026-10-31. The apply check preserved all 45 users and 158 Page assignments present at that time, verified new-parent exclusion and new-subaccount completion with rolled-back fixtures, and confirmed that team-account readiness remains true. The first-login screen and workspace gate take effect when the updated application is deployed.
+
 Account creation, Page grants, optional lifetime, audit records, and any invitation delivery are transactional. Repeated submissions use an idempotency key. Password fingerprints use the server secret, rather than a stored plain password or an unkeyed password verifier. Stored passwords are never returned to the browser.
 
 Only the creator of a subaccount controls its account-wide lifetime. Another parent can assign one of their Pages to an existing account without taking over that account's credentials or deletion schedule. **Revoke this Page** removes that delegated Page membership while preserving other assignments.
@@ -50,6 +60,7 @@ Apply migrations in this order, in transactions:
 5. `database/migration_original_facebook_access.sql` (the current authoritative Facebook resolver and parent identity guard).
 6. `database/migration_parent_subaccounts.sql`.
 7. `database/migration_subaccount_cleanup_schedule.sql`.
+8. `database/migration_subaccount_first_login_profile.sql`.
 
 The scheduler migration installs `tokko-expired-subaccounts` in `pg_cron` when that extension is available. Otherwise configure an authenticated `GET /api/cron/subaccounts` every minute with `Authorization: Bearer <CRON_SECRET>`. This worker is independent of account email delivery. Inspect its `deleted` and `failed` counts and private access-audit records if cleanup fails.
 

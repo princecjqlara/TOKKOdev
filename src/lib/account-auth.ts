@@ -33,16 +33,18 @@ export async function authenticateEmail(credentials: Record<string, unknown> | u
 
 export async function getActiveAccount(id: string, version: number, provider: string) {
     const db = getSupabaseAdmin();
-    let { data, error } = await db.from('users')
-        .select('id,is_active,session_version,email_login_enabled,email_verified_at,expires_at,created_by,account_kind')
-        .eq('id', id).maybeSingle();
-    // The optional expiry migration may follow a Facebook-only deployment.
-    // Retry only this specific missing column; all other DB failures deny access.
-    if (error?.code === '42703' && /column (?:users\.)?expires_at does not exist/.test(error.message || '')) {
-        const legacy = await db.from('users').select('id,is_active,session_version,email_login_enabled,email_verified_at,created_by,account_kind')
-            .eq('id', id).maybeSingle();
-        data = legacy.data ? { ...legacy.data, expires_at: null } : null;
-        error = legacy.error;
+    const profileColumns = ['phone_number', 'profile_required', 'profile_completed_at'];
+    let columns = ['id', 'name', 'is_active', 'session_version', 'email_login_enabled', 'email_verified_at', 'expires_at', 'created_by', 'account_kind', ...profileColumns];
+    let data: Record<string, any> | null = null;
+    let error: { code?: string; message?: string } | null = null;
+    // Additive migrations can follow an older Facebook-only deployment. Retry
+    // only known optional columns; other failures continue to deny access.
+    for (let attempt = 0; attempt < 3; attempt++) {
+        const result = await db.from('users').select(columns.join(',')).eq('id', id).maybeSingle();
+        data = result.data; error = result.error;
+        const missing = error?.code === '42703' ? /column (?:users\.)?(expires_at|phone_number|profile_required|profile_completed_at) does not exist/.exec(error.message || '')?.[1] : null;
+        if (!missing) break;
+        columns = columns.filter(column => missing === 'expires_at' ? column !== missing : !profileColumns.includes(column));
     }
     if (error) throw new AccessError(503, 'Sign-in is temporarily unavailable.');
     if (!data?.is_active || Number(data.session_version) !== version || accountHasExpired(data.expires_at)) return null;

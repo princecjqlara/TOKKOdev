@@ -43,6 +43,7 @@ export default function DashboardLayout({
     useEffect(() => {
         // Only redirect if we're sure the user is unauthenticated (not loading)
         if (status === 'unauthenticated') router.replace('/login');
+        else if (status === 'authenticated' && session?.requiresProfileCompletion) router.replace('/complete-profile');
         else if (status === 'authenticated' && !session?.user?.id) {
             router.replace(session?.signInProvider === 'facebook' || session?.requiresFacebookVerification ? facebookSignInCallback(pathname) : '/login');
         }
