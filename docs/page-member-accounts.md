@@ -49,6 +49,8 @@ Successful OAuth returns through `/facebook-signin` to the requested workspace s
 
 Authentication database requests have an eight-second deadline and cancel stalled HTTP requests. The completion screen uses a full navigation once the session is verified. If session loading or navigation takes fifteen seconds, it offers an account-check retry or a direct workspace link for an already verified session. OAuth errors show recovery controls immediately; a stalled Facebook retry also stops disabling the button after fifteen seconds. These changes require deploying the app, with no new database migration or connection changes. A database outage still denies access and must be resolved separately.
 
+If Facebook callbacks and webhook Page lookups fail together, check the deployed Supabase project first. OAuth account resolution and webhook Page lookup failures log the configured database hostname, HTTP status, safe error code and a fallback explanation, including for gateway errors without a `message`. Raw errors, gateway bodies, credentials and OAuth metadata are omitted. Webhook Page lookups also have an eight-second deadline. Failed lookups, missing Page records and contact-write failures return a non-success response so Facebook can retry; do not acknowledge an event that was not processed or reconnect Pages to a different database to mask an outage.
+
 ## Deployment and activation
 
 Use the existing canonical live application URL, `https://tokkobeta.vercel.app`. The live Vercel project is `tokkobeta` in `sircjdigiworks-4427s-projects`. The locally linked `tokkodev` project in `bigclicklara-2607s-projects` is a different project; do not deploy there or change the Facebook callback URL to bypass missing live-team access.

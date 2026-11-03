@@ -36,6 +36,7 @@ vi.mock('@/lib/workflow-automations', () => ({
 }));
 
 import { POST } from './route';
+import { DATABASE_REQUEST_TIMEOUT_MS } from '@/lib/database-request';
 
 function createWebhookRequest(payload?: Record<string, unknown>): NextRequest {
     const defaultPayload = {
@@ -159,6 +160,7 @@ function createSupabaseMock(options?: {
 
     return {
         from,
+        pageSingle,
         contactsUpsert
     };
 }
@@ -402,6 +404,48 @@ describe('POST /api/facebook/webhook', () => {
 
     afterEach(() => {
         vi.unstubAllGlobals();
+        vi.restoreAllMocks();
+        vi.useRealTimers();
+    });
+
+    it('reports the HTTP status for gateway errors without a message and requests a retry', async () => {
+        const supabase = createSupabaseMock();
+        supabase.pageSingle.mockResolvedValueOnce({ data: null, error: { error: 'upstream unavailable' }, status: 521 });
+        mocks.getSupabaseAdmin.mockReturnValue(supabase);
+        const logged = vi.spyOn(console, 'error').mockImplementation(() => {});
+        const response = await POST(createWebhookRequest());
+        expect(response.status).toBe(500);
+        expect(logged).toHaveBeenCalledWith(expect.stringContaining('Failed to fetch page by fb_page_id'), expect.objectContaining({
+            pageId: 'fb_page_1', status: 521, error: 'Database service is unavailable (HTTP 521).'
+        }));
+        expect(supabase.contactsUpsert).not.toHaveBeenCalled();
+        expect(mocks.sendMessage).not.toHaveBeenCalled();
+    });
+
+    it('bounds a stalled Page lookup and keeps the delivery eligible for Facebook retry', async () => {
+        vi.useFakeTimers();
+        const supabase = createSupabaseMock();
+        supabase.pageSingle.mockImplementationOnce(() => new Promise(() => {}));
+        mocks.getSupabaseAdmin.mockReturnValue(supabase);
+        const logged = vi.spyOn(console, 'error').mockImplementation(() => {});
+        const pending = POST(createWebhookRequest());
+        await vi.advanceTimersByTimeAsync(0);
+        await vi.advanceTimersByTimeAsync(DATABASE_REQUEST_TIMEOUT_MS);
+        const response = await pending;
+        expect(response.status).toBe(500);
+        expect(logged).toHaveBeenCalledWith(expect.stringContaining('Failed to fetch page by fb_page_id'), expect.objectContaining({
+            code: 'DATABASE_TIMEOUT', error: 'Database request timed out.'
+        }));
+        expect(supabase.contactsUpsert).not.toHaveBeenCalled();
+    });
+
+    it('does not acknowledge a delivery whose Page record is absent', async () => {
+        const supabase = createSupabaseMock();
+        supabase.pageSingle.mockResolvedValueOnce({ data: null, error: null });
+        mocks.getSupabaseAdmin.mockReturnValue(supabase);
+        const response = await POST(createWebhookRequest());
+        expect(response.status).toBe(500);
+        expect(supabase.contactsUpsert).not.toHaveBeenCalled();
     });
 
     it('creates new contacts and enriches profile from Facebook on first inbound message', async () => {

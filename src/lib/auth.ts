@@ -7,6 +7,7 @@ import { authenticateEmail, getActiveAccount } from './account-auth';
 import { getServerAuthToken } from './server-auth-token';
 import { needsSubaccountProfile } from './subaccount-profile';
 import { accountRequest } from './account-request';
+import { databaseErrorDetails } from './database-request';
 
 export const authOptions: NextAuthOptions = {
     providers: [
@@ -36,10 +37,13 @@ export const authOptions: NextAuthOptions = {
                     // Reuse an existing signed binding for this same Facebook subject.
                     const previous = await getServerAuthToken();
                     const legacyId = previous?.facebookId === account.providerAccountId ? previous.id : null;
-                    const { data, error } = await accountRequest(getSupabaseAdmin().rpc('tokko_resolve_facebook_user', {
+                    const { data, error, status } = await accountRequest(getSupabaseAdmin().rpc('tokko_resolve_facebook_user', {
                         p_subject: account.providerAccountId, p_email: user.email || null,
                         p_name: user.name || null, p_image: user.image || null, p_legacy_id: legacyId || null
-                    }));
+                    })).catch(error => {
+                        console.error('[FACEBOOK_SIGNIN] Account lookup failed', databaseErrorDetails(error));
+                        throw error;
+                    });
                     if (error?.code === '28000' && ['Subaccounts use email and password', 'Account inactive or expired'].includes(error.message)) {
                         delete token.id; delete token.sessionVersion; delete token.pendingFacebookLinkAt;
                         token.provider = 'facebook'; token.facebookId = account.providerAccountId;
@@ -47,7 +51,10 @@ export const authOptions: NextAuthOptions = {
                         return token;
                     }
                     const row = error ? null : Array.isArray(data) ? data[0] : data;
-                    if (!row?.user_id) throw new Error('Facebook sign-in is temporarily unavailable.');
+                    if (!row?.user_id) {
+                        console.error('[FACEBOOK_SIGNIN] Account lookup failed', databaseErrorDetails(error, status));
+                        throw new Error('Facebook sign-in is temporarily unavailable.');
+                    }
                     token.id = row.user_id; token.sessionVersion = Number(row.version); token.provider = 'facebook';
                     token.facebookId = account.providerAccountId; token.accessToken = account.access_token;
                     delete token.pendingFacebookLinkAt;
@@ -62,7 +69,10 @@ export const authOptions: NextAuthOptions = {
             try {
                 active = token.id ? await getActiveAccount(token.id, Number(token.sessionVersion || 0), provider) : null;
                 if (token.id && !active) authenticationError = 'account_unavailable';
-            } catch { authenticationError = 'service_unavailable'; }
+            } catch (error) {
+                authenticationError = 'service_unavailable';
+                console.error('[AUTH_SESSION] Account check failed', databaseErrorDetails(error));
+            }
             const requiresProfileCompletion = Boolean(active && needsSubaccountProfile(active));
             return { ...session, user: { ...session.user, id: active && !requiresProfileCompletion ? token.id : undefined,
                 name: active?.name ?? session.user?.name,

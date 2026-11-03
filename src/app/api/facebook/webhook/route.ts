@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getSupabaseAdmin } from '@/lib/supabase';
+import { databaseErrorDetails, databaseRequest } from '@/lib/database-request';
 import { verifyWebhookSignature, sendMessage, getConversationForPsid, getUserProfile } from '@/lib/facebook';
 import { isExpectedFacebookProfileLookupError } from '@/lib/facebook-errors';
 import { getPhilippinesDayOfWeek, getPhilippinesHour } from '@/lib/philippines-time';
@@ -173,16 +174,26 @@ export async function POST(request: NextRequest) {
                 }
 
                 // Get our page record
-                const { data: page, error: pageError } = await supabase
-                    .from('pages')
-                    .select('id, access_token')
-                    .eq('fb_page_id', pageId)
-                    .single();
+                const pageLookupStartedAt = Date.now();
+                let lookup;
+                try {
+                    lookup = await databaseRequest(supabase
+                        .from('pages')
+                        .select('id, access_token')
+                        .eq('fb_page_id', pageId)
+                        .single());
+                } catch (error) {
+                    logError('Failed to fetch page by fb_page_id', {
+                        pageId, ...databaseErrorDetails(error), durationMs: Date.now() - pageLookupStartedAt
+                    });
+                    hadCriticalFailure = true;
+                    continue;
+                }
+                const { data: page, error: pageError, status: pageStatus } = lookup;
 
                 if (pageError) {
                     logError('Failed to fetch page by fb_page_id', {
-                        pageId,
-                        error: pageError.message
+                        pageId, ...databaseErrorDetails(pageError, pageStatus), durationMs: Date.now() - pageLookupStartedAt
                     });
                     hadCriticalFailure = true;
                     continue;
@@ -190,6 +201,7 @@ export async function POST(request: NextRequest) {
 
                 if (!page) {
                     logWarn('No internal page record found for webhook entry', { pageId });
+                    hadCriticalFailure = true;
                     continue;
                 }
 
@@ -762,7 +774,7 @@ export async function POST(request: NextRequest) {
             return NextResponse.json(
                 {
                     error: 'Webhook processing partially failed',
-                    message: 'One or more contact upserts failed. Returning 500 so Facebook can retry delivery.'
+                    message: 'One or more database or event operations failed. Returning 500 so Facebook can retry delivery.'
                 },
                 { status: 500 }
             );

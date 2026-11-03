@@ -8,8 +8,17 @@ import { ACCOUNT_REQUEST_TIMEOUT_MS } from '../account-request';
 const callback = () => ({ token: {}, user: { id: 'facebook-subject', email: 'existing@example.com', name: 'Existing' },
     account: { provider: 'facebook', providerAccountId: 'facebook-subject', access_token: 'secret-facebook-token' } });
 beforeEach(() => { vi.clearAllMocks(); mocks.previous.mockResolvedValue(null); mocks.active.mockResolvedValue({ id: 'stable-user', created_by: null, account_kind: 'facebook' }); });
-afterEach(() => vi.useRealTimers());
+afterEach(() => { vi.useRealTimers(); vi.restoreAllMocks(); });
 describe('provider identity binding and session redaction', () => {
+    it('logs a structured database status without exposing OAuth identities or credentials', async () => {
+        const logged = vi.spyOn(console, 'error').mockImplementation(() => {});
+        mocks.rpc.mockResolvedValueOnce({ data: null, error: { error: 'gateway failure' }, status: 521 });
+        await expect(authOptions.callbacks!.jwt!(callback() as any)).rejects.toThrow('temporarily unavailable');
+        expect(logged).toHaveBeenCalledWith('[FACEBOOK_SIGNIN] Account lookup failed', expect.objectContaining({
+            status: 521, error: 'Database service is unavailable (HTTP 521).'
+        }));
+        expect(JSON.stringify(logged.mock.calls)).not.toMatch(/secret-facebook-token|existing@example.com|facebook-subject/);
+    });
     it('bounds a stalled Facebook identity lookup instead of leaving the callback pending', async () => {
         vi.useFakeTimers();
         mocks.rpc.mockImplementationOnce(() => new Promise(() => {}));
