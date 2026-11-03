@@ -4,6 +4,8 @@ Original Tokko users admitted through Facebook Developer app invitations are **p
 
 Page assignments are many-to-many: one subaccount may have multiple Pages, and several subaccounts may share a Page. Repeating the same assignment does not duplicate the membership. Email/password sign-in keeps a unique email identity; assigning an existing email account preserves its password and other assignments.
 
+Facebook connection status does not remove Tokko Page access. An assigned Page stays available when its saved Facebook token expires or permissions need renewal, so existing users can still open stored contacts, tags, campaigns, and history. The workspace marks the Page as needing reconnection; a Facebook manager uses **Connect Pages → Refresh Permissions** and reconnects it to restore syncing and messaging. Actual membership revocation, account deactivation, and temporary-account deadlines still control access.
+
 ## Parent and member workflows
 
 1. An original user chooses **Continue with Facebook**, then opens **Team Subaccounts**.

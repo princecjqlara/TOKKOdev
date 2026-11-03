@@ -31,6 +31,7 @@ export interface Page {
   business_id: string | null;
   created_at: string;
   updated_at: string;
+  requiresReconnect?: boolean;
 }
 
 export interface UserPage {

@@ -2,7 +2,7 @@
 
 import { useSession, signIn } from 'next-auth/react';
 import { useEffect, useState } from 'react';
-import { FacebookPageSummary } from '@/types';
+import { FacebookPageSummary, Page } from '@/types';
 import { Check, Facebook, RefreshCw, AlertCircle } from 'lucide-react';
 import { runContactSyncToCompletion } from '@/lib/contact-sync-client';
 import { FACEBOOK_PERMISSION_SCOPE } from '@/lib/facebook-permissions';
@@ -55,7 +55,9 @@ export default function ConnectPage() {
         try {
             const res = await fetch('/api/pages');
             const data = await res.json();
-            const fbPageIds = new Set(data.pages?.map((p: { fb_page_id: string }) => p.fb_page_id) || []);
+            const fbPageIds = new Set((data.pages || [])
+                .filter((page: Page) => !page.requiresReconnect)
+                .map((page: Page) => page.fb_page_id));
             setConnectedPages(fbPageIds as Set<string>);
         } catch (error) {
             console.error('Error fetching connected pages:', error);

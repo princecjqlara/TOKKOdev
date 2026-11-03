@@ -76,7 +76,7 @@ export default function TemplatesPage() {
                 const data = await res.json();
                 const pgs: Page[] = data.pages || [];
                 setPages(pgs);
-                setSubmissionPages([...pgs, ...(data.reconnectRequiredPages || [])]);
+                setSubmissionPages(pgs);
                 if (pgs.length > 0) {
                     setSelectedPageId(pgs[0].id);
                 }

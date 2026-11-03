@@ -75,7 +75,7 @@ async function getPageTokenStatus(page: PageRecord): Promise<PageTokenStatus> {
     }
 }
 
-// GET /api/pages - Get user's connected pages
+// GET /api/pages - Get the user's assigned Pages and their connection status.
 export async function GET(request: NextRequest) {
     try {
         const session = await getSessionFromRequest(request);
@@ -155,17 +155,17 @@ export async function GET(request: NextRequest) {
                 return a.page.name.localeCompare(b.page.name);
             });
 
+        // Tokko membership controls access to stored Page data. An expired Meta
+        // connection must not hide that membership or its contacts and history.
         const pages = sortedPages
-            .filter(({ tokenStatus }) => tokenStatus !== 'invalid')
-            .map(({ page }) => withoutAccessToken(page));
-        const reconnectRequiredPages = sortedPages
-            .filter(({ tokenStatus }) => tokenStatus === 'invalid')
-            .map(({ page }) => ({
+            .map(({ page, tokenStatus }) => ({
                 ...withoutAccessToken(page),
-                requiresReconnect: true
+                requiresReconnect: tokenStatus === 'invalid'
             }));
+        const reconnectRequiredPages = pages.filter(page => page.requiresReconnect);
 
-        return NextResponse.json({ pages, reconnectRequiredPages });
+        return NextResponse.json({ pages, reconnectRequiredPages },
+            { headers: { 'Cache-Control': 'private, no-store' } });
     } catch (error) {
         console.error('Error fetching pages:', error);
         return NextResponse.json(

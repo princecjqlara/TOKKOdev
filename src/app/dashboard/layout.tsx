@@ -92,7 +92,7 @@ export default function DashboardLayout({
             setPages(data.pages || []);
             setReconnectRequiredPages(data.reconnectRequiredPages || []);
             setPagesError(null);
-            membershipSnapshot.current = [...(data.pages || []), ...(data.reconnectRequiredPages || [])].map((page: Page) => page.id).sort().join(',');
+            membershipSnapshot.current = (data.pages || []).map((page: Page) => page.id).sort().join(',');
             setPagesLoaded(true);
             if (data.pages?.length > 0 && !selectedPage) {
                 setSelectedPage(data.pages[0]);
@@ -276,7 +276,7 @@ export default function DashboardLayout({
                     {reconnectRequiredPages.length > 0 && pathname !== '/dashboard/connect' && (
                         <div role="alert" className="border-2 border-amber-700 bg-amber-50 p-4 mb-6 text-sm">
                             <p className="font-bold">Facebook reconnection required</p>
-                            <p className="mt-2">Facebook no longer accepts the saved connection for: {reconnectRequiredPages.map(page => page.name).join(', ')}. Reconnect these Pages to restore syncing and messaging.</p>
+                            <p className="mt-2">Facebook no longer accepts the saved connection for: {reconnectRequiredPages.map(page => page.name).join(', ')}. Your assigned Pages and saved data remain available. Reconnect these Pages to restore syncing and messaging.</p>
                             <Link href="/dashboard/connect" className="inline-block mt-3 font-bold underline">Reconnect Facebook Pages</Link>
                         </div>
                     )}

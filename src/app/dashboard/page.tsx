@@ -93,6 +93,10 @@ export default function DashboardPage() {
         }
 
         if (syncing) return;
+        if (pages.find(page => page.id === selectedPageId)?.requiresReconnect) {
+            alert('Reconnect this Facebook Page before syncing. Your saved contacts and Page data are still available.');
+            return;
+        }
 
         setSyncing(true);
 
@@ -196,7 +200,8 @@ export default function DashboardPage() {
                         <label className="text-xs font-bold uppercase mb-1">Actions</label>
                         <button
                             onClick={handleSync}
-                            disabled={syncing || !selectedPageId}
+                            disabled={syncing || !selectedPageId || selectedPage?.requiresReconnect}
+                            title={selectedPage?.requiresReconnect ? 'Reconnect this Facebook Page before syncing.' : undefined}
                             className="h-10 px-6 border border-black bg-black text-white hover:bg-gray-800 disabled:opacity-50 disabled:cursor-not-allowed font-bold uppercase text-sm flex items-center gap-2"
                         >
                             <RefreshCw className={`w-4 h-4 ${syncing ? 'animate-spin' : ''}`} />
@@ -254,11 +259,11 @@ export default function DashboardPage() {
                         <span className="text-xs font-bold uppercase tracking-widest text-gray-500">Page Status</span>
                         <Clock className="w-5 h-5" />
                     </div>
-                    <div className="text-xl font-bold uppercase truncate">{selectedPage ? 'Connected' : 'Offline'}</div>
+                    <div className="text-xl font-bold uppercase truncate">{selectedPage?.requiresReconnect ? 'Reconnect needed' : selectedPage ? 'Connected' : 'Offline'}</div>
                     <div className="mt-auto pt-4 border-t border-gray-100 flex items-center justify-between text-xs">
                         <div className="flex items-center gap-2">
-                            <div className={`w-2 h-2 rounded-full ${selectedPage ? 'bg-green-500' : 'bg-red-500'}`} />
-                            <span className="font-mono text-gray-400">{selectedPage ? 'Live' : 'Error'}</span>
+                            <div className={`w-2 h-2 rounded-full ${selectedPage && !selectedPage.requiresReconnect ? 'bg-green-500' : 'bg-amber-600'}`} />
+                            <span className="font-mono text-gray-400">{selectedPage?.requiresReconnect ? 'Saved data available' : selectedPage ? 'Live' : 'Error'}</span>
                         </div>
                     </div>
                 </div>
