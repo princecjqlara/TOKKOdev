@@ -1,8 +1,9 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 const mocks = vi.hoisted(() => ({ db: vi.fn(), compare: vi.fn() }));
 vi.mock('../supabase', () => ({ getSupabaseAdmin: mocks.db }));
 vi.mock('../account-security', async original => ({ ...await original<typeof import('../account-security')>(), verifyAccountPassword: mocks.compare }));
 import { authenticateEmail, getActiveAccount } from '../account-auth';
+import { ACCOUNT_REQUEST_TIMEOUT_MS } from '../account-request';
 const user = { id: 'member', name: 'Member', email: 'member@example.com', image: null, password_hash: 'stored-hash', is_active: true,
     email_login_enabled: true, email_verified_at: '2026-10-26T00:00:00Z', session_version: 2 };
 function database(record: unknown = user, ready = true) {
@@ -10,7 +11,15 @@ function database(record: unknown = user, ready = true) {
     return { rpc, from: () => ({ select: () => ({ eq: () => ({ maybeSingle: async () => ({ data: record, error: null }) }) }) }) };
 }
 beforeEach(() => { vi.clearAllMocks(); mocks.compare.mockResolvedValue(true); });
+afterEach(() => vi.useRealTimers());
 describe('email account identity and live session validation', () => {
+    it('stops a stalled session lookup without granting workspace access', async () => {
+        vi.useFakeTimers();
+        mocks.db.mockReturnValue({ from: () => ({ select: () => ({ eq: () => ({ maybeSingle: () => new Promise(() => {}) }) }) }) });
+        const failure = expect(getActiveAccount('member', 2, 'facebook')).rejects.toMatchObject({ status: 503 });
+        await vi.advanceTimersByTimeAsync(ACCOUNT_REQUEST_TIMEOUT_MS);
+        await failure;
+    });
     it('preserves legacy account access while the additive profile migration is being installed', async () => {
         const select = vi.fn((columns: string) => ({ eq: () => ({ maybeSingle: async () => columns.includes('profile_required')
             ? { data: null, error: { code: '42703', message: 'column users.profile_required does not exist' } }

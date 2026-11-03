@@ -47,6 +47,8 @@ Existing provider bindings take precedence over profile email. Legacy no-email F
 
 Successful OAuth returns through `/facebook-signin` to the requested workspace screen. Stale pending Facebook sessions are no longer routed into email verification. An explicit **Sign in to a team subaccount** link permits choosing email login without bouncing back into Facebook. Database failures and inactive accounts remain denied instead of silently creating broader access.
 
+Authentication database requests have an eight-second deadline and cancel stalled HTTP requests. The completion screen uses a full navigation once the session is verified. If session loading or navigation takes fifteen seconds, it offers an account-check retry or a direct workspace link for an already verified session. OAuth errors show recovery controls immediately; a stalled Facebook retry also stops disabling the button after fifteen seconds. These changes require deploying the app, with no new database migration or connection changes. A database outage still denies access and must be resolved separately.
+
 ## Deployment and activation
 
 Use the existing canonical live application URL, `https://tokkobeta.vercel.app`. The live Vercel project is `tokkobeta` in `sircjdigiworks-4427s-projects`. The locally linked `tokkodev` project in `bigclicklara-2607s-projects` is a different project; do not deploy there or change the Facebook callback URL to bypass missing live-team access.

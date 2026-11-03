@@ -6,6 +6,7 @@ import { FACEBOOK_PERMISSION_SCOPE } from './facebook-permissions';
 import { authenticateEmail, getActiveAccount } from './account-auth';
 import { getServerAuthToken } from './server-auth-token';
 import { needsSubaccountProfile } from './subaccount-profile';
+import { accountRequest } from './account-request';
 
 export const authOptions: NextAuthOptions = {
     providers: [
@@ -35,10 +36,10 @@ export const authOptions: NextAuthOptions = {
                     // Reuse an existing signed binding for this same Facebook subject.
                     const previous = await getServerAuthToken();
                     const legacyId = previous?.facebookId === account.providerAccountId ? previous.id : null;
-                    const { data, error } = await getSupabaseAdmin().rpc('tokko_resolve_facebook_user', {
+                    const { data, error } = await accountRequest(getSupabaseAdmin().rpc('tokko_resolve_facebook_user', {
                         p_subject: account.providerAccountId, p_email: user.email || null,
                         p_name: user.name || null, p_image: user.image || null, p_legacy_id: legacyId || null
-                    });
+                    }));
                     if (error?.code === '28000' && ['Subaccounts use email and password', 'Account inactive or expired'].includes(error.message)) {
                         delete token.id; delete token.sessionVersion; delete token.pendingFacebookLinkAt;
                         token.provider = 'facebook'; token.facebookId = account.providerAccountId;

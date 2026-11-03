@@ -1,13 +1,22 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 const mocks = vi.hoisted(() => ({ rpc: vi.fn(), previous: vi.fn(), active: vi.fn() }));
 vi.mock('../supabase', () => ({ getSupabaseAdmin: () => ({ rpc: mocks.rpc }) }));
 vi.mock('../server-auth-token', () => ({ getServerAuthToken: mocks.previous }));
 vi.mock('../account-auth', () => ({ authenticateEmail: vi.fn(), getActiveAccount: mocks.active }));
 import { authOptions } from '../auth';
+import { ACCOUNT_REQUEST_TIMEOUT_MS } from '../account-request';
 const callback = () => ({ token: {}, user: { id: 'facebook-subject', email: 'existing@example.com', name: 'Existing' },
     account: { provider: 'facebook', providerAccountId: 'facebook-subject', access_token: 'secret-facebook-token' } });
 beforeEach(() => { vi.clearAllMocks(); mocks.previous.mockResolvedValue(null); mocks.active.mockResolvedValue({ id: 'stable-user', created_by: null, account_kind: 'facebook' }); });
+afterEach(() => vi.useRealTimers());
 describe('provider identity binding and session redaction', () => {
+    it('bounds a stalled Facebook identity lookup instead of leaving the callback pending', async () => {
+        vi.useFakeTimers();
+        mocks.rpc.mockImplementationOnce(() => new Promise(() => {}));
+        const failure = expect(authOptions.callbacks!.jwt!(callback() as any)).rejects.toMatchObject({ status: 503 });
+        await vi.advanceTimersByTimeAsync(ACCOUNT_REQUEST_TIMEOUT_MS);
+        await failure;
+    });
     it('withholds workspace identity until a new subaccount finishes its first-login details', async () => {
         const input = { session: { user: { name: 'Invited Name' } }, token: { id: 'member', provider: 'credentials', sessionVersion: 1 } };
         mocks.active.mockResolvedValue({ id: 'member', name: 'Member Name', phone_number: '+639123456789', created_by: 'parent', account_kind: 'email', profile_required: true, profile_completed_at: null });
