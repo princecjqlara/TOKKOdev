@@ -2,6 +2,7 @@ import { getPageConversationsBatch, isFacebookReauthRequired } from '@/lib/faceb
 import { classifyMessengerSystemMessage } from '@/lib/messaging-auto-tag';
 import { getSupabaseAdmin } from '@/lib/supabase';
 import { randomUUID } from 'node:crypto';
+import { normalizeContactName } from '@/lib/contact-names';
 
 type Page = {
     id: string;
@@ -13,6 +14,17 @@ type Page = {
 };
 
 type Message = { id: string; message?: string; from?: { id?: string }; created_time: string };
+type PageTag = { id: string; name: string; is_default: boolean };
+
+function autoTagIds(tags: PageTag[]) {
+    const defaults = new Map(tags.filter(tag => tag.is_default)
+        .map(tag => [tag.name.toLowerCase().replace(/[^a-z]/g, ''), tag.id]));
+    const outcomes = new Map(tags.map(tag => [tag.name.toLowerCase().replace(/[^a-z]/g, ''), tag.id]));
+    return {
+        paid: defaults.get('paidavailedservice') || defaults.get('paidavailedservices'),
+        unqualified: outcomes.get('notqualified') || outcomes.get('unqualified')
+    };
+}
 
 async function getMessagesSince(conversationId: string, token: string, since: string, signal: AbortSignal): Promise<Message[]> {
     let next: string | null = `https://graph.facebook.com/v21.0/${encodeURIComponent(conversationId)}/messages?fields=id,message,from,created_time&limit=100`;
@@ -21,7 +33,7 @@ async function getMessagesSince(conversationId: string, token: string, since: st
 
     for (let page = 0; next && page < 10; page++) {
         const url: URL = new URL(next);
-        if (url.hostname !== 'graph.facebook.com' || seen.has(next)) throw new Error('Unexpected Messenger pagination URL');
+        if (url.protocol !== 'https:' || url.hostname !== 'graph.facebook.com' || url.username || url.password || seen.has(next)) throw new Error('Unexpected Messenger pagination URL');
         seen.add(next);
         url.searchParams.delete('access_token');
         const response: Response = await fetch(url, {
@@ -32,6 +44,9 @@ async function getMessagesSince(conversationId: string, token: string, since: st
         if (!response.ok || body.error) throw new Error(body.error?.message || `Messenger history HTTP ${response.status}`);
         if (!Array.isArray(body.data)) throw new Error('Messenger history returned incomplete data');
         const rows = body.data;
+        if (rows.some(message => !message.id || !Number.isFinite(Date.parse(message.created_time)))) {
+            throw new Error('Messenger history returned missing message identifiers or timestamps');
+        }
         messages.push(...rows.filter(message => new Date(message.created_time).getTime() >= new Date(since).getTime()));
         if (rows.some(message => new Date(message.created_time).getTime() < new Date(since).getTime())) return messages;
         next = body.paging?.next || null;
@@ -58,11 +73,14 @@ export async function processOneMessagingAutoTagPage(options: { pageId?: string;
         const { data: tags, error: tagError } = await db.from('tags').select('id,name,is_default')
             .eq('owner_type', 'page').eq('owner_id', current.id);
         if (tagError) throw tagError;
-        const defaultTags = new Map((tags || []).filter(tag => tag.is_default)
-            .map(tag => [tag.name.toLowerCase().replace(/[^a-z]/g, ''), tag.id]));
-        const outcomeTags = new Map((tags || []).map(tag => [tag.name.toLowerCase().replace(/[^a-z]/g, ''), tag.id]));
-        const paidTagId = defaultTags.get('paidavailedservice') || defaultTags.get('paidavailedservices');
-        const unqualifiedTagId = outcomeTags.get('notqualified') || outcomeTags.get('unqualified');
+        let ids = autoTagIds(tags || []);
+        if (!ids.paid || !ids.unqualified) {
+            const { data: restored, error: restoreError } = await db.rpc('ensure_page_default_tags', { p_page_id: current.id });
+            if (restoreError) throw new Error(`Could not restore required Page tags: ${restoreError.message || restoreError.code}`);
+            ids = autoTagIds([...(tags || []), ...(Array.isArray(restored) ? restored : [])]);
+        }
+        const paidTagId = ids.paid;
+        const unqualifiedTagId = ids.unqualified;
         if (!paidTagId || !unqualifiedTagId) throw new Error('Required Page tags are missing');
 
         const batch = await getPageConversationsBatch(current.fb_page_id, current.access_token, {
@@ -75,8 +93,9 @@ export async function processOneMessagingAutoTagPage(options: { pageId?: string;
         // Bound Meta concurrency while avoiding ten sequential history waits.
         for (let offset = 0; offset < batch.conversations.length; offset += 3) {
             const chunkResults = await Promise.allSettled(batch.conversations.slice(offset, offset + 3).map(async conversation => {
-                const participant = conversation.participants?.data?.find(p => p.id !== current.fb_page_id);
-                if (!participant) return;
+                const participants = conversation.participants?.data?.filter(p => p.id !== current.fb_page_id) || [];
+                if (participants.length !== 1) return;
+                const participant = participants[0];
                 const messages = await getMessagesSince(conversation.id, current.access_token, current.messaging_auto_tag_checked_at, controller.signal);
                 const signals = messages
                     .filter(message => message.from?.id === current.fb_page_id)
@@ -94,7 +113,7 @@ export async function processOneMessagingAutoTagPage(options: { pageId?: string;
                     const inserted = await db.from('contacts').insert({
                         page_id: current.id,
                         psid: participant.id,
-                        name: participant.name?.trim() || null
+                        name: normalizeContactName(participant.name)
                     }).select('id').single();
                     if (inserted.error) {
                         // Another worker may have created the contact first.

@@ -36,7 +36,8 @@ END $$;
 UPDATE public.users SET password_hash=NULL,email_login_enabled=FALSE,session_version=session_version+1
 WHERE email='admin@tokko.local' AND password_hash='$2a$10$3euPcmQFCibsmXK6jnNgXuRfxAzCmW3Rf0H.SrNMLlLbFfLs.OYTC';
 
-UPDATE public.tokko_account_config SET enabled=TRUE WHERE id;
+INSERT INTO public.tokko_account_config(id, enabled) VALUES(TRUE, TRUE)
+ON CONFLICT(id) DO UPDATE SET enabled=TRUE;
 DO $$ BEGIN IF NOT public.tokko_accounts_ready() THEN RAISE EXCEPTION 'Page isolation checks failed'; END IF; END $$;
 INSERT INTO app_private.schema_migrations(version,description) VALUES('20261026_003','Enforce Page data isolation and enable manager-provisioned accounts') ON CONFLICT(version) DO NOTHING;
 NOTIFY pgrst,'reload schema';
