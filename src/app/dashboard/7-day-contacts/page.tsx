@@ -127,10 +127,14 @@ export default function SevenDayContactsPage() {
 
     useEffect(() => {
         const timer = setInterval(() => {
+            if (document.hidden) return;
             setNow(Date.now());
             setRefreshKey((value) => value + 1);
         }, 60_000);
-        const onFocus = () => setRefreshKey((value) => value + 1);
+        const onFocus = () => {
+            setNow(Date.now());
+            setRefreshKey((value) => value + 1);
+        };
         window.addEventListener('focus', onFocus);
         return () => {
             clearInterval(timer);

@@ -37,7 +37,7 @@ describe('Facebook sign-in recovery', () => {
     it('replaces an endless session check with an account retry that preserves the existing login', () => {
         render();
         expect(text()).toContain('Completing Facebook sign-in');
-        act(() => vi.advanceTimersByTime(15_000));
+        act(() => { vi.advanceTimersByTime(15_000); });
         expect(text()).not.toContain('Completing Facebook sign-in');
         expect(text()).toContain('The sign-in check took too long');
         act(() => button('Retry account check').props.onClick());
@@ -52,7 +52,7 @@ describe('Facebook sign-in recovery', () => {
         render();
         expect(location.replace).toHaveBeenCalledOnce();
         expect(location.replace).toHaveBeenCalledWith('/dashboard/contacts?tag=123');
-        act(() => vi.advanceTimersByTime(15_000));
+        act(() => { vi.advanceTimersByTime(15_000); });
         const link = page!.root.findAllByType('a').find(node => node.children.join('') === 'Open your workspace');
         expect(link?.props.href).toBe('/dashboard/contacts?tag=123');
         expect(text()).not.toContain('Completing Facebook sign-in');
@@ -61,7 +61,7 @@ describe('Facebook sign-in recovery', () => {
 
     it('still opens the workspace when the session arrives after the recovery controls appear', () => {
         render();
-        act(() => vi.advanceTimersByTime(15_000));
+        act(() => { vi.advanceTimersByTime(15_000); });
         session = { data: { user: { id: 'verified', provider: 'facebook' } } as Session, status: 'authenticated' };
         refresh();
         expect(location.replace).toHaveBeenCalledOnce();
@@ -105,7 +105,7 @@ describe('Facebook sign-in recovery', () => {
         render();
         act(() => button('Continue with Facebook').props.onClick());
         expect(button('Connecting…').props.disabled).toBe(true);
-        act(() => vi.advanceTimersByTime(15_000));
+        act(() => { vi.advanceTimersByTime(15_000); });
         expect(button('Continue with Facebook').props.disabled).toBe(false);
     });
 });

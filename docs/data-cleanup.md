@@ -18,6 +18,44 @@ Do not clear scan cursors or advance Page checkpoints as part of repairing tag
 definitions. Normal webhook and sync activity may add new contacts after a reset.
 Historical imports are separate jobs; do not restart them merely to repair setup.
 
+## Cleanup and Supabase quotas
+
+A data reset removes activity rows; it does not reset monthly bandwidth, billed
+usage or the billing-period average database size. Deleted PostgreSQL rows may
+also leave reusable space until vacuuming. Check the exact exceeded meter before
+choosing a remedy. See Supabase's [egress](https://supabase.com/docs/guides/platform/manage-your-usage/egress)
+and [database-size](https://supabase.com/docs/guides/platform/database-size) guidance.
+Do not run a full backup repeatedly to diagnose bandwidth usage: the exported
+data itself consumes egress.
+
+Verify the live app's project against the cleanup receipt before any deletion.
+The historical cleanup receipts under `.vercel/contact-refresh` target
+`vhtbmdizugnxkgocmruq`; the live TOKKO bundle inspected on 2026-11-04 referenced
+`pnhzpeyzpwsmwcuafgpw`. Those receipts do not establish that the live project's
+activity was cleared. Keep the existing live connection; never silently select
+the reachable replacement project to get a successful cleanup result.
+
+Run a small read-only inventory using settings for the intended project:
+
+```powershell
+node --env-file=<matching-local-env-file> scripts/audit-database-usage.mjs --expected-project pnhzpeyzpwsmwcuafgpw
+```
+
+The audit refuses mismatched API/SQL projects before connecting, uses a read-only
+transaction, and reports relation sizes, estimated row/dead-row counts, connection
+counts and schedules without exporting customer rows or cron command secrets.
+Receipts stay under `.vercel/usage-audit`. If the project is quota-restricted or
+unreachable, resolve access before applying a TOKKO-only cleanup. Shared contacts
+and chatbot-owned data require checking their consumers before deletion.
+
+The TOKKO admin REST client backs off after quota, rate-limit, network and service
+failures. Quota responses wait at least five minutes; service failures start at
+30 seconds and grow to five minutes. `Retry-After` is honored up to 24 hours. One
+request per warm worker probes recovery, and writes are never replayed. This is
+per worker, not a global billing cap; other apps sharing Supabase still contribute
+usage. Normal authorization, row reads and auto-tagging remain fresh. Webhooks
+still return failure for unprocessed events so Facebook can retry them.
+
 ## Repair a cleanup that removed setup
 
 `migration_repair_default_page_tags.sql` installs a server-only, idempotent repair

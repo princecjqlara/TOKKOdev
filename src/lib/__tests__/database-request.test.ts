@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { databaseErrorDetails } from '../database-request';
 
-afterEach(() => vi.unstubAllEnvs());
+afterEach(() => { vi.unstubAllEnvs(); });
 
 describe('safe database failure diagnostics', () => {
     it('reports an unavailable database even when the gateway error has no message', () => {

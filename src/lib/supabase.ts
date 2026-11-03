@@ -1,4 +1,5 @@
 import { createClient, SupabaseClient } from '@supabase/supabase-js';
+import { createDatabaseFetch } from './database-fetch';
 
 function getSupabaseUrl() {
     const url = process.env.NEXT_PUBLIC_SUPABASE_URL ?? process.env.SUPABASE_URL;
@@ -38,7 +39,9 @@ export function getSupabaseClient(): GenericSupabaseClient {
 
 export function getSupabaseAdmin(): GenericSupabaseClient {
     if (!supabaseAdminClient) {
-        supabaseAdminClient = createClient(getSupabaseUrl(), getSupabaseServiceKey(), {
+        const url = getSupabaseUrl();
+        supabaseAdminClient = createClient(url, getSupabaseServiceKey(), {
+            global: { fetch: createDatabaseFetch(url) },
             auth: {
                 autoRefreshToken: false,
                 persistSession: false

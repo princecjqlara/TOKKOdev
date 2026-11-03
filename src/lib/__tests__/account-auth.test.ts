@@ -11,7 +11,7 @@ function database(record: unknown = user, ready = true) {
     return { rpc, from: () => ({ select: () => ({ eq: () => ({ maybeSingle: async () => ({ data: record, error: null }) }) }) }) };
 }
 beforeEach(() => { vi.clearAllMocks(); mocks.compare.mockResolvedValue(true); });
-afterEach(() => vi.useRealTimers());
+afterEach(() => { vi.useRealTimers(); });
 describe('email account identity and live session validation', () => {
     it('stops a stalled session lookup without granting workspace access', async () => {
         vi.useFakeTimers();

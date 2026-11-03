@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { accountRequest, ACCOUNT_REQUEST_TIMEOUT_MS } from '../account-request';
 
-afterEach(() => vi.useRealTimers());
+afterEach(() => { vi.useRealTimers(); });
 
 describe('authentication request deadline', () => {
     it('returns the database response and removes its deadline when the request finishes', async () => {

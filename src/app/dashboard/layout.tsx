@@ -78,7 +78,7 @@ export default function DashboardLayout({
                 membershipSnapshot.current = snapshot;
             } finally { inFlight = false; }
         };
-        const timer = window.setInterval(() => { void refresh().catch(() => {}); }, 15000);
+        const timer = window.setInterval(() => { void refresh().catch(() => {}); }, 60_000);
         const onFocus = () => { void refresh().catch(() => {}); };
         window.addEventListener('focus', onFocus);
         return () => { window.clearInterval(timer); window.removeEventListener('focus', onFocus); };
