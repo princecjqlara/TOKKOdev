@@ -1,7 +1,7 @@
 'use client';
 
 import { useSession } from 'next-auth/react';
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Users, Tag, MessageSquare, RefreshCw, Clock, ArrowUpRight } from 'lucide-react';
 import { Page } from '@/types';
 import { runContactSyncToCompletion } from '@/lib/contact-sync-client';
@@ -25,10 +25,14 @@ export default function DashboardPage() {
     });
     const [loading, setLoading] = useState(true);
     const [syncing, setSyncing] = useState(false);
+    const [pagesError, setPagesError] = useState<string | null>(null);
+    const [statsError, setStatsError] = useState<string | null>(null);
+    const [reconnectRequired, setReconnectRequired] = useState(false);
+    const statsRequest = useRef(0);
 
     useEffect(() => {
-        void fetchPages();
-    }, []);
+        if (session?.user?.id) void fetchPages();
+    }, [session?.user?.id]);
 
     useEffect(() => {
         if (selectedPageId) {
@@ -37,31 +41,38 @@ export default function DashboardPage() {
     }, [selectedPageId]);
 
     const fetchPages = async () => {
+        setLoading(true);
         try {
             const res = await fetch('/api/pages');
+            if (!res.ok) throw new Error('Your Pages could not be loaded. Please retry.');
             const data = await res.json();
             const pageList: Page[] = data.pages || [];
             setPages(pageList);
+            setPagesError(null);
+            setReconnectRequired(Boolean(data.reconnectRequiredPages?.length));
             if (pageList.length > 0) {
                 setSelectedPageId(pageList[0].id);
             }
         } catch (error) {
             console.error('Error fetching pages:', error);
+            setPagesError('Your Pages could not be loaded. Please retry.');
         } finally {
             setLoading(false);
         }
     };
 
     const fetchStats = async (pageId: string) => {
+        const request = ++statsRequest.current;
+        setStatsError(null);
         try {
-            const contactsRes = await fetch(`/api/pages/${pageId}/contacts?pageSize=1`);
-            const contactsData = await contactsRes.json();
-
-            const tagsRes = await fetch(`/api/tags?scope=page&pageId=${pageId}&pageSize=1`);
-            const tagsData = await tagsRes.json();
-
-            const campaignsRes = await fetch(`/api/campaigns?pageId=${pageId}&pageSize=1`);
-            const campaignsData = await campaignsRes.json();
+            const results = await Promise.all([
+                fetch(`/api/pages/${pageId}/contacts?pageSize=1&includeTags=false`),
+                fetch(`/api/tags?scope=page&pageId=${pageId}&pageSize=1`),
+                fetch(`/api/campaigns?pageId=${pageId}&pageSize=1`)
+            ]);
+            if (results.some(response => !response.ok)) throw new Error('Dashboard totals could not be loaded.');
+            const [contactsData, tagsData, campaignsData] = await Promise.all(results.map(response => response.json()));
+            if (request !== statsRequest.current) return;
 
             setStats({
                 totalContacts: contactsData.total || 0,
@@ -71,6 +82,7 @@ export default function DashboardPage() {
             });
         } catch (error) {
             console.error('Error fetching stats:', error);
+            if (request === statsRequest.current) setStatsError('Dashboard totals could not be loaded. Please retry.');
         }
     };
 
@@ -137,13 +149,11 @@ export default function DashboardPage() {
                     <div className="w-20 h-20 border border-black flex items-center justify-center mx-auto mb-6 bg-gray-50">
                         <MessageSquare className="w-10 h-10 text-black" />
                     </div>
-                    <h2 className="text-2xl font-bold uppercase mb-3">Welcome to Tokko</h2>
+                    <h2 className="text-2xl font-bold uppercase mb-3">{pagesError ? 'Unable to load Pages' : reconnectRequired ? 'Reconnect your Facebook Pages' : 'Welcome to Tokko'}</h2>
                     <p className="text-gray-600 mb-8 font-mono text-sm max-w-md mx-auto">
-                        Connect your first Facebook Page to get started with contact management and messaging.
+                        {pagesError || (reconnectRequired ? 'Your Pages are still assigned to your account. Reconnect through Facebook to restore syncing and messaging.' : 'Connect your first Facebook Page to get started with contact management and messaging.')}
                     </p>
-                    <a href="/dashboard/connect" className="btn-wireframe">
-                        Connect Facebook Page
-                    </a>
+                    {pagesError ? <button onClick={() => void fetchPages()} className="btn-wireframe">Retry loading Pages</button> : <a href="/dashboard/connect" className="btn-wireframe">{reconnectRequired ? 'Reconnect Facebook Pages' : 'Connect Facebook Page'}</a>}
                 </div>
             </div>
         );
@@ -197,7 +207,8 @@ export default function DashboardPage() {
             </div>
 
             {/* Stats Grid */}
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-12">
+            {statsError && <div role="alert" className="border-2 border-black p-4 mb-6"><p>{statsError}</p><button onClick={() => selectedPageId && void fetchStats(selectedPageId)} className="btn-wireframe mt-3">Retry dashboard totals</button></div>}
+            {!statsError && <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-12">
                 {/* Stat 1 */}
                 <div className="wireframe-card group hover:bg-gray-50 transition-colors">
                     <div className="flex justify-between items-start mb-4">
@@ -251,7 +262,7 @@ export default function DashboardPage() {
                         </div>
                     </div>
                 </div>
-            </div>
+            </div>}
 
             {/* Quick Actions Table */}
             <div className="mb-8">

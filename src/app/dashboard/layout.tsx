@@ -38,6 +38,8 @@ export default function DashboardLayout({
     const [selectedPage, setSelectedPage] = useState<Page | null>(null);
     const [showPageDropdown, setShowPageDropdown] = useState(false);
     const [pagesLoaded, setPagesLoaded] = useState(false);
+    const [pagesError, setPagesError] = useState<string | null>(null);
+    const [reconnectRequiredPages, setReconnectRequiredPages] = useState<Page[]>([]);
     const membershipSnapshot = useRef<string | null>(null);
 
     useEffect(() => {
@@ -88,6 +90,8 @@ export default function DashboardLayout({
             if (!res.ok) throw new Error('Could not load assigned Pages.');
             const data = await res.json();
             setPages(data.pages || []);
+            setReconnectRequiredPages(data.reconnectRequiredPages || []);
+            setPagesError(null);
             membershipSnapshot.current = [...(data.pages || []), ...(data.reconnectRequiredPages || [])].map((page: Page) => page.id).sort().join(',');
             setPagesLoaded(true);
             if (data.pages?.length > 0 && !selectedPage) {
@@ -95,6 +99,7 @@ export default function DashboardLayout({
             }
         } catch (error) {
             console.error('Error fetching pages:', error);
+            setPagesError('Your assigned Pages could not be loaded. Please retry.');
         }
     };
 
@@ -268,7 +273,16 @@ export default function DashboardLayout({
             {/* Main Content */}
             <main className="flex-1 overflow-auto bg-white">
                 <div className="p-4 md:p-6 lg:p-8">
-                    {pagesLoaded && !pages.length && session.user.provider === 'credentials'
+                    {reconnectRequiredPages.length > 0 && pathname !== '/dashboard/connect' && (
+                        <div role="alert" className="border-2 border-amber-700 bg-amber-50 p-4 mb-6 text-sm">
+                            <p className="font-bold">Facebook reconnection required</p>
+                            <p className="mt-2">Facebook no longer accepts the saved connection for: {reconnectRequiredPages.map(page => page.name).join(', ')}. Reconnect these Pages to restore syncing and messaging.</p>
+                            <Link href="/dashboard/connect" className="inline-block mt-3 font-bold underline">Reconnect Facebook Pages</Link>
+                        </div>
+                    )}
+                    {pagesError
+                        ? <div role="alert" className="border-2 border-black p-6"><p>{pagesError}</p><button className="btn-wireframe mt-4" onClick={() => void fetchPages()}>Retry loading Pages</button></div>
+                        : pagesLoaded && !pages.length && session.user.provider === 'credentials'
                         ? <div className="border-2 border-black p-6"><h1 className="text-2xl font-black">No Pages assigned</h1><p className="mt-3">Your account is ready. Ask your Facebook Page manager to assign a Page. Its contacts, tags, campaigns, and other Page features will appear here.</p></div>
                         : children}
                 </div>
