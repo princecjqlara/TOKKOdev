@@ -1,0 +1,6 @@
+import fs from 'node:fs';
+const p='analysis-output/manawari-2026-09-15/';const rs=JSON.parse(fs.readFileSync(p+'live-records.json'));const ds=JSON.parse(fs.readFileSync(p+'review-decisions.json'));const rows=[];
+const re=/(?:nag|naka(?:pag)?|naka pag|ng)\s*down|na.?send.*(?:balance|payment)|sent.*(?:balance|payment)|nagpay|nakapag pay|bayad.*na|(?:sent|send).*gcash|send.*description.*payment|proof of payment|confirm receipt of full payment|binayad ko|nagsend.*(?:na|nako)|nag ?send na|na send ko na\s*\d/i;
+for(const r of rs){if(ds[r.psid]?.qualifies)continue;const ev=r.messages.map((m,i)=>({...m,i})).filter(m=>m.sender==='contact'&&m.text.length<400&&re.test(m.text));if(ev.length)rows.push({...r,evidence:ev});}
+fs.writeFileSync(p+'final-candidates.json',JSON.stringify(rows));console.log('Candidates '+rows.length);
+for(const r of rows.slice(Number(process.argv[2]||0),Number(process.argv[3]||30))){console.log('\n'+r.psid+'|'+r.name+'|existing='+r.paidTag);const indices=new Set();for(const e of r.evidence)for(let i=Math.max(0,e.i-2);i<Math.min(r.messages.length,e.i+4);i++)indices.add(i);for(const i of indices){const m=r.messages[i];if(m.text)console.log(i+' '+m.sender+': '+m.text.replace(/\n/g,' | ').slice(0,400));}}

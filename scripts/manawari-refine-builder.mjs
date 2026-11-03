@@ -1,0 +1,10 @@
+import fs from 'node:fs';
+const f='scripts/manawari-build-workbook-data.mjs';let s=fs.readFileSync(f,'utf8');
+const start=s.indexOf('const phone=t=>'),end=s.indexOf('\n',start);
+s=s.slice(0,start)+String.raw`const phone=t=>uniq([...(t.match(/(?:\+?63[\s-]*|0)9(?:[\s–—-]*\d){9}\b/g)||[]).map(s=>s.replace(/\D/g,'')).map(s=>s.startsWith('63')?'0'+s.slice(2):s),...(t.match(/\+(?!63)(?:\d[ -]?){9,14}\d\b/g)||[]).map(s=>'+'+s.replace(/\D/g,'')),...((/contact|phone|mobile|whatsapp|viber|telegram/i.test(t)||/^\s*9[\d -]+\s*$/.test(t))?(t.match(/(?<!\d)9(?:[ -]*\d){9}(?!\d)/g)||[]).map(s=>'0'+s.replace(/\D/g,'')):[])]).filter(s=>!staff.has(s));`+s.slice(end);
+s=s.replace("const useful=s=>s&&!/", "const useful=s=>s&&!/^(?:po ano|lang po|ano po|personal use|not applicable)/i.test(s)&&!/");
+fs.writeFileSync(f,s);
+const py='scripts/manawari-create-workbook.py';let v=fs.readFileSync(py,'utf8');
+v=v.replace("if j>0 and col=='B' and names[idx] in ('Business History','Service History','Tag Evidence','Billing History') and str(txt).isdigit():", "if j>0 and ((col=='B' and names[idx] in ('Business History','Service History','Tag Evidence','Billing History')) or (col in ('C','D') and names[idx]=='Review Needed') or (col=='D' and names[idx]=='Coverage')) and str(txt).isdigit():");
+fs.writeFileSync(py,v);
+console.log('Refined phone extraction and preview dates');
