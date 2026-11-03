@@ -1,4 +1,5 @@
 import { AccessError } from './account-security';
+import { getSupabaseServerUrl } from './supabase-config';
 
 export const DATABASE_REQUEST_TIMEOUT_MS = 8_000;
 
@@ -38,7 +39,7 @@ export function databaseErrorDetails(error: unknown, responseStatus?: number) {
     const status = typeof candidate === 'number' && Number.isInteger(candidate) && candidate >= 100 && candidate <= 599 ? candidate : null;
     let databaseHost: string | null = null;
     try {
-        databaseHost = new URL(process.env.NEXT_PUBLIC_SUPABASE_URL ?? process.env.SUPABASE_URL ?? '').hostname;
+        databaseHost = new URL(getSupabaseServerUrl()).hostname;
     } catch { /* Missing or invalid configuration is represented by a null host. */ }
 
     const message = code === 'DATABASE_TIMEOUT' ? 'Database request timed out.'

@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { databaseRequest, DATABASE_REQUEST_TIMEOUT_MS } from '../database-request';
+import { databaseErrorDetails, databaseRequest, DATABASE_REQUEST_TIMEOUT_MS } from '../database-request';
 
 const json = (body: unknown, status = 200) => new Response(JSON.stringify(body), {
     status, headers: { 'Content-Type': 'application/json' }
@@ -15,6 +15,7 @@ async function admin(transport: typeof fetch) {
 
 beforeEach(() => {
     vi.resetModules();
+    vi.stubEnv('SUPABASE_URL', '');
     vi.stubEnv('NEXT_PUBLIC_SUPABASE_URL', 'https://test-project.supabase.co');
     vi.stubEnv('SUPABASE_SERVICE_ROLE_KEY', 'test-service-key');
 });
@@ -26,6 +27,32 @@ afterEach(() => {
 });
 
 describe('independent Supabase admin requests', () => {
+    it('uses the server database URL for backend requests and diagnostics when the public build setting is stale', async () => {
+        vi.stubEnv('NEXT_PUBLIC_SUPABASE_URL', 'https://old-project.supabase.co');
+        vi.stubEnv('SUPABASE_URL', 'https://new-project.supabase.co');
+        const transport = mockTransport().mockResolvedValue(json(page));
+        const db = await admin(transport);
+
+        await db.from('pages').select('id').single();
+
+        expect(new URL(String(transport.mock.calls[0][0])).hostname).toBe('new-project.supabase.co');
+        expect(databaseErrorDetails({ code: 'DATABASE_TIMEOUT' }).databaseHost).toBe('new-project.supabase.co');
+    });
+
+    it('keeps the public client on its public URL and publishable key', async () => {
+        vi.stubEnv('NEXT_PUBLIC_SUPABASE_URL', 'https://public-project.supabase.co');
+        vi.stubEnv('SUPABASE_URL', 'https://server-project.supabase.co');
+        vi.stubEnv('NEXT_PUBLIC_SUPABASE_ANON_KEY', 'test-publishable-key');
+        const transport = mockTransport().mockResolvedValue(json(page));
+        vi.stubGlobal('fetch', transport);
+        const { getSupabaseClient } = await import('../supabase');
+
+        await getSupabaseClient().from('pages').select('id').single();
+
+        expect(new URL(String(transport.mock.calls[0][0])).hostname).toBe('public-project.supabase.co');
+        expect(new Headers(transport.mock.calls[0][1]?.headers).get('apikey')).toBe('test-publishable-key');
+    });
+
     it.each([402, 429, 500, 502, 503, 504, 521])('keeps an HTTP %i failure local to its request and sends subsequent reads and writes', async status => {
         const transport = mockTransport()
             .mockResolvedValueOnce(json({ code: 'UPSTREAM_FAILURE', message: 'upstream failure' }, status))

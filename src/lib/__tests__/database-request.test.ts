@@ -1,9 +1,16 @@
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { databaseErrorDetails } from '../database-request';
 
+beforeEach(() => { vi.stubEnv('SUPABASE_URL', ''); });
 afterEach(() => { vi.unstubAllEnvs(); });
 
 describe('safe database failure diagnostics', () => {
+    it('reports the server URL when the public build uses a different project', () => {
+        vi.stubEnv('NEXT_PUBLIC_SUPABASE_URL', 'https://old-project.supabase.co');
+        vi.stubEnv('SUPABASE_URL', 'https://new-project.supabase.co');
+        expect(databaseErrorDetails({ code: 'DATABASE_TIMEOUT' }).databaseHost).toBe('new-project.supabase.co');
+    });
+
     it('reports an unavailable database even when the gateway error has no message', () => {
         vi.stubEnv('NEXT_PUBLIC_SUPABASE_URL', 'https://original-project.supabase.co');
         expect(databaseErrorDetails({ error: 'upstream failure' }, 521)).toEqual({

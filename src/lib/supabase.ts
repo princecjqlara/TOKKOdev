@@ -1,4 +1,5 @@
 import { createClient, SupabaseClient } from '@supabase/supabase-js';
+import { getSupabaseServerUrl } from './supabase-config';
 
 function getSupabaseUrl() {
     const url = process.env.NEXT_PUBLIC_SUPABASE_URL ?? process.env.SUPABASE_URL;
@@ -38,7 +39,7 @@ export function getSupabaseClient(): GenericSupabaseClient {
 
 export function getSupabaseAdmin(): GenericSupabaseClient {
     if (!supabaseAdminClient) {
-        const url = getSupabaseUrl();
+        const url = getSupabaseServerUrl();
         supabaseAdminClient = createClient(url, getSupabaseServiceKey(), {
             auth: {
                 autoRefreshToken: false,
