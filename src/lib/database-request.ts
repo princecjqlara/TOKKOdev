@@ -42,7 +42,6 @@ export function databaseErrorDetails(error: unknown, responseStatus?: number) {
     } catch { /* Missing or invalid configuration is represented by a null host. */ }
 
     const message = code === 'DATABASE_TIMEOUT' ? 'Database request timed out.'
-        : code === 'DATABASE_BACKOFF' ? 'Database requests are cooling down after a service or usage-limit failure.'
         : code === 'PGRST116' ? 'Expected one database record; the lookup returned none or multiple records.'
         : status && status >= 500 ? `Database service is unavailable (HTTP ${status}).`
         : status === 401 || status === 403 ? `Database rejected the server credentials or permissions (HTTP ${status}).`
