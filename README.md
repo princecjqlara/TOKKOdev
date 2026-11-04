@@ -2,8 +2,6 @@
 
 A Next.js application for managing Facebook Page contacts, tags, and messaging campaigns.
 
-<!-- Last updated for Vercel deployment - Redeploy trigger -->
-
 ## Features
 
 - 🔐 Facebook OAuth authentication
@@ -45,7 +43,7 @@ npm install
 ```
 
 3. Set up environment variables:
-Create a `.env` file in the root directory:
+Create a `.env.local` file in the root directory:
 ```env
 # NextAuth
 NEXTAUTH_URL=http://localhost:3000
@@ -57,6 +55,7 @@ FACEBOOK_CLIENT_SECRET=your-facebook-app-secret
 FACEBOOK_APP_SECRET=your-facebook-app-secret
 
 # Supabase
+SUPABASE_URL=your-supabase-url
 NEXT_PUBLIC_SUPABASE_URL=your-supabase-url
 NEXT_PUBLIC_SUPABASE_ANON_KEY=your-supabase-anon-key
 SUPABASE_SERVICE_ROLE_KEY=your-supabase-service-role-key
@@ -114,6 +113,14 @@ src/
 - `npm run build` - Build for production
 - `npm start` - Start production server
 - `npm run lint` - Run ESLint
+- `npm test` - Run application tests
+
+The `scripts/` directory contains supported TOKKO tools for account activation,
+Page access verification, template review, database usage auditing, and recovery.
+Generated exports and review progress belong in the ignored `outputs/` directory.
+Keep local credentials, backups, and deployment receipts under the ignored
+`.vercel/` directory. Client-specific analysis scripts and conversation dumps are
+outside this application's source tree.
 
 ## Deployment
 
@@ -131,6 +138,7 @@ For original Facebook parent users and their email/password team subaccounts, fo
    - `FACEBOOK_CLIENT_SECRET` - Your Facebook App Secret
    - `FACEBOOK_APP_SECRET` - Your Facebook App Secret
    - `NEXT_PUBLIC_SUPABASE_URL` - Your Supabase project URL
+   - `SUPABASE_URL` - The server's Supabase project URL; use the same project as the public URL
    - `NEXT_PUBLIC_SUPABASE_ANON_KEY` - Your Supabase anon key
    - `SUPABASE_SERVICE_ROLE_KEY` - Your Supabase service role key
 

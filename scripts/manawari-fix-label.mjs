@@ -1,1 +1,0 @@
-import fs from 'node:fs';const p='scripts/manawari-client-details.mjs';let s=fs.readFileSync(p,'utf8');s=s.replace('(?:/\\s*Social','(?:\\/\\s*Social').replace('Style(?:\\s*/\\s*Inspiration)','Style(?:\\s*\\/\\s*Inspiration)');fs.writeFileSync(p,s);

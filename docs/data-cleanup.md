@@ -48,13 +48,12 @@ Receipts stay under `.vercel/usage-audit`. If the project is quota-restricted or
 unreachable, resolve access before applying a TOKKO-only cleanup. Shared contacts
 and chatbot-owned data require checking their consumers before deletion.
 
-The TOKKO admin REST client backs off after quota, rate-limit, network and service
-failures. Quota responses wait at least five minutes; service failures start at
-30 seconds and grow to five minutes. `Retry-After` is honored up to 24 hours. One
-request per warm worker probes recovery, and writes are never replayed. This is
-per worker, not a global billing cap; other apps sharing Supabase still contribute
-usage. Normal authorization, row reads and auto-tagging remain fresh. Webhooks
-still return failure for unprocessed events so Facebook can retry them.
+The TOKKO admin client uses the normal Supabase transport. Each failed query
+returns its own error; subsequent reads and writes continue immediately. Account
+checks and webhook Page lookups have an eight-second deadline. Writes are never
+automatically replayed. Webhooks return failure for unprocessed events so Facebook
+can retry delivery. Server requests and their diagnostic logs prefer
+`SUPABASE_URL`; keep it aligned with `NEXT_PUBLIC_SUPABASE_URL` during deployment.
 
 ## Repair a cleanup that removed setup
 

@@ -1,1 +1,0 @@
-import fs from 'node:fs';const p='scripts/manawari-create-workbook.py';let s=fs.readFileSync(p,'utf8').replaceAll('B27:F27','B29:F29').replace('summary.set_row(26,40)','summary.set_row(28,40)').replace("print_area('B2:F27')","print_area('B2:F29')");fs.writeFileSync(p,s);

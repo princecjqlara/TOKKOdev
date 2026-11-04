@@ -1,4 +1,0 @@
-import fs from 'node:fs';const p='analysis-output/loki-2026-09-15/';const rs=JSON.parse(fs.readFileSync(p+'live-records.json'));const ds=JSON.parse(fs.readFileSync(p+'review-decisions.json'));
-for(const r of rs)if(ds[r.psid]?.qualifies&&ds[r.psid].evidenceIndexes.every(i=>/confirmed that.*made a payment/.test(r.messages[i].text)))ds[r.psid]={qualifies:false,evidenceIndexes:[],reason:'Facebook payment event alone; surrounding text shows inquiries or refusal and no corroborating payment/service evidence. Verify receipt before tagging.'};
-ds['28188520397427811']={qualifies:true,evidenceIndexes:[140,193,211,215],reason:'Commissioned video production and unpaid preview; revisions pending as of latest messages; full payment not confirmed'};
-fs.writeFileSync(p+'review-decisions.json',JSON.stringify(ds,null,2));console.log({supported:Object.values(ds).filter(x=>x.qualifies).length});
