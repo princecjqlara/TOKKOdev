@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { NextRequest } from 'next/server';
 
 const mocks = vi.hoisted(() => ({
@@ -22,6 +22,7 @@ vi.mock('@/lib/messaging-auto-tag-worker', () => ({
 import { GET } from './route';
 
 describe('GET /api/cron/follow-up-automations', () => {
+    afterEach(() => vi.restoreAllMocks());
     beforeEach(() => {
         vi.clearAllMocks();
         mocks.getSupabaseAdmin.mockReturnValue({ database: true });
@@ -50,6 +51,43 @@ describe('GET /api/cron/follow-up-automations', () => {
         }));
         expect(mocks.processDueFollowUpAutomationSteps).toHaveBeenCalledTimes(1);
         expect(mocks.processOneMessagingAutoTagPage).toHaveBeenCalledTimes(3);
+        expect(mocks.processOneMessagingAutoTagPage).toHaveBeenCalledWith({ maxProcessingTimeMs: 18000, conversationLimit: 10 });
+        expect(fetchMock).toHaveBeenCalledTimes(1);
+        expect(body.messagingAutoTag).toEqual({ pages: 3, conversations: 0, tagged: 0, errors: [] });
+    });
+
+    it('starts polling in the existing scheduler while follow-ups are still running', async () => {
+        let finishFollowUps!: (result: { processed: number }) => void;
+        mocks.processDueFollowUpAutomationSteps.mockReturnValue(new Promise(resolve => { finishFollowUps = resolve; }));
+        const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue(Response.json({ success: true }));
+        const responseTask = GET(new Request('https://tokkobeta.vercel.app/api/cron/follow-up-automations') as NextRequest);
+        expect(mocks.processOneMessagingAutoTagPage).toHaveBeenCalledTimes(3);
+        expect(fetchMock).not.toHaveBeenCalled();
+        finishFollowUps({ processed: 1 });
+        const response = await responseTask;
+        expect(response.status).toBe(200);
+        expect(fetchMock).toHaveBeenCalledTimes(1);
+    });
+
+    it('finishes tag polling even when the follow-up worker fails', async () => {
+        mocks.processDueFollowUpAutomationSteps.mockRejectedValueOnce(new Error('Follow-up database unavailable'));
+        const fetchMock = vi.spyOn(globalThis, 'fetch');
+        mocks.processOneMessagingAutoTagPage.mockResolvedValue({ pages: 1, conversations: 2, tagged: 1 });
+        const response = await GET(new Request('https://tokkobeta.vercel.app/api/cron/follow-up-automations') as NextRequest);
+        expect(response.status).toBe(500);
+        expect((await response.json()).messagingAutoTag).toEqual({ pages: 3, conversations: 6, tagged: 3, errors: [] });
+        expect(mocks.processOneMessagingAutoTagPage).toHaveBeenCalledTimes(3);
+        expect(fetchMock).not.toHaveBeenCalled();
+    });
+
+    it('isolates a failed Page scan without failing follow-ups or the other Page scans', async () => {
+        mocks.processOneMessagingAutoTagPage.mockRejectedValueOnce(new Error('Facebook permissions expired'));
+        vi.spyOn(globalThis, 'fetch').mockResolvedValue(Response.json({ success: true }));
+        const response = await GET(new Request('https://tokkobeta.vercel.app/api/cron/follow-up-automations') as NextRequest);
+        const body = await response.json();
+        expect(response.status).toBe(200);
+        expect(body.messagingAutoTag).toEqual({ pages: 2, conversations: 0, tagged: 0, errors: ['Facebook permissions expired'] });
+        expect(body.campaignWorker.ok).toBe(true);
     });
 
     it('processes follow-ups before invoking the potentially slow campaign worker', async () => {

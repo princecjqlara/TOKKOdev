@@ -6,7 +6,6 @@ import { authOptions } from '@/lib/auth';
 import { getSupabaseAdmin } from '@/lib/supabase';
 import { PaginatedResponse, Contact } from '@/types';
 import { normalizeContactName } from '../../../../../lib/contact-names';
-import { processOneMessagingAutoTagPage } from '@/lib/messaging-auto-tag-worker';
 import { chunkArray } from '@/lib/chunking';
 import { fetchAllSupabaseRows, SUPABASE_IN_FILTER_BATCH_SIZE } from '@/lib/supabase-pagination';
 
@@ -123,23 +122,6 @@ export async function GET(
                 { error: 'Forbidden', message: 'You do not have access to this page' },
                 { status: 403 }
             );
-        }
-
-        // Refresh recent lead/order tags before applying tag filters and loading
-        // the response. The shared Page lease limits this to once a minute,
-        // including overlapping requests by different Page members. Selection
-        // exports that omit tags keep their lightweight, database-only path.
-        let autoTagRefresh: { status: 'checked' | 'idle' | 'unavailable'; message?: string } = { status: 'idle' };
-        if (includeTags) {
-            try {
-                const result = await processOneMessagingAutoTagPage({ pageId,
-                    conversationLimit: 3, maxProcessingTimeMs: 6000 });
-                autoTagRefresh = { status: result.pages ? 'checked' : 'idle' };
-            } catch {
-                logWarn('Auto-tag refresh did not finish; returning saved tags', { pageId });
-                autoTagRefresh = { status: 'unavailable', message:
-                    'Auto-tag could not refresh. Saved tags are shown. Retry Sync, or refresh Facebook permissions if the connection has expired.' };
-            }
         }
 
         // Build query — fetch contacts WITHOUT the tag join. The tag join was
@@ -345,8 +327,7 @@ export async function GET(
             items: transformedContacts,
             page,
             pageSize,
-            total: includeCount ? count || 0 : null,
-            ...(includeTags ? { autoTagRefresh } : {})
+            total: includeCount ? count || 0 : null
         } as PaginatedResponse<Contact>, { headers: { 'Cache-Control': 'private, no-store' } });
     } catch (error) {
         if (error instanceof AccessError) return NextResponse.json({ message: error.message }, { status: error.status });

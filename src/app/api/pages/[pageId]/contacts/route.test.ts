@@ -220,35 +220,31 @@ describe('GET /api/pages/[pageId]/contacts', () => {
         expect(response.headers.get('Cache-Control')).toBe('private, no-store');
     });
 
-    it('returns new automatic stage tags in the same contact fetch, before filtering tags', async () => {
+    it('returns automatic tags saved by the scheduler without starting a new poll', async () => {
         mocks.getServerSession.mockResolvedValue({ user: { id: 'user_1' } });
-        const tagRows: any[] = [];
+        const tagRows = [{ contact_id: 'contact_1', tag_id: 'converted', created_by: null,
+            tags: { id: 'converted', name: 'Converted', owner_type: 'page', owner_id: 'page_1', page_id: 'page_1' } }];
         const db = createSupabaseMock({ tagRows }); mocks.getSupabaseAdmin.mockReturnValue(db);
-        mocks.autoTag.mockImplementationOnce(async () => {
-            tagRows.push({ contact_id: 'contact_1', tag_id: 'converted', created_by: null,
-                tags: { id: 'converted', name: 'Converted', owner_type: 'page', owner_id: 'page_1', page_id: 'page_1' } });
-            return { pages: 1, conversations: 3, tagged: 1 };
-        });
         const response = await GET(createRequest('http://localhost:3000/api/pages/page_1/contacts?tagIds=converted'),
             { params: Promise.resolve({ pageId: 'page_1' }) });
         const body = await response.json();
         expect(response.status).toBe(200);
         expect(body.items[0].tags).toEqual([expect.objectContaining({ id: 'converted', name: 'Converted' })]);
-        expect(body.autoTagRefresh).toEqual({ status: 'checked' });
-        expect(mocks.autoTag).toHaveBeenCalledWith({ pageId: 'page_1', conversationLimit: 3, maxProcessingTimeMs: 6000 });
-        expect(mocks.autoTag.mock.invocationCallOrder[0]).toBeLessThan(db.contactsSelect.mock.invocationCallOrder[0]);
+        expect(body).not.toHaveProperty('autoTagRefresh');
+        expect(mocks.autoTag).not.toHaveBeenCalled();
+        expect(db.contactsIn).toHaveBeenCalledWith('included_tag_filter.tag_id', ['converted']);
     });
 
-    it('keeps saved tags available and reports when the Messenger refresh cannot complete', async () => {
+    it('keeps saved tags available independently of Messenger worker availability', async () => {
         mocks.getServerSession.mockResolvedValue({ user: { id: 'user_1' } });
         mocks.getSupabaseAdmin.mockReturnValue(createSupabaseMock());
-        mocks.autoTag.mockRejectedValueOnce(new Error('Facebook history unavailable'));
+        mocks.autoTag.mockRejectedValue(new Error('Facebook history unavailable'));
         const response = await GET(createRequest('http://localhost:3000/api/pages/page_1/contacts'),
             { params: Promise.resolve({ pageId: 'page_1' }) });
         const body = await response.json();
         expect(response.status).toBe(200);
         expect(body.items[0].tags[0].name).toBe('VIP');
-        expect(body.autoTagRefresh).toMatchObject({ status: 'unavailable', message: expect.stringContaining('Saved tags are shown') });
+        expect(mocks.autoTag).not.toHaveBeenCalled();
     });
 
     it('does not return empty tag arrays as a successful response when the tag lookup fails', async () => {

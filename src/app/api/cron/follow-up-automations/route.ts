@@ -9,14 +9,28 @@ export const dynamic = 'force-dynamic';
 export async function GET(_request: NextRequest) {
     const startTime = Date.now();
 
+    // Start the primary job first, then run polling alongside it in this same
+    // authenticated scheduler invocation. Slow or failing follow-ups must not
+    // prevent the Page cursor from advancing. No extra cron or HTTP call.
+    const followUpTask = (async () => processDueFollowUpAutomationSteps({
+        supabase: getSupabaseAdmin(), limit: 10
+    }))();
+    const messagingAutoTagTask = (async () => {
+        const results = await Promise.allSettled(Array.from({ length: 3 }, async () =>
+            processOneMessagingAutoTagPage({ maxProcessingTimeMs: 18000, conversationLimit: 10 })));
+        return {
+            pages: results.reduce((sum, result) => sum + (result.status === 'fulfilled' ? result.value.pages : 0), 0),
+            conversations: results.reduce((sum, result) => sum + (result.status === 'fulfilled' ? result.value.conversations : 0), 0),
+            tagged: results.reduce((sum, result) => sum + (result.status === 'fulfilled' ? result.value.tagged : 0), 0),
+            errors: results.flatMap(result => result.status === 'rejected' ? [result.reason instanceof Error ? result.reason.message : String(result.reason)] : [])
+        };
+    })();
+
     try {
         // Follow-ups are this route's primary job. Run them before the nested
         // campaign worker, which can consume almost the entire external cron
         // request timeout when campaign delivery is slow.
-        const result = await processDueFollowUpAutomationSteps({
-            supabase: getSupabaseAdmin(),
-            limit: 10
-        });
+        const result = await followUpTask;
 
         // Reuse the already-configured minute job on cron-jobs.org to advance
         // durable immediate campaigns. Atomic recipient claims make this safe
@@ -46,19 +60,7 @@ export async function GET(_request: NextRequest) {
             }
         };
 
-        // The minute scheduler advances three independently claimed Pages per run.
-        // Keep this isolated so an unavailable Meta token cannot delay follow-ups.
-        const tagTask = async (): Promise<Record<string, unknown>> => {
-            const results = await Promise.allSettled(Array.from({ length: 3 }, () => processOneMessagingAutoTagPage()));
-            return {
-                pages: results.reduce((sum, result) => sum + (result.status === 'fulfilled' ? result.value.pages : 0), 0),
-                tagged: results.reduce((sum, result) => sum + (result.status === 'fulfilled' ? result.value.tagged : 0), 0),
-                errors: results.flatMap(result => result.status === 'rejected' ? [result.reason instanceof Error ? result.reason.message : String(result.reason)] : [])
-            };
-        };
-        // Both continuations start after follow-ups. An 18-second tag deadline
-        // must not begin after the campaign's 25-second request timeout.
-        const [campaignWorker, messagingAutoTag] = await Promise.all([campaignTask(), tagTask()]);
+        const [campaignWorker, messagingAutoTag] = await Promise.all([campaignTask(), messagingAutoTagTask]);
 
         return NextResponse.json({
             success: true,
@@ -69,10 +71,12 @@ export async function GET(_request: NextRequest) {
         });
     } catch (error) {
         console.error('Follow-up automation cron failed:', error);
+        const messagingAutoTag = await messagingAutoTagTask;
         return NextResponse.json(
             {
                 error: 'Follow-up automation cron failed',
                 message: (error as Error).message,
+                messagingAutoTag,
                 duration: Date.now() - startTime
             },
             { status: 500 }
