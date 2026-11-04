@@ -11,17 +11,19 @@ let needsInitialSync: boolean;
 let assignedPages: any[];
 let facebookPages: any[];
 let facebookError: boolean;
+let discoveryMessage: string | null;
 beforeEach(() => {
     vi.clearAllMocks();
     needsInitialSync = false;
     assignedPages = [];
     facebookPages = [{ id: 'facebook_page', name: 'Shared Page', tasks: ['MANAGE'] }];
     facebookError = false;
+    discoveryMessage = null;
     mocks.useSession.mockReturnValue({ data: { user: { id: 'new_manager', provider: 'facebook' } } });
     mocks.sync.mockResolvedValue({ completed: true, totalSynced: 1, totalFailed: 0 });
     vi.stubGlobal('fetch', vi.fn(async (url: string) => Response.json(url === '/api/facebook/pages'
         ? facebookError ? { error: 'Facebook authorization required', requiresReauth: true, message: 'Refresh Facebook permissions' } : { pages: facebookPages }
-        : url === '/api/pages' ? { pages: assignedPages }
+        : url.startsWith('/api/pages') ? { pages: assignedPages, facebookDiscovery: { message: discoveryMessage } }
         : { success: true, pageId: 'shared_page', needsInitialSync })));
 });
 afterEach(() => { act(() => screen?.unmount()); screen = undefined; vi.unstubAllGlobals(); });
@@ -63,12 +65,38 @@ describe('connecting a shared Page', () => {
         expect(mocks.sync).not.toHaveBeenCalled();
     });
 
+    it('keeps existing contacts available when automatic discovery of more Pages fails', async () => {
+        assignedPages = [{ id: 'assigned_page', fb_page_id: 'facebook_page', name: 'Existing Page' }];
+        discoveryMessage = 'Refresh Facebook permissions to discover additional Pages';
+        await act(async () => { screen = create(React.createElement(ConnectPage)); });
+        expect(screen!.root.findByProps({ href: '/dashboard/contacts?pageId=assigned_page' })).toBeTruthy();
+        expect(JSON.stringify(screen!.toJSON())).toContain(discoveryMessage);
+    });
+
     it('does not offer token refresh to a member with messaging-only access', async () => {
         assignedPages = [{ id: 'assigned_page', fb_page_id: 'facebook_page', name: 'Assigned Team Page' }];
         facebookPages = [{ id: 'facebook_page', name: 'Shared Page', tasks: ['PROFILE_PLUS_MESSAGING'] }];
         await act(async () => { screen = create(React.createElement(ConnectPage)); });
         expect(screen!.root.findAllByType('button').some(button => button.children.includes('Reconnect'))).toBe(false);
         expect(screen!.root.findByProps({ href: '/dashboard/contacts?pageId=assigned_page' })).toBeTruthy();
+    });
+
+    it.each(['MESSAGING', 'PROFILE_PLUS_MESSAGING', 'PAGES_MESSAGING'])('enables Connect for Facebook %s access without a Tokko assignment', async task => {
+        facebookPages = [{ id: 'facebook_page', name: 'Shared Page', tasks: [task] }];
+        await act(async () => { screen = create(React.createElement(ConnectPage)); });
+        const connect = screen!.root.findAllByType('button').find(button => button.children.includes('Connect'))!;
+        expect(connect.props.disabled).toBe(false);
+        expect(JSON.stringify(screen!.toJSON())).not.toContain('Ask your Tokko administrator');
+        expect(JSON.stringify(screen!.toJSON())).not.toContain('Ask your Tokko admin');
+        await act(async () => { await connect.props.onClick(); });
+        expect(mocks.sync).not.toHaveBeenCalled();
+        expect(fetch).toHaveBeenCalledWith('/api/pages?discoverFacebook=1');
+    });
+
+    it('keeps unsupported Facebook roles disabled with Facebook permission instructions', async () => {
+        facebookPages = [{ id: 'facebook_page', name: 'Analytics Page', tasks: ['ANALYZE'] }];
+        await act(async () => { screen = create(React.createElement(ConnectPage)); });
+        expect(screen!.root.findAllByType('button').find(button => button.children.includes('Facebook messaging access required'))?.props.disabled).toBe(true);
     });
 
     it('sends an explicit refresh request when a verified manager chooses Reconnect', async () => {

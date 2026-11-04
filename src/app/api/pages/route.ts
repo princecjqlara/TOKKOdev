@@ -125,9 +125,11 @@ export async function GET(request: NextRequest) {
         if (error) throw error;
         let facebookDiscovery: { restored: number; message?: string; requiresReauth?: boolean } | undefined;
         // Facebook sign-in admits the account independently of team invitations.
-        // Recover only existing Pages owned/managed by this verified Facebook
-        // identity. Membership-only polling remains a database read.
-        if (!userPages?.length && session.user.provider === 'facebook' && request.nextUrl?.searchParams.get('membershipOnly') !== '1') {
+        // Recover shared Pages verified through Facebook management or messaging
+        // access. Connect Pages can discover newly available Pages as well.
+        // Membership-only polling remains a database read.
+        if ((!userPages?.length || request.nextUrl?.searchParams.get('discoverFacebook') === '1')
+            && session.user.provider === 'facebook' && request.nextUrl?.searchParams.get('membershipOnly') !== '1') {
             try {
                 const restored = await restoreFacebookPageMemberships(session, supabase);
                 facebookDiscovery = { restored };

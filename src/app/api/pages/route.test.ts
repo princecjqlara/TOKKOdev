@@ -152,6 +152,18 @@ describe('GET /api/pages', () => {
         expect(mocks.restoreFacebookPages).not.toHaveBeenCalled();
     });
 
+    it('discovers additional shared Facebook Pages from Connect even when the user already has a Page', async () => {
+        const response = await GET(createRequest('?discoverFacebook=1'));
+        expect(response.status).toBe(200);
+        expect(mocks.restoreFacebookPages).toHaveBeenCalledOnce();
+    });
+
+    it('keeps explicit discovery out of lightweight membership polling', async () => {
+        expect((await GET(createRequest('?discoverFacebook=1&membershipOnly=1'))).status).toBe(200);
+        expect(mocks.restoreFacebookPages).not.toHaveBeenCalled();
+        expect(fetch).not.toHaveBeenCalled();
+    });
+
     it('preserves assigned Page access when its Facebook connection expires', async () => {
         vi.stubGlobal('fetch', vi.fn(async (url: URL) => {
             const accessToken = url.searchParams.get('access_token');

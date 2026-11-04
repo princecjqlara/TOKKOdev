@@ -285,7 +285,7 @@ export default function DashboardLayout({
                     {pagesLoaded && !pages.length && session.user.provider === 'facebook' && pathname !== '/dashboard/connect' && (
                         <div className="border-2 border-black p-4 mb-6 text-sm">
                             <p className="font-bold">Facebook sign-in is complete</p>
-                            <p className="mt-2">No connected Pages were found for this Facebook account. You can connect a Page you manage directly; a Tokko email invitation is not required.</p>
+                            <p className="mt-2">No connected Pages were found for this Facebook account. You can connect a Page you can manage or message directly; a Tokko email invitation is not required.</p>
                             {facebookDiscoveryMessage && <p className="mt-2 text-amber-800">{facebookDiscoveryMessage}</p>}
                             <Link href="/dashboard/connect" className="inline-block mt-3 font-bold underline">Find or connect Facebook Pages</Link>
                         </div>

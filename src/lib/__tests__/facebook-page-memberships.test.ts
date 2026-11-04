@@ -30,6 +30,7 @@ describe('automatic Page recovery for direct Facebook sign-in', () => {
         expect(f.upsert).toHaveBeenCalledWith([{ user_id: 'facebook_user', page_id: 'stored-page_1', grant_source: 'facebook' }],
             { onConflict: 'user_id,page_id', ignoreDuplicates: true });
         expect(f.from.mock.calls.map(([table]) => table)).toEqual(['pages', 'user_pages']);
+        expect(mocks.verified).toHaveBeenCalledWith(session, 'messaging');
         expect(JSON.stringify(f.upsert.mock.calls)).not.toContain('server_only');
     });
     it.each(['PROFILE_PLUS_MANAGE', 'PROFILE_PLUS_FULL_CONTROL'])('restores access for the modern management task %s', async task => {
@@ -37,8 +38,15 @@ describe('automatic Page recovery for direct Facebook sign-in', () => {
         const f = fixture();
         expect(await restoreFacebookPageMemberships(session, f.db)).toBe(1);
     });
-    it('does not enroll an app tester or messaging-only user in someone else’s Page', async () => {
-        mocks.verified.mockResolvedValue([{ id: 'page_1', access_token: 'token', tasks: ['PROFILE_PLUS_MESSAGING'] }]);
+    it.each(['MESSAGING', 'PROFILE_PLUS_MESSAGING', 'PAGES_MESSAGING'])('automatically grants shared Page use for %s without team administration', async task => {
+        mocks.verified.mockResolvedValue([{ id: 'page_1', access_token: 'token', tasks: [task] }]);
+        const f = fixture();
+        expect(await restoreFacebookPageMemberships(session, f.db)).toBe(1);
+        expect(f.upsert).toHaveBeenCalledWith([{ user_id: 'facebook_user', page_id: 'stored-page_1', grant_source: 'facebook_messaging' }],
+            { onConflict: 'user_id,page_id', ignoreDuplicates: true });
+    });
+    it.each(['PROFILE_PLUS_FACEBOOK_ACCESS', 'ANALYZE', 'MODERATE'])('does not grant messaging or contact access from %s alone', async task => {
+        mocks.verified.mockResolvedValue([{ id: 'page_1', access_token: 'token', tasks: [task] }]);
         const f = fixture();
         expect(await restoreFacebookPageMemberships(session, f.db)).toBe(0);
         expect(f.from).not.toHaveBeenCalled();
@@ -47,7 +55,7 @@ describe('automatic Page recovery for direct Facebook sign-in', () => {
     it('asks a recognized manager for Page consent instead of saying they lack management access', async () => {
         mocks.verified.mockResolvedValue([{ id: 'page_1', tasks: ['PROFILE_PLUS_FULL_CONTROL'] }]);
         const f = fixture();
-        await expect(restoreFacebookPageMemberships(session, f.db)).rejects.toMatchObject({ status: 409, message: expect.stringContaining('recognizes your Page management access') });
+        await expect(restoreFacebookPageMemberships(session, f.db)).rejects.toMatchObject({ status: 409, message: expect.stringContaining('recognizes your Page access') });
         expect(f.from).not.toHaveBeenCalled();
     });
     it('never grants access to an unverified Facebook Page ID', async () => {

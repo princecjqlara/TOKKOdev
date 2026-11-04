@@ -242,6 +242,7 @@ try {
     // Page MANAGE tasks; password identities are parent-owned subaccounts.
     await db.query(migration('database/migration_original_facebook_access.sql'));
     await db.query(migration('database/migration_parent_subaccounts.sql'));
+    await db.query(migration('database/migration_facebook_messaging_access.sql'));
     const oldOriginal = randomUUID();
     await db.query("INSERT INTO users(id,email,name) VALUES($1,'original-no-manage@example.test','Original app tester')",[oldOriginal]);
     await db.query("INSERT INTO user_pages(user_id,page_id,grant_source) VALUES($1,$2,'legacy'),($1,$3,'legacy')",[oldOriginal,pageA,pageB]);
@@ -254,6 +255,13 @@ try {
     await db.query("INSERT INTO users(id,email) VALUES($1,'old-no-pages@example.test')",[noPageOriginal]);
     assert.equal((await db.query(`SELECT * FROM ${schema}.tokko_resolve_facebook_user('old-no-pages','old-no-pages@example.test','Tester',NULL,NULL)`)).rows[0].user_id,noPageOriginal); checks++;
     await db.query("INSERT INTO tokko_page_managers(user_id,page_id,facebook_subject,authority_source) VALUES($1,$2,'app-tester-subject','original'),($1,$3,'app-tester-subject','original')",[oldOriginal,pageA,pageB]);
+    // Even a stale/forged manager proof cannot promote a messaging-only grant.
+    await db.query("UPDATE user_pages SET grant_source='facebook_messaging' WHERE user_id=$1 AND page_id=$2",[oldOriginal,pageA]);
+    await denied(`SELECT ${schema}.tokko_assert_manager($1,$2)`,[oldOriginal,[pageA]]);
+    await denied(`SELECT ${schema}.tokko_assert_manager($1,$2)`,[oldOriginal,[pageA,pageB]]);
+    await db.query(`SELECT ${schema}.tokko_assert_manager($1,$2)`,[oldOriginal,[pageB]]); checks++;
+    assert.equal(await scalar('SELECT count(*)::int value FROM user_pages WHERE user_id=$1',[oldOriginal]),2); checks++;
+    await db.query("UPDATE user_pages SET grant_source='legacy' WHERE user_id=$1 AND page_id=$2",[oldOriginal,pageA]);
     const saveSql = `SELECT ${schema}.tokko_save_subaccount($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14) value`;
     const temporaryArgs = [oldOriginal,[pageA,pageB],'temporary-team@example.test','Team Member',randomUUID(),'temporary-request','password','temporary-hash','','scrypt-v1$temporary',false,null,2,true];
     const temporary = await scalar(saveSql,temporaryArgs);

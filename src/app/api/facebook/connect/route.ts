@@ -7,7 +7,7 @@ import { selectTemplateStarterSet } from '@/lib/facebook-template-order';
 import type { UtilityTemplate } from '@/lib/facebook';
 import { verifiedFacebookPages } from '@/lib/page-managers';
 import { AccessError } from '@/lib/account-security';
-import { hasFacebookManagementTask } from '@/lib/facebook-page-capabilities';
+import { hasFacebookManagementTask, hasFacebookMessagingTask } from '@/lib/facebook-page-capabilities';
 
 type WebhookRefreshWarning = {
     code: 'WEBHOOK_SUBSCRIPTION_FAILED';
@@ -58,12 +58,15 @@ export async function POST(request: NextRequest) {
                 reusedConnection: true, warning: null, message: 'This Page is already assigned to you. Open Contacts to use its existing contacts and tags.' });
         }
 
-        const facebookPage = (await verifiedFacebookPages(session)).find(page => page.id === fbPageId);
-        if (!facebookPage || !hasFacebookManagementTask(facebookPage)) throw new AccessError(403, membership
+        const facebookPage = (await verifiedFacebookPages(session, 'messaging')).find(page => page.id === fbPageId);
+        if (!facebookPage || !hasFacebookMessagingTask(facebookPage)) throw new AccessError(403, membership
             ? 'This Page is already assigned to you. Open Contacts without reconnecting, or ask its Facebook Page administrator to refresh the shared connection.'
-            : 'Ask your Tokko administrator to assign this Page in Team Access. To connect a new Page yourself, accept its Facebook Page invitation with management access and refresh permissions. A Facebook app tester invitation alone does not grant Page access.');
+            : 'Facebook has not granted this account messaging access to this Page. Accept the Page invitation on Facebook, then refresh permissions and select the Page. A Facebook app tester invitation alone does not grant Page access.');
+        const canManage = hasFacebookManagementTask(facebookPage);
+        if (refreshConnection && !canManage) throw new AccessError(403,
+            'Your Facebook messaging access lets you use this Page in Tokko. Open Contacts without reconnecting. Refreshing its shared connection requires Facebook Page management access.');
         if (!facebookPage.access_token) throw new AccessError(409,
-            'Facebook recognizes your Page management access but did not provide a Page connection token. Refresh Facebook permissions, select this Page, and approve Tokko’s requested Page permissions.');
+            'Facebook recognizes your Page access but did not provide a Page connection token. Refresh Facebook permissions, select this Page, and approve Tokko’s requested Page permissions.');
         const name = facebookPage.name;
         const accessToken = facebookPage.access_token;
 
@@ -72,6 +75,47 @@ export async function POST(request: NextRequest) {
                 { error: 'Bad Request', message: 'Missing required fields: fbPageId, name, accessToken' },
                 { status: 400 }
             );
+        }
+
+        // Messaging staff can join an existing shared Page without replacing its
+        // connection or starting another import. Their role does not grant team
+        // administration. New Page creation also preserves concurrent connects.
+        if (!canManage) {
+            const findSharedPage = () => supabase.from('pages').select('id,last_synced_at')
+                .eq('fb_page_id', fbPageId).maybeSingle();
+            let { data: sharedPage, error: sharedError } = await findSharedPage();
+            if (sharedError) throw sharedError;
+            let created = false;
+            if (!sharedPage) {
+                const result = await supabase.from('pages').upsert({ fb_page_id: fbPageId, name,
+                    access_token: accessToken }, { onConflict: 'fb_page_id', ignoreDuplicates: true })
+                    .select('id,last_synced_at').maybeSingle();
+                if (result.error) throw result.error;
+                sharedPage = result.data;
+                created = !!sharedPage;
+                if (!sharedPage) {
+                    const resolved = await findSharedPage();
+                    if (resolved.error) throw resolved.error;
+                    sharedPage = resolved.data;
+                }
+            }
+            if (!sharedPage) throw new Error('Could not resolve the shared Facebook Page');
+            const { error: grantError } = await supabase.from('user_pages').upsert({
+                user_id: userId, page_id: sharedPage.id, grant_source: 'facebook_messaging'
+            }, { onConflict: 'user_id,page_id', ignoreDuplicates: true });
+            if (grantError) throw grantError;
+            let warning: WebhookRefreshWarning | null = null;
+            if (created) {
+                try {
+                    await subscribePageToAppWebhook(fbPageId, accessToken, ['messages', 'messaging_postbacks', 'message_echoes']);
+                } catch {
+                    warning = { code: 'WEBHOOK_SUBSCRIPTION_FAILED',
+                        message: 'Page connected. Facebook did not allow webhook setup with these permissions. A Facebook Page manager can reconnect to enable live updates.' };
+                }
+            }
+            return NextResponse.json({ success: true, pageId: sharedPage.id,
+                needsInitialSync: created, reusedConnection: !created, warning,
+                message: warning?.message || 'Facebook Page connected. Open Contacts to use its shared contacts and tags.' });
         }
 
         // One shared Page row even when two managers connect concurrently.

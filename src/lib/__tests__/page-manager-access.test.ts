@@ -49,6 +49,22 @@ describe('verified Facebook manager authority', () => {
         expect(db.upsert).not.toHaveBeenCalled();
     });
 
+    it('accepts verified messaging access only when Page use is requested', async () => {
+        mocks.db.mockReturnValue(database([]));
+        mocks.facebook.mockResolvedValue([{ id: 'fb-a', tasks: ['PROFILE_PLUS_MESSAGING'] },
+            { id: 'analytics-only', tasks: ['ANALYZE'] }, { id: 'manager', tasks: ['MANAGE'] }]);
+        expect((await verifiedFacebookPages(session, 'messaging')).map(page => page.id)).toEqual(['fb-a', 'manager']);
+        expect((await verifiedFacebookPages(session)).map(page => page.id)).toEqual(['manager']);
+    });
+
+    it('does not turn an automatic messaging membership into team administration', async () => {
+        const db = database([{ id: 'a', fb_page_id: 'fb-a', grant_source: 'facebook_messaging' },
+            { id: 'b', fb_page_id: 'fb-b', grant_source: 'facebook' }]); mocks.db.mockReturnValue(db);
+        expect((await teamAdministrationPages(session)).map(page => page.id)).toEqual(['b']);
+        await expect(requireTeamPageAdministrator(session, ['a'])).rejects.toMatchObject({ status: 403 });
+        expect(db.upsert).not.toHaveBeenCalled();
+    });
+
     it('returns a refresh-permissions response only when Facebook authorization has expired', async () => {
         mocks.facebook.mockRejectedValue(Object.assign(new Error('Expired token'), { requiresReauth: true }));
         await expect(verifiedFacebookPages(session)).rejects.toMatchObject({ status: 409 });

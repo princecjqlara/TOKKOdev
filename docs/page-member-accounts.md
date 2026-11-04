@@ -67,6 +67,7 @@ Apply migrations in this order, in transactions:
 6. `database/migration_parent_subaccounts.sql`.
 7. `database/migration_subaccount_cleanup_schedule.sql`.
 8. `database/migration_subaccount_first_login_profile.sql`.
+9. `database/migration_facebook_messaging_access.sql` (keeps messaging access separate from team administration).
 
 The scheduler migration installs `tokko-expired-subaccounts` in `pg_cron` when that extension is available. Otherwise configure an authenticated `GET /api/cron/subaccounts` every minute with `Authorization: Bearer <CRON_SECRET>`. This worker is independent of account email delivery. Inspect its `deleted` and `failed` counts and private access-audit records if cleanup fails.
 
@@ -127,14 +128,30 @@ are established during connection, reconnect, and contact sync.
 
 Facebook login is a complete account path; it does not require a Tokko email
 invitation. When that account has no Page memberships, the initial `/api/pages`
-load verifies the signed Facebook identity and its current Page management
-tasks. It links matching Pages that are already connected to Tokko, using
-`grant_source='facebook'` and duplicate-safe inserts. Existing shared contacts
-then appear without another import. Email matching is never used for this.
+load verifies the signed Facebook identity and its current management or
+messaging tasks. Connect Pages also discovers additional shared Pages for users
+who already have a membership. Matching Pages already connected to Tokko are
+linked using duplicate-safe inserts. Existing contacts and tags appear without
+another import. Email matching is never used for this.
 
 Recovery does not create Pages, replace shared tokens, reset sync progress,
-change existing grants, or enroll app testers or messaging-only users in
-unassigned Pages. Normal membership polling stays database-only. A Page not yet
-connected to Tokko can be connected by its verified Facebook manager from
-Connect Pages. Page/token consent failures are shown as permission-refresh
-actions, while Facebook sign-in itself remains independent of Page management.
+change existing grants, or enroll users based only on an app tester invitation,
+analytics, moderation, or general Facebook access tasks. Normal membership
+polling stays database-only. A Page not yet connected to Tokko can be connected
+using a server-verified Facebook Page token and management or messaging access.
+Messaging users reuse a shared connection without replacing its token or
+requesting another import; a concurrent first connection uses a duplicate-safe
+insert. New messaging connections attempt webhook setup and report a permission
+warning if Facebook requires a Page manager to complete it. They do not seed
+templates automatically. Page/token consent failures show permission-refresh
+actions. Existing assigned Pages remain visible during discovery failures.
+
+Management grants use `grant_source='facebook'`. Messaging grants use
+`facebook_messaging`, which both the application and `tokko_assert_manager`
+exclude from team administration, even if an old manager proof exists. Existing
+legacy and delegated grants retain their authorization rules. Refreshing a
+shared token still requires Facebook management; a verified manager can use
+Reconnect to update their messaging membership to a management grant. These
+memberships follow Tokko's existing assignment lifecycle and are not temporary
+Facebook permission leases. Removing Page access in Tokko revokes workspace
+access through the existing membership checks.

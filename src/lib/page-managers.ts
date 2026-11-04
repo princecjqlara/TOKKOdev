@@ -3,7 +3,7 @@ import { getFacebookPages, isFacebookReauthRequired } from './facebook';
 import { getFacebookServerToken } from './server-auth-token';
 import { getSupabaseAdmin } from './supabase';
 import { AccessError } from './account-security';
-import { hasFacebookManagementTask } from './facebook-page-capabilities';
+import { hasFacebookManagementTask, hasFacebookMessagingTask } from './facebook-page-capabilities';
 import { FACEBOOK_REAUTH_MESSAGE } from './facebook-permissions';
 
 export { hasFacebookManagementTask } from './facebook-page-capabilities';
@@ -33,6 +33,8 @@ export async function teamAdministrationPages(session: Session) {
         .select('grant_source,pages(id,fb_page_id,name)').eq('user_id', session.user.id!);
     if (error) throw error;
     return (data || []).flatMap(row => {
+        // Facebook messaging access grants workspace use, not team administration.
+        if (row.grant_source === 'facebook_messaging') return [];
         const page = Array.isArray(row.pages) ? row.pages[0] : row.pages;
         return page ? [{ ...page, authoritySource: 'original' as const }] : [];
     });
@@ -52,7 +54,7 @@ export async function requireTeamPageAdministrator(session: Session, pageIds: st
     return records;
 }
 
-export async function verifiedFacebookPages(session: Session) {
+export async function verifiedFacebookPages(session: Session, access: 'management' | 'messaging' = 'management') {
     if (!session.user?.id || session.user.provider !== 'facebook' || !session.user.facebookId) {
         throw new AccessError(403, 'Use your assigned Pages in Tokko. A Facebook Page administrator must connect a new Page.');
     }
@@ -68,7 +70,7 @@ export async function verifiedFacebookPages(session: Session) {
     }
     // Keep identity checks separate from Meta availability, and never merge by email.
     await verifyFacebookIdentity(session);
-    return pages.filter(hasFacebookManagementTask);
+    return pages.filter(access === 'messaging' ? hasFacebookMessagingTask : hasFacebookManagementTask);
 }
 
 export async function requireFacebookPageManager(session: Session, pageIds: string[]) {
