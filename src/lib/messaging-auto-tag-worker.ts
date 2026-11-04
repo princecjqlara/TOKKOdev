@@ -44,7 +44,9 @@ async function getMessagesSince(conversationId: string, token: string, since: st
     return messages;
 }
 
-export async function processOneMessagingAutoTagPage(options: { pageId?: string; maxProcessingTimeMs?: number } = {}) {
+export async function processOneMessagingAutoTagPage(options: {
+    pageId?: string; maxProcessingTimeMs?: number; conversationLimit?: number;
+} = {}) {
     const db = getSupabaseAdmin();
     const owner = randomUUID();
     const { data: claimed, error: pageError } = await db.rpc('claim_messaging_auto_tag_page', {
@@ -65,7 +67,7 @@ export async function processOneMessagingAutoTagPage(options: { pageId?: string;
         const since = new Date(Math.max(Date.parse(windowStart), Date.parse(current.messaging_auto_tag_checked_at) || 0)).toISOString();
 
         const batch = await getPageConversationsBatch(current.fb_page_id, current.access_token, {
-            limit: 10,
+            limit: Math.max(1, Math.min(10, Math.floor(options.conversationLimit || 10))),
             after: current.messaging_auto_tag_cursor,
             sinceTimestamp: since,
             signal: controller.signal

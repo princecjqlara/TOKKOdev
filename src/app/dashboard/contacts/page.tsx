@@ -309,6 +309,8 @@ export default function ContactsPage() {
     const [loading, setLoading] = useState(true);
     const [syncing, setSyncing] = useState(false);
     const [autoTagDuringSync, setAutoTagDuringSync] = useState(true);
+    const [contactFetchError, setContactFetchError] = useState<string | null>(null);
+    const [autoTagWarning, setAutoTagWarning] = useState<string | null>(null);
     const [exportingConversations, setExportingConversations] = useState(false);
     const [availableTemplates, setAvailableTemplates] = useState<AvailableTemplate[]>([]);
     const [selectedTemplateName, setSelectedTemplateName] = useState<string | null>(null);
@@ -542,7 +544,10 @@ export default function ContactsPage() {
             });
 
             const res = await fetch(`/api/pages/${selectedPageId}/contacts?${params}`);
-            const data = await res.json() as Omit<PaginatedResponse<Contact>, 'total'> & { total?: number | null };
+            const data = await res.json() as Omit<PaginatedResponse<Contact>, 'total'> & {
+                total?: number | null;
+                autoTagRefresh?: { status: 'checked' | 'idle' | 'unavailable'; message?: string };
+            };
 
             if (!res.ok) {
                 throw new Error((data as { message?: string }).message || `Failed to fetch contacts (${res.status})`);
@@ -553,6 +558,10 @@ export default function ContactsPage() {
             }
 
             setContacts(data.items || []);
+            setContactFetchError(null);
+            if (data.autoTagRefresh && data.autoTagRefresh.status !== 'idle') {
+                setAutoTagWarning(data.autoTagRefresh.message || null);
+            }
             if (typeof data.total === 'number') {
                 setTotal(data.total);
             }
@@ -561,12 +570,18 @@ export default function ContactsPage() {
                 return;
             }
             console.error('Error fetching contacts:', error);
+            setContactFetchError('Contacts and tags could not be refreshed. Please retry.');
         } finally {
             if (!silent) {
                 setLoading(false);
             }
         }
     }, [selectedPageId, page, pageSize, search, selectedTagFilters, excludedTagFilters, dateFrom, dateTo, dateFilterMode]);
+
+    useEffect(() => {
+        setContactFetchError(null);
+        setAutoTagWarning(null);
+    }, [selectedPageId]);
 
     useEffect(() => {
         if (!selectedPageId) return;
@@ -2065,6 +2080,10 @@ export default function ContactsPage() {
             </div>
 
             <p className="text-xs text-gray-500 mb-3">Contacts are shared with everyone assigned to this Page. One sync updates the whole team. Auto-tag follows this Page&apos;s setting in Settings.</p>
+            {(contactFetchError || autoTagWarning) && <div role="alert" className="border border-amber-500 bg-amber-50 p-3 text-sm mb-3">
+                <p>{contactFetchError || autoTagWarning}</p>
+                <button className="font-bold underline mt-1" onClick={() => void fetchContacts()}>Retry</button>
+            </div>}
             {/* Filters & Actions Bar */}
             <div className="wireframe-card mb-6 p-4">
                 <div className="flex flex-wrap items-center gap-4">

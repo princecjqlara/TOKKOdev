@@ -3,7 +3,8 @@ import type { NextRequest } from 'next/server';
 
 const mocks = vi.hoisted(() => ({
     getServerSession: vi.fn(),
-    getSupabaseAdmin: vi.fn()
+    getSupabaseAdmin: vi.fn(),
+    autoTag: vi.fn()
 }));
 
 vi.mock('next-auth', () => ({
@@ -17,6 +18,7 @@ vi.mock('@/lib/auth', () => ({
 vi.mock('@/lib/supabase', () => ({
     getSupabaseAdmin: mocks.getSupabaseAdmin
 }));
+vi.mock('@/lib/messaging-auto-tag-worker', () => ({ processOneMessagingAutoTagPage: mocks.autoTag }));
 
 import { GET } from './route';
 
@@ -32,8 +34,11 @@ function createSupabaseMock(options?: {
     includeContactIds?: string[];
     excludeContactIds?: string[];
     contactsData?: Array<Record<string, unknown>>;
+    tagRows?: any[];
+    tagError?: any;
+    hasAccess?: boolean;
 }) {
-    const userPageSingle = vi.fn().mockResolvedValue({ data: { page_id: 'page_1' }, error: null });
+    const userPageSingle = vi.fn().mockResolvedValue({ data: options?.hasAccess === false ? null : { page_id: 'page_1' }, error: null });
     const userPageEqPage = vi.fn().mockReturnValue({ single: userPageSingle });
     const userPageEqUser = vi.fn().mockReturnValue({ eq: userPageEqPage });
     const userPageSelect = vi.fn().mockReturnValue({ eq: userPageEqUser });
@@ -116,7 +121,7 @@ function createSupabaseMock(options?: {
         return contactTagsFilterQuery;
     });
     const contactTagsIn = vi.fn().mockReturnValue({ eq: contactTagsEq });
-    const contactTagRows = contactsData.flatMap((contact) =>
+    const contactTagRows = options?.tagRows ?? contactsData.flatMap((contact) =>
         Array.isArray(contact.contact_tags)
             ? contact.contact_tags.map((tagRow) => ({
                 contact_id: contact.id,
@@ -124,9 +129,14 @@ function createSupabaseMock(options?: {
             }))
             : []
     );
-    const contactTagRowsIn = vi.fn().mockResolvedValue({
-        data: contactTagRows,
-        error: null
+    const tagRanges: number[][] = [], tagBatches: string[][] = [];
+    const contactTagRowsIn = vi.fn((_: string, ids: string[]) => {
+        tagBatches.push(ids);
+        const chain: any = { order: () => chain, range: async (from: number, to: number) => {
+            tagRanges.push([from, to]);
+            return { data: contactTagRows.filter(row => ids.includes(row.contact_id)).slice(from, to + 1), error: options?.tagError || null };
+        } };
+        return chain;
     });
     const contactTagsSelect = vi.fn((columns: string) => {
         if (columns.includes('tag_id')) {
@@ -178,6 +188,7 @@ function createSupabaseMock(options?: {
         contactsOrder: contactsBuilder.order,
         contactTagsIn,
         contactTagRowsIn,
+        tagRanges, tagBatches,
         contactTagsEq
     };
 }
@@ -185,6 +196,7 @@ function createSupabaseMock(options?: {
 describe('GET /api/pages/[pageId]/contacts', () => {
     beforeEach(() => {
         vi.clearAllMocks();
+        mocks.autoTag.mockResolvedValue({ pages: 0, conversations: 0, tagged: 0 });
     });
 
     it('includes who added each tag in contact results', async () => {
@@ -205,6 +217,92 @@ describe('GET /api/pages/[pageId]/contacts', () => {
         expect(response.status).toBe(200);
         expect(body.items[0].tags[0].tagged_by_user_id).toBe('user_2');
         expect(body.items[0].tags[0].tagged_by_name).toBe('Teammate A');
+        expect(response.headers.get('Cache-Control')).toBe('private, no-store');
+    });
+
+    it('returns new automatic stage tags in the same contact fetch, before filtering tags', async () => {
+        mocks.getServerSession.mockResolvedValue({ user: { id: 'user_1' } });
+        const tagRows: any[] = [];
+        const db = createSupabaseMock({ tagRows }); mocks.getSupabaseAdmin.mockReturnValue(db);
+        mocks.autoTag.mockImplementationOnce(async () => {
+            tagRows.push({ contact_id: 'contact_1', tag_id: 'converted', created_by: null,
+                tags: { id: 'converted', name: 'Converted', owner_type: 'page', owner_id: 'page_1', page_id: 'page_1' } });
+            return { pages: 1, conversations: 3, tagged: 1 };
+        });
+        const response = await GET(createRequest('http://localhost:3000/api/pages/page_1/contacts?tagIds=converted'),
+            { params: Promise.resolve({ pageId: 'page_1' }) });
+        const body = await response.json();
+        expect(response.status).toBe(200);
+        expect(body.items[0].tags).toEqual([expect.objectContaining({ id: 'converted', name: 'Converted' })]);
+        expect(body.autoTagRefresh).toEqual({ status: 'checked' });
+        expect(mocks.autoTag).toHaveBeenCalledWith({ pageId: 'page_1', conversationLimit: 3, maxProcessingTimeMs: 6000 });
+        expect(mocks.autoTag.mock.invocationCallOrder[0]).toBeLessThan(db.contactsSelect.mock.invocationCallOrder[0]);
+    });
+
+    it('keeps saved tags available and reports when the Messenger refresh cannot complete', async () => {
+        mocks.getServerSession.mockResolvedValue({ user: { id: 'user_1' } });
+        mocks.getSupabaseAdmin.mockReturnValue(createSupabaseMock());
+        mocks.autoTag.mockRejectedValueOnce(new Error('Facebook history unavailable'));
+        const response = await GET(createRequest('http://localhost:3000/api/pages/page_1/contacts'),
+            { params: Promise.resolve({ pageId: 'page_1' }) });
+        const body = await response.json();
+        expect(response.status).toBe(200);
+        expect(body.items[0].tags[0].name).toBe('VIP');
+        expect(body.autoTagRefresh).toMatchObject({ status: 'unavailable', message: expect.stringContaining('Saved tags are shown') });
+    });
+
+    it('does not return empty tag arrays as a successful response when the tag lookup fails', async () => {
+        mocks.getServerSession.mockResolvedValue({ user: { id: 'user_1' } });
+        mocks.getSupabaseAdmin.mockReturnValue(createSupabaseMock({ tagError: { message: 'Tag lookup failed' } }));
+        const response = await GET(createRequest('http://localhost:3000/api/pages/page_1/contacts'),
+            { params: Promise.resolve({ pageId: 'page_1' }) });
+        expect(response.status).toBe(500);
+        expect(await response.json()).not.toHaveProperty('items');
+    });
+
+    it('reads all tag relations beyond the database row limit', async () => {
+        mocks.getServerSession.mockResolvedValue({ user: { id: 'user_1' } });
+        const tagRows = Array.from({ length: 1001 }, (_, i) => ({ contact_id: 'contact_1', tag_id: `tag-${i}`,
+            tags: { id: `tag-${i}`, name: `Tag ${i}`, owner_type: 'page', owner_id: 'page_1', page_id: 'page_1' } }));
+        const db = createSupabaseMock({ tagRows }); mocks.getSupabaseAdmin.mockReturnValue(db);
+        const body = await (await GET(createRequest('http://localhost:3000/api/pages/page_1/contacts'),
+            { params: Promise.resolve({ pageId: 'page_1' }) })).json();
+        expect(body.items[0].tags).toHaveLength(1001);
+        expect(db.tagRanges).toEqual([[0, 999], [1000, 1999]]);
+    });
+
+    it('bounds contact ID filters when a large list of contacts is fetched', async () => {
+        mocks.getServerSession.mockResolvedValue({ user: { id: 'user_1' } });
+        const db = createSupabaseMock({ contactsData: Array.from({ length: 205 }, (_, i) => ({ id: `contact-${i}` })), tagRows: [] });
+        mocks.getSupabaseAdmin.mockReturnValue(db);
+        const response = await GET(createRequest('http://localhost:3000/api/pages/page_1/contacts?pageSize=1000'),
+            { params: Promise.resolve({ pageId: 'page_1' }) });
+        expect(response.status).toBe(200);
+        expect(db.tagBatches.map(ids => ids.length)).toEqual([100, 100, 5]);
+    });
+
+    it('returns multiple Page stage tags while protecting private and other-Page tags', async () => {
+        mocks.getServerSession.mockResolvedValue({ user: { id: 'user_1' } });
+        const visible = ['Qualified', 'Not Qualified', 'Converted', 'Lost'];
+        const tagRows = visible.map(name => ({ contact_id: 'contact_1', tag_id: name,
+            tags: { id: name, name, owner_type: 'page', owner_id: 'page_1', page_id: 'page_1' } }));
+        tagRows.push({ contact_id: 'contact_1', tag_id: 'private',
+            tags: { id: 'private', name: 'Private', owner_type: 'user', owner_id: 'other-user', page_id: 'page_1' } },
+        { contact_id: 'contact_1', tag_id: 'foreign',
+            tags: { id: 'foreign', name: 'Other Page', owner_type: 'page', owner_id: 'page_2', page_id: 'page_2' } });
+        mocks.getSupabaseAdmin.mockReturnValue(createSupabaseMock({ tagRows }));
+        const body = await (await GET(createRequest('http://localhost:3000/api/pages/page_1/contacts'),
+            { params: Promise.resolve({ pageId: 'page_1' }) })).json();
+        expect(body.items[0].tags.map((tag: any) => tag.name)).toEqual(visible);
+    });
+
+    it.each([false, true])('skips Facebook tag polling for lightweight selection or unauthorized access: hasAccess=%s', async hasAccess => {
+        mocks.getServerSession.mockResolvedValue({ user: { id: 'user_1' } });
+        mocks.getSupabaseAdmin.mockReturnValue(createSupabaseMock({ hasAccess }));
+        const response = await GET(createRequest(`http://localhost:3000/api/pages/page_1/contacts${hasAccess ? '?includeTags=false' : ''}`),
+            { params: Promise.resolve({ pageId: 'page_1' }) });
+        expect(response.status).toBe(hasAccess ? 200 : 403);
+        expect(mocks.autoTag).not.toHaveBeenCalled();
     });
 
     it('returns the same existing contacts to two members of a shared Page without another sync', async () => {

@@ -6,6 +6,9 @@ import { authOptions } from '@/lib/auth';
 import { getSupabaseAdmin } from '@/lib/supabase';
 import { PaginatedResponse, Contact } from '@/types';
 import { normalizeContactName } from '../../../../../lib/contact-names';
+import { processOneMessagingAutoTagPage } from '@/lib/messaging-auto-tag-worker';
+import { chunkArray } from '@/lib/chunking';
+import { fetchAllSupabaseRows, SUPABASE_IN_FILTER_BATCH_SIZE } from '@/lib/supabase-pagination';
 
 type DateFilterMode = 'include' | 'exclude';
 type HumanAgentSort = 'expiring' | 'latest' | 'name_asc' | 'name_desc';
@@ -122,6 +125,23 @@ export async function GET(
             );
         }
 
+        // Refresh recent lead/order tags before applying tag filters and loading
+        // the response. The shared Page lease limits this to once a minute,
+        // including overlapping requests by different Page members. Selection
+        // exports that omit tags keep their lightweight, database-only path.
+        let autoTagRefresh: { status: 'checked' | 'idle' | 'unavailable'; message?: string } = { status: 'idle' };
+        if (includeTags) {
+            try {
+                const result = await processOneMessagingAutoTagPage({ pageId,
+                    conversationLimit: 3, maxProcessingTimeMs: 6000 });
+                autoTagRefresh = { status: result.pages ? 'checked' : 'idle' };
+            } catch {
+                logWarn('Auto-tag refresh did not finish; returning saved tags', { pageId });
+                autoTagRefresh = { status: 'unavailable', message:
+                    'Auto-tag could not refresh. Saved tags are shown. Retry Sync, or refresh Facebook permissions if the connection has expired.' };
+            }
+        }
+
         // Build query — fetch contacts WITHOUT the tag join. The tag join was
         // causing failures on large pages (e.g., "Zeus Media") because the
         // joined response could exceed Supabase row/size limits. Tags are
@@ -236,18 +256,13 @@ export async function GET(
         const tagsByContact = new Map<string, { tag_id: string; created_by: string | null; tags: Record<string, unknown> }[]>();
 
         if (includeTags && pageContactIds.length > 0) {
-            const { data: tagRows, error: tagError } = await supabase
-                .from('contact_tags')
-                .select('contact_id, tag_id, created_by, tags(*,tag_shares(shared_with_user_id))')
-                .in('contact_id', pageContactIds);
-
-            if (tagError) {
-                logWarn('Failed to fetch contact tags — returning contacts without tags', {
-                    pageId,
-                    message: tagError.message
-                });
-            } else {
-                for (const row of tagRows || []) {
+            // A contact can have several tags. Read every relation page rather
+            // than losing tags after PostgREST's row limit or oversized URL.
+            for (const batch of chunkArray(pageContactIds, SUPABASE_IN_FILTER_BATCH_SIZE)) {
+                const tagRows = await fetchAllSupabaseRows(supabase.from('contact_tags')
+                    .select('contact_id, tag_id, created_by, tags(*,tag_shares(shared_with_user_id))')
+                    .in('contact_id', batch).order('contact_id').order('tag_id'));
+                for (const row of tagRows) {
                     const list = tagsByContact.get(row.contact_id) || [];
                     const tagsField = (row as { tags?: unknown }).tags;
                     const tagsObj = tagsField && typeof tagsField === 'object' && !Array.isArray(tagsField)
@@ -330,8 +345,9 @@ export async function GET(
             items: transformedContacts,
             page,
             pageSize,
-            total: includeCount ? count || 0 : null
-        } as PaginatedResponse<Contact>);
+            total: includeCount ? count || 0 : null,
+            ...(includeTags ? { autoTagRefresh } : {})
+        } as PaginatedResponse<Contact>, { headers: { 'Cache-Control': 'private, no-store' } });
     } catch (error) {
         if (error instanceof AccessError) return NextResponse.json({ message: error.message }, { status: error.status });
         logError('Error fetching contacts', {

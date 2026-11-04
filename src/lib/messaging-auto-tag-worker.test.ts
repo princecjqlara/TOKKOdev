@@ -66,6 +66,11 @@ describe('bounded Messenger lead-stage polling', () => {
             ['lte', 'last_inbound_at', '2026-10-13T00:00:00.000Z']]);
         expect(fixture.fetchMock).not.toHaveBeenCalled();
     });
+    it.each([[3, 3], [100, 10], [-2, 1]])('bounds the contact-fetch conversation slice %s to %s', async (conversationLimit, expected) => {
+        workerFixture();
+        await processOneMessagingAutoTagPage({ pageId: 'page-1', conversationLimit, maxProcessingTimeMs: 6000 });
+        expect(mocks.getPageConversationsBatch).toHaveBeenCalledWith('fb-page', 'token', expect.objectContaining({ limit: expected }));
+    });
     it.each([null, '2026-10-05T23:59:59Z', '2026-10-14T00:00:00Z'])('rechecks an expired or invalid inbound window before tagging: %s', async lastInbound => {
         const fixture = workerFixture({ lastInbound });
         await expect(processOneMessagingAutoTagPage()).resolves.toMatchObject({ tagged: 0 });

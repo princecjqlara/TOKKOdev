@@ -36,6 +36,20 @@ Group conversations are skipped. Contacts refresh from the shared database;
 opening Contacts does not start another Facebook import. All Page members see
 the same contacts and Page tags; private personal tags retain their access rules.
 
+Contact reads that include tags also advance a small auto-tag slice before the
+contact query and its tag filters run. That slice checks at most three updated
+conversations with a six-second history budget, respects the Page switch and
+seven-day inbound window, and uses the same shared once-per-minute lease as the
+background worker. This allows an open Contacts screen to catch up even if its
+external scheduler has stopped. Lightweight selection reads with
+`includeTags=false` remain database-only. A disabled Page does not fetch Meta.
+
+Every tag relation is read using bounded contact-ID batches and database
+pagination, preserving multiple tags on large result sets. A tag lookup failure
+fails the contact refresh so the UI keeps its previous data instead of clearing
+tags. A Messenger scan failure returns the saved tags with a visible refresh
+notice. Contact responses are private and not cached.
+
 Apply `database/migration_messaging_lead_stage_tags.sql` after worker coordination
 and default-tag repair. It renames Paid / Availed Service to Converted and
 Unqualified to Not Qualified, preserving their IDs and existing assignments.
