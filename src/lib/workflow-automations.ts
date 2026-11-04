@@ -1,20 +1,15 @@
-import { sendMessage, sendMessengerMediaAttachment } from './facebook';
+import { getPageTemplates, sendMessage, sendMessengerMediaAttachment } from './facebook';
 import { ContactRecord, replaceTemplateVariables } from './placeholders';
 import { recordOutboundMessageEvent } from './outbound-message-events';
+import { followUpTemplateError, getFollowUpMessagingType, getFollowUpTemplates, MAX_FOLLOW_UP_DELAY_MINUTES,
+    type FollowUpStep, type FollowUpTemplate } from './follow-up-delivery';
 
-const HUMAN_AGENT_WINDOW_MS = 7 * 24 * 60 * 60 * 1000;
 const MAX_FOLLOW_UP_STEPS = 10;
-const MAX_STEP_DELAY_MINUTES = 10080;
 
 export type WorkflowReplyAction = 'stop' | 'reset' | 'continue';
 export type WorkflowAutomationMediaType = 'image' | 'video';
 
-export type WorkflowAutomationStep = {
-    message_text: string;
-    delay_minutes: number;
-    media_type?: WorkflowAutomationMediaType | null;
-    media_url?: string | null;
-};
+export type WorkflowAutomationStep = FollowUpStep;
 
 export type WorkflowAutomationRecord = {
     id: string;
@@ -106,13 +101,6 @@ export function workflowTextMatchesCode(messageText: string, code: string | null
     return normalizeWorkflowKeyword(messageText) === normalizeWorkflowKeyword(code);
 }
 
-function isWithinHumanAgentWindow(lastInteractionAt: string | null | undefined, now: Date): boolean {
-    if (!lastInteractionAt) return false;
-    const lastInteractionTime = new Date(lastInteractionAt).getTime();
-    if (!Number.isFinite(lastInteractionTime)) return false;
-    return now.getTime() - lastInteractionTime <= HUMAN_AGENT_WINDOW_MS;
-}
-
 function addMinutes(date: Date, minutes: number): string {
     return new Date(date.getTime() + Math.max(0, minutes) * 60 * 1000).toISOString();
 }
@@ -136,7 +124,7 @@ function normalizeStepDelay(value: unknown): number {
     if (!Number.isFinite(numericValue)) {
         return 0;
     }
-    return Math.min(MAX_STEP_DELAY_MINUTES, Math.max(0, Math.round(numericValue)));
+    return Math.min(MAX_FOLLOW_UP_DELAY_MINUTES, Math.max(0, Math.round(numericValue)));
 }
 
 function normalizeStepMediaType(value: unknown): WorkflowAutomationMediaType | null {
@@ -163,9 +151,14 @@ export function normalizeWorkflowSteps(
                     : '',
             delay_minutes: normalizeStepDelay(step.delay_minutes ?? step.delayMinutes),
             media_type: normalizeStepMediaType(step.media_type ?? step.mediaType),
-            media_url: normalizeStepMediaUrl(step.media_url ?? step.mediaUrl)
+            media_url: normalizeStepMediaUrl(step.media_url ?? step.mediaUrl),
+            template_name: typeof step.template_name === 'string' ? step.template_name.trim() || null : null,
+            template_language: typeof step.template_language === 'string' ? step.template_language.trim().replace('-', '_') || 'en_US' : 'en_US',
+            template_parameters: Array.isArray(step.template_parameters)
+                ? step.template_parameters.map(value => typeof value === 'string' ? value : '') : [],
+            use_template: step.use_template === true
         }))
-        .filter((step) => step.message_text.length > 0 || Boolean(step.media_url))
+        .filter((step) => step.message_text.length > 0 || Boolean(step.media_url) || Boolean(step.template_name))
         .map((step) => ({
             ...step,
             media_type: step.media_url ? (step.media_type || 'image') : null
@@ -467,7 +460,7 @@ export async function processDueFollowUpAutomationSteps(params: {
                 reply_action,
                 pages(fb_page_id, access_token)
             ),
-            contacts(id, psid, page_id, name, last_interaction_at)
+            contacts(id, psid, page_id, name, last_interaction_at, last_inbound_at)
         `)
         .eq('status', 'active')
         .lte('next_step_at', now.toISOString())
@@ -481,6 +474,7 @@ export async function processDueFollowUpAutomationSteps(params: {
 
     const states = (data || []) as Array<Record<string, any>>;
     result.checked = states.length;
+    const templateCache = new Map<string, Promise<FollowUpTemplate[]>>();
 
     for (const state of states) {
         try {
@@ -490,7 +484,7 @@ export async function processDueFollowUpAutomationSteps(params: {
             const contact = Array.isArray(state.contacts) ? state.contacts[0] : state.contacts;
             const page = Array.isArray(rawAutomation?.pages) ? rawAutomation.pages[0] : rawAutomation?.pages;
 
-            if (!state.id || !rawAutomation?.enabled || !contact?.psid || !page?.access_token) {
+            if (!state.id || !rawAutomation?.enabled || !contact?.psid || !page?.access_token || contact.page_id !== rawAutomation.page_id) {
                 result.skipped += 1;
                 continue;
             }
@@ -509,11 +503,14 @@ export async function processDueFollowUpAutomationSteps(params: {
                 continue;
             }
 
-            if (!isWithinHumanAgentWindow(contact.last_interaction_at, now)) {
+            // Recheck at delivery time: cron delays and later customer replies
+            // can change the route selected by the schedule preview.
+            const messagingType = step.use_template ? 'UTILITY' : getFollowUpMessagingType(contact.last_inbound_at, params.now ?? new Date());
+            if (messagingType === 'UTILITY' && !step.template_name) {
                 await updateAutomationState(supabase, state.id, {
                     status: 'stopped',
                     stopped_at: now.toISOString(),
-                    stopped_reason: 'outside_human_agent_window',
+                    stopped_reason: 'template_required',
                     next_step_at: null
                 });
                 result.stopped += 1;
@@ -532,50 +529,48 @@ export async function processDueFollowUpAutomationSteps(params: {
                 ? replaceTemplateVariables(step.media_url, placeholderContact).trim()
                 : '';
 
-            if (!messageToSend && !mediaUrl) {
+            if (messagingType === 'UTILITY' || (!messageToSend && !mediaUrl && step.template_name)) {
+                if (!templateCache.has(automation.page_id)) {
+                    templateCache.set(automation.page_id, getPageTemplates(page.fb_page_id, page.access_token).then(getFollowUpTemplates));
+                }
+                const templates = await templateCache.get(automation.page_id)!;
+                const resolvedStep = { ...step, template_parameters: (step.template_parameters || [])
+                    .map(value => replaceTemplateVariables(value, placeholderContact).trim()), media_url: mediaUrl || null };
+                const validationError = followUpTemplateError(resolvedStep, templates);
+                if (validationError) {
+                    await updateAutomationState(supabase, state.id, { status: 'stopped', stopped_at: now.toISOString(),
+                        stopped_reason: 'template_unavailable', next_step_at: null });
+                    result.stopped += 1;
+                    continue;
+                }
+                const selected = templates.find(template => template.name === step.template_name &&
+                    template.language === (step.template_language || 'en_US').replace('-', '_'))!;
+                const sent = await sendMessage(page.fb_page_id, page.access_token, contact.psid, messageToSend, 'UTILITY',
+                    selected.name, selected.language, resolvedStep.template_parameters, undefined,
+                    selected.mediaType ? { type: selected.mediaType, url: mediaUrl } : undefined);
+                await recordOutboundMessageEvent(supabase, { pageId: automation.page_id, contactId: contact.id,
+                    messageId: sent.message_id, sourceType: 'automation', sourceId: automation.id,
+                    sourceName: automation.name, messageKind: `UTILITY (${selected.name})` });
+            } else if (!messageToSend && !mediaUrl) {
                 result.skipped += 1;
                 continue;
-            }
-
-            if (messageToSend) {
-                const sendResult = await sendMessage(
-                    page.fb_page_id,
-                    page.access_token,
-                    contact.psid,
-                    messageToSend,
-                    'HUMAN_AGENT'
-                );
-                await recordOutboundMessageEvent(supabase, {
-                    pageId: automation.page_id,
-                    contactId: contact.id,
-                    messageId: sendResult.message_id,
-                    sourceType: 'automation',
-                    sourceId: automation.id,
-                    sourceName: automation.name,
-                    messageKind: 'HUMAN_AGENT'
-                });
-            }
-
-            if (mediaUrl) {
-                const mediaSendResult = await sendMessengerMediaAttachment(
-                    page.fb_page_id,
-                    page.access_token,
-                    contact.psid,
-                    {
-                        type: step.media_type || 'image',
-                        url: mediaUrl
-                    },
-                    'HUMAN_AGENT'
-                );
-                await recordOutboundMessageEvent(supabase, {
-                    pageId: automation.page_id,
-                    contactId: contact.id,
-                    messageId: mediaSendResult.message_id,
-                    sourceType: 'automation',
-                    sourceId: automation.id,
-                    sourceName: automation.name,
-                    messageKind: `${step.media_type || 'image'} attachment`
-                });
+            } else {
+                if (messageToSend) {
+                    const sendResult = await sendMessage(page.fb_page_id, page.access_token, contact.psid, messageToSend, messagingType);
+                    await recordOutboundMessageEvent(supabase, {
+                        pageId: automation.page_id, contactId: contact.id, messageId: sendResult.message_id,
+                        sourceType: 'automation', sourceId: automation.id, sourceName: automation.name, messageKind: messagingType
+                    });
+                }
+                if (mediaUrl) {
+                    const mediaSendResult = await sendMessengerMediaAttachment(page.fb_page_id, page.access_token, contact.psid,
+                        { type: step.media_type || 'image', url: mediaUrl }, messagingType);
+                    await recordOutboundMessageEvent(supabase, {
+                        pageId: automation.page_id, contactId: contact.id, messageId: mediaSendResult.message_id,
+                        sourceType: 'automation', sourceId: automation.id, sourceName: automation.name,
+                        messageKind: `${step.media_type || 'image'} attachment`
+                    });
+                }
             }
 
             const nextStepIndex = stepIndex + 1;

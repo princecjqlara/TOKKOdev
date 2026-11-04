@@ -3,6 +3,7 @@ import { getServerSession } from 'next-auth';
 import { authOptions } from '@/lib/auth';
 import { getSupabaseAdmin } from '@/lib/supabase';
 import { normalizeWorkflowReplyAction, normalizeWorkflowSteps } from '@/lib/workflow-automations';
+import { FollowUpValidationError, validateFollowUpConfiguration } from '@/lib/workflow-template-validation';
 
 export const dynamic = 'force-dynamic';
 
@@ -101,6 +102,18 @@ export async function PATCH(
             );
         }
 
+        if (payload.steps || payload.enabled === true) {
+            let steps = payload.steps as ReturnType<typeof normalizeWorkflowSteps> | undefined;
+            if (!steps) {
+                const { data: existing, error: readError } = await supabase.from('workflow_automations')
+                    .select('steps,message_text,cooldown_minutes').eq('id', automationId).eq('page_id', pageId).single();
+                if (readError) throw readError;
+                if (!existing) return NextResponse.json({ error: 'Not Found' }, { status: 404 });
+                steps = normalizeWorkflowSteps(existing.steps, existing.message_text, existing.cooldown_minutes);
+            }
+            await validateFollowUpConfiguration(supabase, pageId, steps);
+        }
+
         const { data, error } = await supabase
             .from('workflow_automations')
             .update(payload)
@@ -116,6 +129,7 @@ export async function PATCH(
 
         return NextResponse.json({ automation: data });
     } catch (error) {
+        if (error instanceof FollowUpValidationError) return NextResponse.json({ error: 'Bad Request', message: error.message }, { status: 400 });
         console.error('Workflow automation PATCH error:', error);
         return NextResponse.json({ error: 'Internal error' }, { status: 500 });
     }

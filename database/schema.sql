@@ -248,7 +248,7 @@
         updated_at TIMESTAMPTZ DEFAULT NOW(),
         CONSTRAINT workflow_automations_trigger_type_check CHECK (trigger_type IN ('contact_reply', 'follow_up')),
         CONSTRAINT workflow_automations_reply_action_check CHECK (reply_action IN ('stop', 'reset', 'continue')),
-        CONSTRAINT workflow_automations_cooldown_minutes_check CHECK (cooldown_minutes >= 0 AND cooldown_minutes <= 10080)
+        CONSTRAINT workflow_automations_cooldown_minutes_check CHECK (cooldown_minutes >= 0 AND cooldown_minutes <= 525600)
     );
 
     -- Workflow automation states table (per-contact progress and send history)

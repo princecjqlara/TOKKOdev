@@ -2,17 +2,20 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const mocks = vi.hoisted(() => ({
     sendMessage: vi.fn(),
-    sendMessengerMediaAttachment: vi.fn()
+    sendMessengerMediaAttachment: vi.fn(),
+    getPageTemplates: vi.fn()
 }));
 
 vi.mock('../facebook', () => ({
     sendMessage: mocks.sendMessage,
-    sendMessengerMediaAttachment: mocks.sendMessengerMediaAttachment
+    sendMessengerMediaAttachment: mocks.sendMessengerMediaAttachment,
+    getPageTemplates: mocks.getPageTemplates
 }));
 
 import {
     handleFollowUpWorkflowContactReply,
     normalizeWorkflowKeyword,
+    normalizeWorkflowSteps,
     processDueFollowUpAutomationSteps,
     stopWorkflowAutomationsFromPageMessage,
     workflowTextMatchesCode
@@ -118,6 +121,9 @@ describe('workflow automations', () => {
     beforeEach(() => {
         mocks.sendMessage.mockReset();
         mocks.sendMessengerMediaAttachment.mockReset();
+        mocks.getPageTemplates.mockReset();
+        mocks.getPageTemplates.mockResolvedValue([{ name: 'follow_up', language: 'en_US', category: 'UTILITY', status: 'APPROVED',
+            components: [{ type: 'BODY', text: 'Hello {{1}}' }] }]);
         mocks.sendMessage.mockResolvedValue({ message_id: 'mid_1' });
         mocks.sendMessengerMediaAttachment.mockResolvedValue({ message_id: 'mid_media_1' });
     });
@@ -126,6 +132,75 @@ describe('workflow automations', () => {
         expect(normalizeWorkflowKeyword('  #StopAuto   Now  ')).toBe('#stopauto now');
         expect(workflowTextMatchesCode(' #STOPAUTO ', '#stopauto')).toBe(true);
         expect(workflowTextMatchesCode('please #stopauto', '#stopauto')).toBe(false);
+    });
+
+    it('preserves delays beyond seven days and template-only steps', () => {
+        expect(normalizeWorkflowSteps([{ message_text: '', delay_minutes: 8 * 1440, template_name: 'follow_up',
+            template_language: 'en-US', template_parameters: ['{{first_name}}'] }])).toMatchObject([
+            { delay_minutes: 11520, template_name: 'follow_up', template_language: 'en_US', template_parameters: ['{{first_name}}'] }
+        ]);
+    });
+
+    function dueFixture(inbound: string | null, step: Record<string, unknown> = {}, extra = {}) {
+        return createWorkflowSupabaseMock({ states: [{ id: 'state_1', automation_id: automation.id, contact_id: 'contact_1',
+            status: 'active', current_step_index: 0, next_step_at: '2026-07-28T00:00:00Z', workflow_automations: {
+                ...automation, steps: [{ message_text: 'Hi {{first_name}}', delay_minutes: 60, ...step }],
+                pages: { fb_page_id: 'fb_page_1', access_token: 'token_1' }
+            }, contacts: { id: 'contact_1', psid: 'psid_1', page_id: 'page_1', name: 'Juan Dela Cruz',
+                last_interaction_at: '2026-07-29T00:00:00Z', last_inbound_at: inbound, ...extra } }] });
+    }
+
+    it('selects a standard response for a recent inbound reply', async () => {
+        const { supabase } = dueFixture('2026-07-28T23:00:00Z');
+        expect((await processDueFollowUpAutomationSteps({ supabase, now: new Date('2026-07-29T00:00:00Z') })).sent).toBe(1);
+        expect(mocks.sendMessage).toHaveBeenCalledWith('fb_page_1', 'token_1', 'psid_1', 'Hi Juan', 'RESPONSE');
+        expect(mocks.getPageTemplates).not.toHaveBeenCalled();
+    });
+
+    it('uses the selected approved template after the window expires, even for a late cron run', async () => {
+        const { supabase, stateUpdates } = dueFixture('2026-07-21T00:00:00Z', { template_name: 'follow_up',
+            template_language: 'en_US', template_parameters: ['{{first_name}}'] });
+        const result = await processDueFollowUpAutomationSteps({ supabase, now: new Date('2026-07-29T00:00:00Z') });
+        expect(result).toMatchObject({ sent: 1, completed: 1, stopped: 0 });
+        expect(mocks.sendMessage).toHaveBeenCalledWith('fb_page_1', 'token_1', 'psid_1', 'Hi Juan', 'UTILITY',
+            'follow_up', 'en_US', ['Juan'], undefined, undefined);
+        expect(stateUpdates[0]).toMatchObject({ status: 'completed' });
+    });
+
+    it.each([null, 'invalid', '2026-07-21T00:00:00Z', '2026-07-29T00:01:00Z'])('stops without a template when inbound eligibility is missing or expired: %s', async inbound => {
+        const { supabase, stateUpdates } = dueFixture(inbound);
+        const result = await processDueFollowUpAutomationSteps({ supabase, now: new Date('2026-07-29T00:00:00Z') });
+        expect(result).toMatchObject({ stopped: 1, sent: 0 });
+        expect(mocks.sendMessage).not.toHaveBeenCalled();
+        expect(mocks.sendMessengerMediaAttachment).not.toHaveBeenCalled();
+        expect(stateUpdates[0]).toMatchObject({ status: 'stopped', stopped_reason: 'template_required' });
+    });
+
+    it('never falls back to a different template when approval is revoked', async () => {
+        const { supabase, stateUpdates } = dueFixture('2026-07-21T00:00:00Z', { template_name: 'follow_up', template_parameters: ['Juan'] });
+        mocks.getPageTemplates.mockResolvedValue([{ name: 'follow_up', status: 'REJECTED', language: 'en_US', category: 'UTILITY', components: [] }]);
+        expect((await processDueFollowUpAutomationSteps({ supabase, now: new Date('2026-07-29T00:00:00Z') })).stopped).toBe(1);
+        expect(mocks.sendMessage).not.toHaveBeenCalled();
+        expect(stateUpdates[0]).toMatchObject({ stopped_reason: 'template_unavailable' });
+    });
+
+    it('honors explicit template delivery inside an open reply window', async () => {
+        const { supabase } = dueFixture('2026-07-28T23:00:00Z', { use_template: true, template_name: 'follow_up',
+            template_language: 'en_US', template_parameters: ['{{first_name}}'] });
+        expect((await processDueFollowUpAutomationSteps({ supabase, now: new Date('2026-07-29T00:00:00Z') })).sent).toBe(1);
+        expect(mocks.sendMessage).toHaveBeenCalledWith('fb_page_1', 'token_1', 'psid_1', 'Hi Juan', 'UTILITY',
+            'follow_up', 'en_US', ['Juan'], undefined, undefined);
+    });
+
+    it('puts media inside the approved template header outside seven days', async () => {
+        const { supabase } = dueFixture('2026-07-21T00:00:00Z', { template_name: 'follow_up', template_parameters: ['Juan'],
+            media_type: 'image', media_url: 'https://example.com/photo.jpg' });
+        mocks.getPageTemplates.mockResolvedValue([{ name: 'follow_up', status: 'APPROVED', language: 'en_US', category: 'UTILITY',
+            components: [{ type: 'BODY', text: 'Hello {{1}}' }, { type: 'HEADER', format: 'IMAGE' }] }]);
+        expect((await processDueFollowUpAutomationSteps({ supabase, now: new Date('2026-07-29T00:00:00Z') })).sent).toBe(1);
+        expect(mocks.sendMessage).toHaveBeenCalledWith('fb_page_1', 'token_1', 'psid_1', 'Hi Juan', 'UTILITY',
+            'follow_up', 'en_US', ['Juan'], undefined, { type: 'image', url: 'https://example.com/photo.jpg' });
+        expect(mocks.sendMessengerMediaAttachment).not.toHaveBeenCalled();
     });
 
     it('resets a follow-up sequence to step 1 when configured to reset on contact reply', async () => {
@@ -310,7 +385,8 @@ describe('workflow automations', () => {
                     page_id: 'page_1',
                     psid: 'psid_1',
                     name: 'Juan Dela Cruz',
-                    last_interaction_at: '2026-07-29T02:00:00.000Z'
+                    last_interaction_at: '2026-07-29T02:00:00.000Z',
+                    last_inbound_at: '2026-07-27T02:00:00.000Z'
                 }
             }]
         });
@@ -359,7 +435,8 @@ describe('workflow automations', () => {
                     page_id: 'page_1',
                     psid: 'psid_1',
                     name: 'Juan Dela Cruz',
-                    last_interaction_at: '2026-07-29T02:00:00.000Z'
+                    last_interaction_at: '2026-07-29T02:00:00.000Z',
+                    last_inbound_at: '2026-07-27T02:00:00.000Z'
                 }
             }]
         });
@@ -417,7 +494,8 @@ describe('workflow automations', () => {
                     page_id: 'page_1',
                     psid: 'psid_1',
                     name: 'Juan Dela Cruz',
-                    last_interaction_at: '2026-07-29T02:00:00.000Z'
+                    last_interaction_at: '2026-07-29T02:00:00.000Z',
+                    last_inbound_at: '2026-07-27T02:00:00.000Z'
                 }
             }]
         });

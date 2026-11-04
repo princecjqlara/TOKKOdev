@@ -1,7 +1,9 @@
 'use client';
 
 import { useSession } from 'next-auth/react';
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import { followUpNeedsTemplate, followUpStepError, followUpTemplateError, getFollowUpTemplates,
+    MAX_FOLLOW_UP_DELAY_MINUTES, type FollowUpStep, type FollowUpTemplate } from '@/lib/follow-up-delivery';
 import {
     Check,
     Copy,
@@ -41,12 +43,7 @@ type WorkflowAutomation = {
 type ReplyAction = 'stop' | 'reset' | 'continue';
 type AutomationMediaType = 'image' | 'video';
 
-type AutomationStep = {
-    message_text: string;
-    delay_minutes: number;
-    media_type?: AutomationMediaType | null;
-    media_url?: string | null;
-};
+type AutomationStep = FollowUpStep;
 
 type AutomationForm = {
     id?: string;
@@ -98,24 +95,33 @@ function normalizeSteps(value: unknown, fallbackMessageText?: string, fallbackDe
                     ? step.media_url
                     : typeof step.mediaUrl === 'string'
                         ? step.mediaUrl
-                        : ''
+                        : '',
+                template_name: typeof step.template_name === 'string' ? step.template_name : null,
+                template_language: typeof step.template_language === 'string' ? step.template_language : 'en_US',
+                template_parameters: Array.isArray(step.template_parameters)
+                    ? step.template_parameters.map(value => typeof value === 'string' ? value : '') : [],
+                use_template: step.use_template === true
             }))
-            .filter((step) => step.message_text.trim() || step.media_url.trim())
+            .filter((step) => step.message_text.trim() || step.media_url.trim() || step.template_name)
         : [];
 
     if (steps.length > 0) {
         return steps.slice(0, 10).map((step) => ({
             message_text: step.message_text,
-            delay_minutes: Math.min(10080, Math.max(0, Math.round(Number.isFinite(step.delay_minutes) ? step.delay_minutes : 0))),
+            delay_minutes: Math.min(MAX_FOLLOW_UP_DELAY_MINUTES, Math.max(0, Math.round(Number.isFinite(step.delay_minutes) ? step.delay_minutes : 0))),
             media_type: step.media_url.trim() ? (step.media_type || 'image') : null,
-            media_url: step.media_url.trim() || null
+            media_url: step.media_url.trim() || null,
+            template_name: step.template_name,
+            template_language: step.template_language,
+            template_parameters: step.template_parameters,
+            use_template: step.use_template
         }));
     }
 
     if (fallbackMessageText?.trim()) {
         return [{
             message_text: fallbackMessageText,
-            delay_minutes: Math.min(10080, Math.max(0, Math.round(fallbackDelayMinutes || 0))),
+            delay_minutes: Math.min(MAX_FOLLOW_UP_DELAY_MINUTES, Math.max(0, Math.round(fallbackDelayMinutes || 0))),
             media_type: null,
             media_url: null
         }];
@@ -140,6 +146,9 @@ export default function AutomationsPage() {
     const [resettingId, setResettingId] = useState<string | null>(null);
     const [status, setStatus] = useState<string | null>(null);
     const [error, setError] = useState<string | null>(null);
+    const [templates, setTemplates] = useState<FollowUpTemplate[]>([]);
+    const [templatesLoading, setTemplatesLoading] = useState(false);
+    const [templatesError, setTemplatesError] = useState<string | null>(null);
 
     useEffect(() => {
         if (!session) return;
@@ -185,6 +194,22 @@ export default function AutomationsPage() {
         void fetchAutomations();
     }, [fetchAutomations]);
 
+    useEffect(() => {
+        if (!selectedPageId) return;
+        let cancelled = false;
+        setTemplates([]);
+        setTemplatesLoading(true);
+        setTemplatesError(null);
+        fetch(`/api/facebook/templates?pageId=${encodeURIComponent(selectedPageId)}`)
+            .then(async response => {
+                const data = await response.json();
+                if (!response.ok) throw new Error(data.message || 'Could not load approved templates.');
+                if (!cancelled) setTemplates(getFollowUpTemplates(data.templates || []));
+            }).catch(loadError => { if (!cancelled) setTemplatesError(loadError.message); })
+            .finally(() => { if (!cancelled) setTemplatesLoading(false); });
+        return () => { cancelled = true; };
+    }, [selectedPageId]);
+
     const selectedPageName = useMemo(
         () => pages.find((page) => page.id === selectedPageId)?.name || 'Selected page',
         [pages, selectedPageId]
@@ -213,6 +238,7 @@ export default function AutomationsPage() {
 
     const saveAutomation = async () => {
         if (!selectedPageId) return;
+        if (configurationError) { setError(configurationError); return; }
 
         setSaving(true);
         setStatus(null);
@@ -385,7 +411,11 @@ export default function AutomationsPage() {
         }));
     };
 
-    const hasValidStep = form.steps.some((step) => step.message_text.trim() || step.media_url?.trim());
+    const configurationError = followUpStepError(form.steps) || form.steps.reduce<string | null>((message, step, index) => {
+        if (message || !step.template_name) return message;
+        const templateError = templatesLoading ? 'Wait for approved templates to load.' : followUpTemplateError(step, templates);
+        return templateError ? `Step ${index + 1}: ${templateError}` : null;
+    }, null);
 
     return (
         <div className="max-w-6xl mx-auto">
@@ -397,7 +427,7 @@ export default function AutomationsPage() {
                     <div>
                         <h1 className="text-2xl font-black uppercase text-black">Automations</h1>
                         <p className="text-xs text-gray-500 font-mono">
-                            Multi-step follow-up workflows using Messenger Human Agent within the 7 day window
+                            Automatically select the reply window or your chosen approved template
                         </p>
                     </div>
                 </div>
@@ -428,7 +458,7 @@ export default function AutomationsPage() {
                         <label className="font-mono text-xs font-bold uppercase text-gray-500 mb-2 block">Page</label>
                         <select
                             value={selectedPageId}
-                            onChange={(event) => setSelectedPageId(event.target.value)}
+                                onChange={(event) => { setSelectedPageId(event.target.value); setForm(emptyForm); setError(null); setStatus(null); }}
                             className="input-wireframe w-full text-sm"
                         >
                             {pages.map((page) => (
@@ -495,6 +525,13 @@ export default function AutomationsPage() {
                     </div>
 
                     <div className="p-4 space-y-4">
+                        <p className="text-xs text-gray-600 border border-gray-300 p-3">
+                            Delivery uses the customer&apos;s last incoming message: standard reply within 24 hours,
+                            Human Agent within seven days, then an approved template you choose. Delays add up across steps.
+                            Every send checks the window again, so a late run needs a template fallback.
+                            {' '}Human Agent is intended for human-handled support and requires approved app access.
+                            Choose &quot;Always use this template&quot; for template delivery inside the window too.
+                        </p>
                         <div>
                             <label className="font-mono text-xs font-bold uppercase text-gray-500 mb-2 block">Automation Name</label>
                             <input
@@ -519,7 +556,12 @@ export default function AutomationsPage() {
                                 </button>
                             </div>
                             <div className="space-y-3">
-                                {form.steps.map((step, index) => (
+                                {form.steps.map((step, index) => {
+                                    const needsTemplate = followUpNeedsTemplate(form.steps, index);
+                                    const selectedTemplate = templates.find(template => template.name === step.template_name &&
+                                        template.language === (step.template_language || 'en_US'));
+                                    const elapsed = form.steps.slice(0, index + 1).reduce((sum, item) => sum + Math.max(0, item.delay_minutes || 0), 0);
+                                    return (
                                     <div key={index} className="border border-black">
                                         <div className="border-b border-black px-3 py-2 flex items-center justify-between bg-[#f8f8f8]">
                                             <p className="font-mono text-xs font-bold uppercase">Step {index + 1}</p>
@@ -535,18 +577,65 @@ export default function AutomationsPage() {
                                         </div>
                                         <div className="p-3 space-y-3">
                                             <div>
-                                                <label className="font-mono text-[10px] font-bold uppercase text-gray-500 mb-1 block">Send After Minutes</label>
+                                                <label htmlFor={`step-delay-${index}`} className="font-mono text-[10px] font-bold uppercase text-gray-500 mb-1 block">Delay in minutes {index === 0 ? 'after customer reply' : 'after previous step'}</label>
                                                 <input
+                                                    id={`step-delay-${index}`}
                                                     type="number"
                                                     min={0}
-                                                    max={10080}
+                                                    max={MAX_FOLLOW_UP_DELAY_MINUTES}
                                                     value={step.delay_minutes}
                                                     onChange={(event) => updateStep(index, { delay_minutes: Number(event.target.value) })}
                                                     className="input-wireframe w-full md:w-48 text-sm"
                                                 />
+                                                <p className="mt-1 text-xs text-gray-600">Scheduled {Number((elapsed / 1440).toFixed(2))} days after the workflow starts.{' '}
+                                                    <strong>{needsTemplate ? 'Approved template required' : elapsed < 1440 ? 'Standard reply' : 'Human Agent window'}</strong>
+                                                </p>
+                                            </div>
+                                            <div className={`border p-3 space-y-2 ${needsTemplate ? 'border-amber-500 bg-amber-50' : 'border-gray-300'}`}>
+                                                <label htmlFor={`step-template-${index}`} className="block text-xs font-bold">
+                                                    {needsTemplate ? 'Choose an approved template (required)' : 'Template fallback (optional)'}
+                                                </label>
+                                                <select id={`step-template-${index}`} value={step.template_name ? `${step.template_name}|${step.template_language || 'en_US'}` : ''}
+                                                    disabled={templatesLoading}
+                                                    onChange={event => {
+                                                        const selected = templates.find(template => `${template.name}|${template.language}` === event.target.value);
+                                                        updateStep(index, { template_name: selected?.name || null, template_language: selected?.language || 'en_US',
+                                                            use_template: selected ? step.use_template : false,
+                                                            template_parameters: selected ? Array.from({ length: selected.parameterCount }, () =>
+                                                                selected.parameterCount === 1 ? step.message_text : '') : [],
+                                                            ...(selected?.mediaType ? { media_type: selected.mediaType } : {}) });
+                                                    }} className="input-wireframe w-full text-sm" aria-required={needsTemplate}>
+                                                    <option value="">{templatesLoading ? 'Loading approved templates...' : 'Choose a template'}</option>
+                                                    {step.template_name && !selectedTemplate && <option value={`${step.template_name}|${step.template_language || 'en_US'}`}>Selected template unavailable — choose another</option>}
+                                                    {templates.map(template => <option key={`${template.name}|${template.language}`} value={`${template.name}|${template.language}`}>
+                                                        {template.body.slice(0, 120)} ({template.language})
+                                                    </option>)}
+                                                </select>
+                                                {selectedTemplate && <label className="flex items-center gap-2 text-xs">
+                                                    <input type="checkbox" checked={step.use_template === true}
+                                                        onChange={event => updateStep(index, { use_template: event.target.checked })} />
+                                                    Always use this template
+                                                </label>}
+                                                {!templatesLoading && !templates.length && <p className="text-xs text-gray-600">
+                                                    {templatesError || 'No approved supported utility templates are available on this Page.'}{' '}
+                                                    <a className="underline" href="/dashboard/templates">Manage templates</a>
+                                                </p>}
+                                                {selectedTemplate && <>
+                                                    {Array.from({ length: selectedTemplate.parameterCount }, (_, parameterIndex) => (
+                                                        <label key={parameterIndex} className="block text-xs">Template value {parameterIndex + 1}
+                                                            <input className="input-wireframe w-full text-sm mt-1" value={step.template_parameters?.[parameterIndex] || ''}
+                                                                onChange={event => updateStep(index, { template_parameters: Array.from({ length: selectedTemplate.parameterCount }, (_, valueIndex) =>
+                                                                    valueIndex === parameterIndex ? event.target.value : step.template_parameters?.[valueIndex] || '') })}
+                                                                placeholder="Text or {{first_name}}" />
+                                                        </label>
+                                                    ))}
+                                                    <p className="text-xs text-gray-600 whitespace-pre-wrap">{selectedTemplate.body.replace(/\{\{\s*(\d+)\s*\}\}/g,
+                                                        (placeholder, position) => step.template_parameters?.[Number(position) - 1] || placeholder)}</p>
+                                                    {selectedTemplate.mediaType && <p className="text-xs font-medium">Requires a {selectedTemplate.mediaType} attachment below.</p>}
+                                                </>}
                                             </div>
                                             <div>
-                                                <label className="font-mono text-[10px] font-bold uppercase text-gray-500 mb-1 block">Message</label>
+                                                <label className="font-mono text-[10px] font-bold uppercase text-gray-500 mb-1 block">Message inside the reply window</label>
                                                 <textarea
                                                     value={step.message_text}
                                                     onChange={(event) => updateStep(index, { message_text: event.target.value })}
@@ -613,7 +702,7 @@ export default function AutomationsPage() {
                                             </div>
                                         </div>
                                     </div>
-                                ))}
+                                ); })}
                             </div>
                         </div>
 
@@ -653,6 +742,7 @@ export default function AutomationsPage() {
                             </div>
                         </div>
 
+                        {configurationError && <p role="alert" className="text-xs text-amber-800">{configurationError}</p>}
                         {(status || error) && (
                             <div className={`border-2 p-3 text-sm font-mono flex items-center gap-2 ${error ? 'border-red-500 text-red-700 bg-red-50' : 'border-green-600 text-green-700 bg-green-50'}`}>
                                 {error ? <PowerOff className="w-4 h-4" /> : <Check className="w-4 h-4" />}
@@ -663,7 +753,7 @@ export default function AutomationsPage() {
 
                     <div className="border-t-2 border-black p-4 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
                         <div className="font-mono text-[11px] text-gray-500">
-                            cron-jobs.org should call the follow-up automation cron every minute.
+                            Delivery checks the customer&apos;s reply window automatically.
                         </div>
                         <div className="flex items-center gap-2">
                             {form.id && (
@@ -703,7 +793,7 @@ export default function AutomationsPage() {
                             <button
                                 type="button"
                                 onClick={() => void saveAutomation()}
-                                disabled={saving || !selectedPageId || !form.name.trim() || !hasValidStep}
+                                disabled={saving || !selectedPageId || !form.name.trim() || Boolean(configurationError)}
                                 className="btn-wireframe bg-black text-white hover:bg-gray-800 flex items-center gap-2 px-4 py-2 text-xs font-bold uppercase disabled:opacity-40"
                             >
                                 <Save className="w-4 h-4" />

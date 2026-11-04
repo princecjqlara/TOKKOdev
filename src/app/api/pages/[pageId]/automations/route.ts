@@ -3,6 +3,7 @@ import { getServerSession } from 'next-auth';
 import { authOptions } from '@/lib/auth';
 import { getSupabaseAdmin } from '@/lib/supabase';
 import { normalizeWorkflowReplyAction, normalizeWorkflowSteps } from '@/lib/workflow-automations';
+import { FollowUpValidationError, validateFollowUpConfiguration } from '@/lib/workflow-template-validation';
 
 export const dynamic = 'force-dynamic';
 
@@ -108,6 +109,7 @@ export async function POST(
             );
         }
 
+        await validateFollowUpConfiguration(supabase, pageId, automation.steps);
         const { data, error } = await supabase
             .from('workflow_automations')
             .insert({
@@ -133,6 +135,7 @@ export async function POST(
 
         return NextResponse.json({ automation: data }, { status: 201 });
     } catch (error) {
+        if (error instanceof FollowUpValidationError) return NextResponse.json({ error: 'Bad Request', message: error.message }, { status: 400 });
         console.error('Workflow automations POST error:', error);
         return NextResponse.json({ error: 'Internal error' }, { status: 500 });
     }
