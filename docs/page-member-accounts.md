@@ -93,3 +93,32 @@ Run the Node suite with `node node_modules/vitest/vitest.mjs run --maxWorkers=2 
 `node --env-file=.env.local scripts/verify-page-member-accounts.mjs` exercises the real SQL in a fresh temporary schema, within one transaction that is rolled back. It does not install production cron jobs or modify production user rows. Checks cover original Facebook restoration, parent/subaccount authority, multi-Page overlapping assignments, password protection, retry-safe lifetimes, expiry denial, deletion, shared-data preservation, and anonymous access denial.
 
 Before enabling broadly, test a real original Facebook user re-login, create two team subaccounts sharing a Page with one account also assigned another Page, operate tags/campaigns as a member, and verify a temporary account's deletion leaves the other account and Page data intact. Live Facebook OAuth and actual mail delivery require hands-on verification.
+
+## Invited users and reconnecting Pages
+
+A Tokko team invitation grants access through `user_pages`. The member should
+sign in with the account that was assigned, open **Connect Pages → Your assigned
+Pages**, and choose **Open contacts**. No Facebook role check, new Page token,
+webhook refresh, or repeated import is needed. Contacts opens the requested Page
+only after verifying it is among the user's assignments. A Facebook login is a
+separate identity from a team email account; Tokko never merges them by matching
+email alone. Assign the intended existing account in Team Access if necessary.
+
+Connecting a new Page or explicitly reconnecting the shared Facebook token still
+requires a Facebook-verified manager. The check recognizes `MANAGE`,
+`PROFILE_PLUS_MANAGE`, and `PROFILE_PLUS_FULL_CONTROL`, including the New Pages
+Experience task names in [Meta's Page SDK](https://github.com/facebook/facebook-python-business-sdk/blob/main/facebook_business/adobjects/page.py).
+Messaging-only access does not grant connection administration. Users with that
+access can ask their Tokko administrator to assign the existing Page instead.
+
+A Facebook app tester/developer invitation is separate from a Page invitation
+or a Tokko assignment. For a Facebook Page invitation, accept it in Facebook and
+refresh Tokko's Facebook permissions to select the Page. For a Tokko invitation,
+use the assigned account and shared connection. If Facebook has revoked or
+expired the stored Page token, its verified manager reconnects it once for the
+whole team; stored contacts and tags remain accessible to assigned members.
+
+This fix changes application authorization and navigation. It does not grant
+new Page memberships or require a database migration. Opening Contacts no longer
+automatically calls the manager-only webhook refresh endpoint; subscriptions
+are established during connection, reconnect, and contact sync.

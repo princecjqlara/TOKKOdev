@@ -18,4 +18,4 @@ export const FACEBOOK_PERMISSION_SCOPE = FACEBOOK_PERMISSION_LIST.join(',');
 export const FACEBOOK_ADS_PERMISSION_SCOPE = `${FACEBOOK_PERMISSION_SCOPE},ads_read`;
 
 export const FACEBOOK_REAUTH_MESSAGE =
-    'Facebook could not list pages with the current login token. Refresh permissions, continue with the Facebook account that admins the page, and approve all requested Page permissions.';
+    'Facebook could not list your Pages. Accept any pending Facebook Page invitation, then refresh permissions and grant Tokko access to the Page. Tokko team members can open their assigned Pages without reconnecting Facebook.';

@@ -32,7 +32,7 @@ vi.mock('@/lib/facebook-templates', () => ({
 
 import { POST } from './route';
 
-function createRequest(): NextRequest {
+function createRequest(extra: Record<string, unknown> = {}): NextRequest {
     return new Request('http://localhost:3000/api/facebook/connect', {
         method: 'POST',
         headers: {
@@ -41,17 +41,22 @@ function createRequest(): NextRequest {
         body: JSON.stringify({
             fbPageId: 'fb_page_1',
             name: 'My Page',
-            accessToken: 'page_access_token_1'
+            accessToken: 'page_access_token_1',
+            ...extra
         })
     }) as unknown as NextRequest;
 }
 
-function createSupabaseMock(options: { lastSyncedAt?: string | null; hasContacts?: boolean } = {}) {
+function createSupabaseMock(options: { lastSyncedAt?: string | null; hasContacts?: boolean; assigned?: boolean; accessError?: any } = {}) {
     const pageSelectSingle = vi.fn().mockResolvedValue({ data: { id: 'page_row_1',
         last_synced_at: options.lastSyncedAt === undefined ? '2026-11-01T00:00:00Z' : options.lastSyncedAt }, error: null });
     const pageUpsert = vi.fn().mockReturnValue({ select: vi.fn().mockReturnValue({ single: pageSelectSingle }) });
 
     const userPagesUpsert = vi.fn().mockResolvedValue({ error: null });
+    const membershipFilters: any[] = [];
+    const membershipQuery: any = { eq: (key: string, value: string) => { membershipFilters.push([key, value]); return membershipQuery; },
+        maybeSingle: async () => ({ data: options.assigned && membershipFilters.some(([key, value]) => key === 'pages.fb_page_id' && value === 'fb_page_1')
+            ? { page_id: 'page_row_1', pages: { id: 'page_row_1', fb_page_id: 'fb_page_1' } } : null, error: options.accessError || null }) };
 
     const from = vi.fn((table: string) => {
         if (table === 'pages') {
@@ -62,6 +67,7 @@ function createSupabaseMock(options: { lastSyncedAt?: string | null; hasContacts
 
         if (table === 'user_pages') {
             return {
+                select: () => membershipQuery,
                 upsert: userPagesUpsert
             };
         }
@@ -75,6 +81,7 @@ function createSupabaseMock(options: { lastSyncedAt?: string | null; hasContacts
     return {
         from,
         pageUpsert,
+        membershipFilters,
         userPagesUpsert
     };
 }
@@ -116,12 +123,88 @@ describe('POST /api/facebook/connect', () => {
     });
 
     it('rejects a client-supplied token when Facebook management is not verified', async () => {
+        const supabase = createSupabaseMock();
+        mocks.getSupabaseAdmin.mockReturnValue(supabase);
         mocks.getSessionFromRequest.mockResolvedValue({ user: { id: 'member', provider: 'credentials' } });
         mocks.verifiedFacebookPages.mockRejectedValue(new AccessError(403, 'Facebook manager required.'));
         const response = await POST(createRequest());
         expect(response.status).toBe(403);
-        expect(mocks.getSupabaseAdmin).not.toHaveBeenCalled();
+        expect(supabase.pageUpsert).not.toHaveBeenCalled();
+        expect(supabase.userPagesUpsert).not.toHaveBeenCalled();
         expect(mocks.subscribePageToAppWebhook).not.toHaveBeenCalled();
+    });
+
+    it.each(['credentials', 'facebook'])('opens an assigned Page without a Facebook manager role or new sync: %s', async provider => {
+        const supabase = createSupabaseMock({ assigned: true }); mocks.getSupabaseAdmin.mockReturnValue(supabase);
+        mocks.getSessionFromRequest.mockResolvedValue({ user: { id: 'invited_member', provider } });
+        mocks.verifiedFacebookPages.mockRejectedValue(new AccessError(403, 'No Meta management role'));
+        const response = await POST(createRequest());
+        const body = await response.json();
+        expect(response.status).toBe(200);
+        expect(body).toMatchObject({ pageId: 'page_row_1', needsInitialSync: false, reusedConnection: true });
+        expect(JSON.stringify(body)).not.toContain('access_token');
+        expect(supabase.membershipFilters).toEqual([['user_id', 'invited_member'], ['pages.fb_page_id', 'fb_page_1']]);
+        expect(mocks.verifiedFacebookPages).not.toHaveBeenCalled();
+        expect(supabase.pageUpsert).not.toHaveBeenCalled();
+        expect(supabase.userPagesUpsert).not.toHaveBeenCalled();
+        expect(mocks.subscribePageToAppWebhook).not.toHaveBeenCalled();
+        expect(mocks.createUtilityTemplate).not.toHaveBeenCalled();
+    });
+
+    it('does not let a team assignment overwrite the shared Facebook token on explicit refresh', async () => {
+        const supabase = createSupabaseMock({ assigned: true }); mocks.getSupabaseAdmin.mockReturnValue(supabase);
+        mocks.getSessionFromRequest.mockResolvedValue({ user: { id: 'member', provider: 'facebook' } });
+        mocks.verifiedFacebookPages.mockResolvedValue([]);
+        const response = await POST(createRequest({ refreshConnection: true }));
+        expect(response.status).toBe(403);
+        expect((await response.json()).message).toContain('already assigned');
+        expect(supabase.pageUpsert).not.toHaveBeenCalled();
+        expect(mocks.subscribePageToAppWebhook).not.toHaveBeenCalled();
+    });
+
+    it.each(['PROFILE_PLUS_MANAGE', 'PROFILE_PLUS_FULL_CONTROL'])('allows a verified manager to connect using %s', async task => {
+        const supabase = createSupabaseMock(); mocks.getSupabaseAdmin.mockReturnValue(supabase);
+        mocks.getSessionFromRequest.mockResolvedValue({ user: { id: 'manager', provider: 'facebook' } });
+        mocks.verifiedFacebookPages.mockResolvedValue([{ id: 'fb_page_1', name: 'New Page', access_token: 'server_only_token', tasks: [task] }]);
+        expect((await POST(createRequest())).status).toBe(200);
+        expect(supabase.pageUpsert).toHaveBeenCalledWith(expect.objectContaining({ access_token: 'server_only_token' }), { onConflict: 'fb_page_id' });
+    });
+
+    it('cannot reuse an assignment for a different Page', async () => {
+        const supabase = createSupabaseMock({ assigned: true }); mocks.getSupabaseAdmin.mockReturnValue(supabase);
+        mocks.getSessionFromRequest.mockResolvedValue({ user: { id: 'member', provider: 'facebook' } });
+        mocks.verifiedFacebookPages.mockResolvedValue([]);
+        expect((await POST(createRequest({ fbPageId: 'foreign_page' }))).status).toBe(403);
+        expect(supabase.pageUpsert).not.toHaveBeenCalled(); expect(supabase.userPagesUpsert).not.toHaveBeenCalled();
+    });
+
+    it.each(['MESSAGING', 'PROFILE_PLUS_MESSAGING', 'PROFILE_PLUS_FACEBOOK_ACCESS'])('does not create a Page grant or replace a token from %s alone', async task => {
+        const supabase = createSupabaseMock(); mocks.getSupabaseAdmin.mockReturnValue(supabase);
+        mocks.getSessionFromRequest.mockResolvedValue({ user: { id: 'member', provider: 'facebook' } });
+        mocks.verifiedFacebookPages.mockResolvedValue([{ id: 'fb_page_1', name: 'Page', access_token: 'staff_token', tasks: [task] }]);
+        const response = await POST(createRequest());
+        expect(response.status).toBe(403);
+        expect((await response.json()).message).toContain('assign this Page');
+        expect(supabase.pageUpsert).not.toHaveBeenCalled(); expect(supabase.userPagesUpsert).not.toHaveBeenCalled();
+        expect(mocks.subscribePageToAppWebhook).not.toHaveBeenCalled();
+    });
+
+    it('fails closed when the membership check fails', async () => {
+        const supabase = createSupabaseMock({ accessError: { message: 'Database unavailable' } }); mocks.getSupabaseAdmin.mockReturnValue(supabase);
+        mocks.getSessionFromRequest.mockResolvedValue({ user: { id: 'member' } });
+        expect((await POST(createRequest())).status).toBe(500);
+        expect(mocks.verifiedFacebookPages).not.toHaveBeenCalled();
+        expect(supabase.pageUpsert).not.toHaveBeenCalled(); expect(supabase.userPagesUpsert).not.toHaveBeenCalled();
+    });
+
+    it('returns a permission-refresh action for an expired Facebook login', async () => {
+        const supabase = createSupabaseMock(); mocks.getSupabaseAdmin.mockReturnValue(supabase);
+        mocks.getSessionFromRequest.mockResolvedValue({ user: { id: 'manager', provider: 'facebook' } });
+        mocks.verifiedFacebookPages.mockRejectedValue(new AccessError(409, 'Refresh permissions'));
+        const response = await POST(createRequest());
+        expect(response.status).toBe(409);
+        expect(await response.json()).toMatchObject({ requiresReauth: true, code: 'FACEBOOK_REAUTH_REQUIRED' });
+        expect(supabase.pageUpsert).not.toHaveBeenCalled();
     });
 
     it('links two managers to the same Page without resetting sync or writing contacts', async () => {

@@ -393,7 +393,6 @@ export default function ContactsPage() {
         (bulkMediaEnabled && bulkDeliveryMode !== 'now') ||
         (bulkMediaEnabled && !bulkMediaUrl.trim()) ||
         (bulkDeliveryMode === 'best_time_next_day' ? !scheduledMessagesComplete : !messagePart1.trim());
-    const webhookRefreshAttemptedRef = useRef<Set<string>>(new Set());
     const contactsRequestGateRef = useRef(createRequestGate());
     const syncingRef = useRef(false);
     const activeDatePreset =
@@ -506,49 +505,14 @@ export default function ContactsPage() {
         }
     }, [selectedPageId]);
 
-    useEffect(() => {
-        if (!selectedPageId) return;
-        if (webhookRefreshAttemptedRef.current.has(selectedPageId)) return;
-
-        webhookRefreshAttemptedRef.current.add(selectedPageId);
-
-        const refreshWebhookSubscription = async () => {
-            try {
-                const response = await fetch(`/api/pages/${selectedPageId}/webhook`, {
-                    method: 'POST'
-                });
-
-                if (!response.ok) {
-                    const data = await response.json().catch(() => ({} as { message?: string }));
-                    console.warn('[CONTACTS_WEBHOOK] Failed to refresh page webhook subscription', {
-                        pageId: selectedPageId,
-                        status: response.status,
-                        message: data.message || null
-                    });
-                    return;
-                }
-
-                console.log('[CONTACTS_WEBHOOK] Page webhook subscription refreshed', {
-                    pageId: selectedPageId
-                });
-            } catch (error) {
-                console.warn('[CONTACTS_WEBHOOK] Error refreshing page webhook subscription', {
-                    pageId: selectedPageId,
-                    error: (error as Error).message
-                });
-            }
-        };
-
-        void refreshWebhookSubscription();
-    }, [selectedPageId]);
-
     const fetchPages = async () => {
         try {
             const res = await fetch('/api/pages');
             const data = await res.json();
             setPages(data.pages || []);
             if (data.pages?.length > 0) {
-                setSelectedPageId(data.pages[0].id);
+                const requestedPageId = new URLSearchParams(window.location.search).get('pageId');
+                setSelectedPageId(data.pages.find((page: Page) => page.id === requestedPageId)?.id || data.pages[0].id);
             }
         } catch (error) {
             console.error('Error fetching pages:', error);

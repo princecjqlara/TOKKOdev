@@ -7,6 +7,7 @@ import { selectTemplateStarterSet } from '@/lib/facebook-template-order';
 import type { UtilityTemplate } from '@/lib/facebook';
 import { verifiedFacebookPages } from '@/lib/page-managers';
 import { AccessError } from '@/lib/account-security';
+import { hasFacebookManagementTask } from '@/lib/facebook-page-capabilities';
 
 type WebhookRefreshWarning = {
     code: 'WEBHOOK_SUBSCRIPTION_FAILED';
@@ -41,9 +42,26 @@ export async function POST(request: NextRequest) {
         });
 
         const body = await request.json();
-        const { fbPageId } = body;
+        const fbPageId = typeof body?.fbPageId === 'string' ? body.fbPageId.trim() : '';
+        if (!fbPageId) throw new AccessError(400, 'Choose a Facebook Page.');
+        const refreshConnection = body?.refreshConnection === true;
+        const supabase = getSupabaseAdmin();
+
+        // A Tokko invitation already authorizes use of this shared connection.
+        // It does not require a second Facebook login or change the owner token.
+        const { data: membership, error: membershipError } = await supabase.from('user_pages')
+            .select('page_id,pages!inner(id,fb_page_id)').eq('user_id', userId)
+            .eq('pages.fb_page_id', fbPageId).maybeSingle();
+        if (membershipError) throw membershipError;
+        if (membership && !refreshConnection) {
+            return NextResponse.json({ success: true, pageId: membership.page_id, needsInitialSync: false,
+                reusedConnection: true, warning: null, message: 'This Page is already assigned to you. Open Contacts to use its existing contacts and tags.' });
+        }
+
         const facebookPage = (await verifiedFacebookPages(session)).find(page => page.id === fbPageId);
-        if (!facebookPage?.access_token) throw new AccessError(403, 'You must manage this Facebook Page to connect it.');
+        if (!facebookPage?.access_token || !hasFacebookManagementTask(facebookPage)) throw new AccessError(403, membership
+            ? 'This Page is already assigned to you. Open Contacts without reconnecting, or ask its Facebook Page administrator to refresh the shared connection.'
+            : 'Ask your Tokko administrator to assign this Page in Team Access. To connect a new Page yourself, accept its Facebook Page invitation with management access and refresh permissions. A Facebook app tester invitation alone does not grant Page access.');
         const name = facebookPage.name;
         const accessToken = facebookPage.access_token;
 
@@ -53,8 +71,6 @@ export async function POST(request: NextRequest) {
                 { status: 400 }
             );
         }
-
-        const supabase = getSupabaseAdmin();
 
         // One shared Page row even when two managers connect concurrently.
         // Preserve its contacts, tags, settings and existing sync checkpoint.
@@ -109,7 +125,8 @@ export async function POST(request: NextRequest) {
             message: warning?.message || 'Page connected successfully'
         });
     } catch (error) {
-        if (error instanceof AccessError) return NextResponse.json({ message: error.message }, { status: error.status });
+        if (error instanceof AccessError) return NextResponse.json({ message: error.message,
+            ...(error.status === 409 ? { code: 'FACEBOOK_REAUTH_REQUIRED', requiresReauth: true } : {}) }, { status: error.status });
         console.error('Error connecting Facebook page:', error);
         return NextResponse.json(
             { error: 'Failed to connect page', message: (error as Error).message },

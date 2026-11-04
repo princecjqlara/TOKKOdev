@@ -1,13 +1,14 @@
 'use client';
 
 import { useSession, signIn } from 'next-auth/react';
-import React, { useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import { FacebookPageSummary, Page } from '@/types';
 import { Check, Facebook, RefreshCw, AlertCircle } from 'lucide-react';
 import { runContactSyncToCompletion } from '@/lib/contact-sync-client';
 import { FACEBOOK_PERMISSION_SCOPE } from '@/lib/facebook-permissions';
 import { facebookSignInCallback } from '@/lib/facebook-signin';
 import { getFacebookConnectErrorMessage, isFacebookReauthMessage } from '@/lib/facebook-errors';
+import { hasFacebookManagementTask, hasFacebookMessagingTask } from '@/lib/facebook-page-capabilities';
 
 export default function ConnectPage() {
     const { data: session } = useSession();
@@ -15,22 +16,25 @@ export default function ConnectPage() {
     const [loading, setLoading] = useState(true);
     const [connecting, setConnecting] = useState<string | null>(null);
     const [connectedPages, setConnectedPages] = useState<Set<string>>(new Set());
+    const [assignedPages, setAssignedPages] = useState<Page[]>([]);
+    const [assignedLoading, setAssignedLoading] = useState(true);
+    const [assignedError, setAssignedError] = useState<string | null>(null);
     const [error, setError] = useState<string | null>(null);
     const [requiresReauth, setRequiresReauth] = useState(false);
     const [success, setSuccess] = useState<string | null>(null);
     const [autoTagDuringSync, setAutoTagDuringSync] = useState(true);
 
-    useEffect(() => {
-        fetchFacebookPages();
-        fetchConnectedPages();
-    }, [session]);
-
-    const fetchFacebookPages = async () => {
-        if (!session?.user?.id || session.user.provider !== 'facebook') {
+    const userId = session?.user?.id;
+    const provider = session?.user?.provider;
+    const hasFacebookSession = provider === 'facebook';
+    const fetchFacebookPages = useCallback(async () => {
+        if (!userId || provider !== 'facebook') {
+            setFacebookPages([]);
             setLoading(false);
             return;
         }
 
+        setLoading(true);
         try {
             const res = await fetch('/api/facebook/pages');
             const data = await res.json();
@@ -50,22 +54,35 @@ export default function ConnectPage() {
         } finally {
             setLoading(false);
         }
-    };
+    }, [userId, provider]);
 
-    const fetchConnectedPages = async () => {
+    const fetchConnectedPages = useCallback(async () => {
+        if (!userId) { setAssignedLoading(false); return; }
+        setAssignedLoading(true);
+        setAssignedError(null);
         try {
             const res = await fetch('/api/pages');
             const data = await res.json();
-            const fbPageIds = new Set((data.pages || [])
-                .filter((page: Page) => !page.requiresReconnect)
-                .map((page: Page) => page.fb_page_id));
+            if (!res.ok) throw new Error(data.message || 'Could not load your assigned Pages.');
+            setAssignedPages(data.pages || []);
+            const fbPageIds = new Set((data.pages || []).map((page: Page) => page.fb_page_id));
             setConnectedPages(fbPageIds as Set<string>);
         } catch (error) {
             console.error('Error fetching connected pages:', error);
+            setAssignedError((error as Error).message);
+        } finally {
+            setAssignedLoading(false);
         }
-    };
+    }, [userId]);
 
-    const handleConnect = async (page: FacebookPageSummary) => {
+    useEffect(() => {
+        setAssignedPages([]);
+        setConnectedPages(new Set());
+        setError(null);
+        void Promise.all([fetchFacebookPages(), fetchConnectedPages()]);
+    }, [fetchFacebookPages, fetchConnectedPages]);
+
+    const handleConnect = async (page: FacebookPageSummary, refreshConnection = false) => {
         setConnecting(page.id);
         setError(null);
         setSuccess(null);
@@ -75,7 +92,8 @@ export default function ConnectPage() {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
-                    fbPageId: page.id
+                    fbPageId: page.id,
+                    refreshConnection
                 })
             });
 
@@ -83,7 +101,8 @@ export default function ConnectPage() {
 
             if (data.success) {
                 setConnectedPages(prev => new Set([...prev, page.id]));
-                const connectedMessage = data.warning?.message || `Successfully connected "${page.name}".`;
+                const connectedMessage = data.warning?.message || data.message || `Successfully connected "${page.name}".`;
+                await fetchConnectedPages();
                 if (data.needsInitialSync === false) {
                     setSuccess(`${connectedMessage} Existing Page contacts and tags are ready in Contacts. No new import needed.`);
                     return;
@@ -139,8 +158,7 @@ export default function ConnectPage() {
         );
     };
 
-    // Show connected pages from database
-    if (!session?.user?.id || session.user.provider !== 'facebook') {
+    if (!userId) {
         return (
             <div className="max-w-[600px] mx-auto p-8 mt-12">
                 <div className="wireframe-card text-center py-12">
@@ -149,7 +167,7 @@ export default function ConnectPage() {
                         Connect Facebook
                     </h1>
                     <p className="font-mono text-sm text-gray-500 mb-8 max-w-sm mx-auto">
-                        Your Facebook Page manager connects and reconnects Pages. Your assigned Pages are available from the workspace.
+                        Sign in to Tokko to open the Pages assigned to your account.
                     </p>
                 </div>
             </div>
@@ -165,18 +183,42 @@ export default function ConnectPage() {
                         Connect Pages
                     </h1>
                     <p className="font-mono text-sm text-gray-500 uppercase tracking-wide">
-                        Select Facebook pages to manage
+                        Open assigned Pages or connect a new Facebook Page
                     </p>
                 </div>
 
-                <button
+                {hasFacebookSession && <button
                     onClick={handleFacebookLogin}
                     className="btn-wireframe text-xs bg-white h-9"
                 >
                     <RefreshCw className="w-3 h-3 mr-2" />
                     Refresh Permissions
-                </button>
+                </button>}
             </div>
+
+            <section className="border border-black mb-6" aria-label="Your assigned Pages">
+                <div className="p-4 border-b border-black">
+                    <h2 className="font-bold">Your assigned Pages</h2>
+                    <p className="text-sm text-gray-600 mt-1">Tokko invitations give access to the existing contacts and tags. You do not need to connect Facebook again.</p>
+                </div>
+                {assignedLoading ? <p className="p-4 text-sm">Loading assigned Pages...</p>
+                    : assignedError ? <p role="alert" className="p-4 text-sm text-red-700">{assignedError}</p>
+                    : !assignedPages.length ? <p className="p-4 text-sm text-gray-600">No Pages are assigned to this account yet. Ask your Tokko administrator to assign the Page in Team Access. Use the same account that was invited.</p>
+                    : assignedPages.map(page => {
+                        const facebookPage = facebookPages.find(candidate => candidate.id === page.fb_page_id);
+                        return <div key={page.id} className="flex flex-wrap items-center justify-between gap-3 p-4 border-b last:border-0">
+                            <div><p className="font-bold text-sm">{page.name}</p>
+                                {page.requiresReconnect && <p className="text-xs text-amber-800 mt-1">The shared Facebook connection needs its Page administrator to reconnect. Stored contacts and tags remain available.</p>}
+                            </div>
+                            <div className="flex gap-2">
+                                <a href={`/dashboard/contacts?pageId=${encodeURIComponent(page.id)}`} className="btn-wireframe text-xs">Open contacts</a>
+                                {facebookPage && hasFacebookManagementTask(facebookPage) && <button
+                                    onClick={() => void handleConnect(facebookPage, true)} disabled={connecting === facebookPage.id}
+                                    className="btn-wireframe text-xs bg-white">{connecting === facebookPage.id ? 'Reconnecting...' : 'Reconnect'}</button>}
+                            </div>
+                        </div>;
+                    })}
+            </section>
 
             {/* Messages */}
             {error && (
@@ -202,6 +244,7 @@ export default function ConnectPage() {
                 </div>
             )}
 
+            {hasFacebookSession && <>
             <label className="flex items-center gap-2 text-sm mb-4">
                 <input type="checkbox" checked={autoTagDuringSync} disabled={connecting !== null}
                     onChange={event => setAutoTagDuringSync(event.target.checked)} />
@@ -216,7 +259,8 @@ export default function ConnectPage() {
                 <div className="wireframe-card text-center py-12">
                     <p className="text-lg font-bold uppercase mb-2">No Facebook Pages found</p>
                     <p className="font-mono text-sm text-gray-500 mb-4">
-                        Ensure you are an admin of a Facebook Page and have granted permissions.
+                        If you were invited to a Facebook Page, accept that invitation and refresh permissions to select it.
+                        A Facebook app tester invitation does not grant Page access. Tokko team members can open their assigned Pages above.
                     </p>
                 </div>
             ) : (
@@ -252,27 +296,17 @@ export default function ConnectPage() {
                                         </td>
                                         <td className="text-right">
                                             {isConnected ? (
-                                                <button
-                                                    onClick={() => handleConnect(page)}
-                                                    disabled={isConnecting}
-                                                    className="btn-wireframe text-xs py-1.5 h-8 bg-white text-black hover:bg-gray-100"
-                                                >
-                                                    {isConnecting ? (
-                                                        <span className="animate-pulse">Reconnecting...</span>
-                                                    ) : (
-                                                        'Reconnect'
-                                                    )}
-                                                </button>
+                                                <span className="text-xs text-gray-600">Use your assigned Page above</span>
                                             ) : (
                                                 <button
                                                     onClick={() => handleConnect(page)}
-                                                    disabled={isConnecting}
+                                                    disabled={isConnecting || !hasFacebookManagementTask(page)}
                                                     className="btn-wireframe text-xs py-1.5 h-8 bg-black text-white hover:bg-gray-800"
                                                 >
                                                     {isConnecting ? (
                                                         <span className="animate-pulse">Connecting...</span>
                                                     ) : (
-                                                        'Connect'
+                                                        hasFacebookManagementTask(page) ? 'Connect' : hasFacebookMessagingTask(page) ? 'Ask your Tokko admin to assign this Page' : 'Page management access required'
                                                     )}
                                                 </button>
                                             )}
@@ -284,6 +318,7 @@ export default function ConnectPage() {
                     </table>
                 </div>
             )}
+            </>}
         </div>
     );
 }

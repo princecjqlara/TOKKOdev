@@ -1,7 +1,8 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Session } from 'next-auth';
 const mocks = vi.hoisted(() => ({ facebook: vi.fn(), token: vi.fn(), db: vi.fn() }));
-vi.mock('../facebook', () => ({ getFacebookPages: mocks.facebook }));
+vi.mock('../facebook', () => ({ getFacebookPages: mocks.facebook,
+    isFacebookReauthRequired: (error: { requiresReauth?: boolean }) => error?.requiresReauth === true }));
 vi.mock('../server-auth-token', () => ({ getFacebookServerToken: mocks.token }));
 vi.mock('../supabase', () => ({ getSupabaseAdmin: mocks.db }));
 import { hasFacebookManagementTask, requireFacebookPageManager, requireTeamPageAdministrator, teamAdministrationPages, verifiedFacebookPages } from '../page-managers';
@@ -29,6 +30,35 @@ describe('verified Facebook manager authority', () => {
     it('requires actual management tasks, not messaging tasks or a Facebook-shaped role', () => {
         expect(hasFacebookManagementTask({ tasks: ['MESSAGING', 'ADVERTISE'] })).toBe(false);
         expect(hasFacebookManagementTask({ tasks: ['MANAGE'] })).toBe(true);
+        expect(hasFacebookManagementTask({ tasks: ['PROFILE_PLUS_MANAGE'] })).toBe(true);
+        expect(hasFacebookManagementTask({ tasks: ['PROFILE_PLUS_FULL_CONTROL'] })).toBe(true);
+        expect(hasFacebookManagementTask({ tasks: ['PROFILE_PLUS_MESSAGING', 'PROFILE_PLUS_FACEBOOK_ACCESS'] })).toBe(false);
+    });
+
+    it.each(['PROFILE_PLUS_MANAGE', 'PROFILE_PLUS_FULL_CONTROL'])('recognizes the current Facebook management task %s', async task => {
+        const db = database([{ id: 'a', fb_page_id: 'fb-a' }]); mocks.db.mockReturnValue(db);
+        mocks.facebook.mockResolvedValue([{ id: 'fb-a', tasks: [task] }]);
+        await requireFacebookPageManager(session, ['a']);
+        expect(db.upsert).toHaveBeenCalledWith([expect.objectContaining({ page_id: 'a', authority_source: 'facebook' })], expect.anything());
+    });
+
+    it('does not promote messaging-only task access into connection administration', async () => {
+        const db = database([{ id: 'a', fb_page_id: 'fb-a' }]); mocks.db.mockReturnValue(db);
+        mocks.facebook.mockResolvedValue([{ id: 'fb-a', tasks: ['PROFILE_PLUS_MESSAGING'] }]);
+        await expect(requireFacebookPageManager(session, ['a'])).rejects.toMatchObject({ status: 403 });
+        expect(db.upsert).not.toHaveBeenCalled();
+    });
+
+    it('returns a refresh-permissions response only when Facebook authorization has expired', async () => {
+        mocks.facebook.mockRejectedValue(Object.assign(new Error('Expired token'), { requiresReauth: true }));
+        await expect(verifiedFacebookPages(session)).rejects.toMatchObject({ status: 409 });
+        expect(mocks.db).not.toHaveBeenCalled();
+    });
+
+    it('preserves an identity mismatch instead of describing it as a Facebook service failure', async () => {
+        const db = database([{ id: 'a', fb_page_id: 'fb-a' }]); mocks.db.mockReturnValue(db);
+        db.rpc.mockResolvedValueOnce({ data: [{ user_id: 'another-user' }], error: null });
+        await expect(verifiedFacebookPages(session)).rejects.toMatchObject({ status: 403 });
     });
     it('denies email members before contacting Facebook or writing proofs', async () => {
         await expect(verifiedFacebookPages({ user: { id: 'member', provider: 'credentials' } } as Session)).rejects.toMatchObject({ status: 403 });

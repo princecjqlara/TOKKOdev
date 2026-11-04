@@ -1,12 +1,12 @@
 import type { Session } from 'next-auth';
-import { getFacebookPages } from './facebook';
+import { getFacebookPages, isFacebookReauthRequired } from './facebook';
 import { getFacebookServerToken } from './server-auth-token';
 import { getSupabaseAdmin } from './supabase';
 import { AccessError } from './account-security';
+import { hasFacebookManagementTask } from './facebook-page-capabilities';
+import { FACEBOOK_REAUTH_MESSAGE } from './facebook-permissions';
 
-export function hasFacebookManagementTask(page: { tasks?: string[] }): boolean {
-    return Array.isArray(page.tasks) && page.tasks.includes('MANAGE');
-}
+export { hasFacebookManagementTask } from './facebook-page-capabilities';
 
 async function verifyFacebookIdentity(session: Session) {
     if (!session.user?.id || session.user.provider !== 'facebook' || !session.user.facebookId) {
@@ -54,18 +54,21 @@ export async function requireTeamPageAdministrator(session: Session, pageIds: st
 
 export async function verifiedFacebookPages(session: Session) {
     if (!session.user?.id || session.user.provider !== 'facebook' || !session.user.facebookId) {
-        throw new AccessError(403, 'Sign in with the Facebook account that manages this Page.');
+        throw new AccessError(403, 'Use your assigned Pages in Tokko. A Facebook Page administrator must connect a new Page.');
     }
     const token = await getFacebookServerToken();
-    if (!token) throw new AccessError(403, 'Reconnect your Facebook account to manage Page access.');
+    if (!token) throw new AccessError(409, FACEBOOK_REAUTH_MESSAGE);
+    let pages;
     try {
-        const pages = (await getFacebookPages(token)).filter(hasFacebookManagementTask);
-        // Old signed Facebook sessions can safely establish their missing
-        // provider binding without merging identities by email.
-        await verifyFacebookIdentity(session);
-        return pages;
+        pages = await getFacebookPages(token);
     }
-    catch { throw new AccessError(503, 'Facebook management permissions could not be verified. Please retry or reconnect Facebook.'); }
+    catch (error) {
+        if (isFacebookReauthRequired(error)) throw new AccessError(409, FACEBOOK_REAUTH_MESSAGE);
+        throw new AccessError(503, 'Facebook Page permissions could not be verified. Please retry.');
+    }
+    // Keep identity checks separate from Meta availability, and never merge by email.
+    await verifyFacebookIdentity(session);
+    return pages.filter(hasFacebookManagementTask);
 }
 
 export async function requireFacebookPageManager(session: Session, pageIds: string[]) {
