@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getSupabaseAdmin } from '@/lib/supabase';
-import { getPageConversations, getUserProfile } from '@/lib/facebook';
+import { getPageConversations, getUserProfile, getConversationMessages } from '@/lib/facebook';
+import { createContactMessagingAutoTagger } from '@/lib/messaging-auto-tag-sync';
 import { composeContactName, normalizeContactName, pickPreferredContactName } from '../../../../lib/contact-names';
 import { repairMissingContactNamesForPage } from '../../../../lib/contact-name-repair';
 
@@ -61,7 +62,7 @@ export async function GET(request: NextRequest) {
         // Process the least recently touched page first so public cron runs rotate quickly.
         const { data: pages, error: pagesError } = await supabase
             .from('pages')
-            .select('id, fb_page_id, access_token, name, updated_at')
+            .select('id, fb_page_id, access_token, name, updated_at, messaging_auto_tag_enabled')
             .order('updated_at', { ascending: true, nullsFirst: true })
             .limit(pageLimit);
 
@@ -93,13 +94,15 @@ export async function GET(request: NextRequest) {
 
                 let synced = 0;
                 let failed = 0;
+                let tagged = 0;
+                const applyMessengerTags = createContactMessagingAutoTagger(supabase, page);
 
                 for (const conversation of conversations) {
-                    const participant = conversation.participants.data.find(
+                    const participants = conversation.participants?.data?.filter(
                         p => p.id !== page.fb_page_id
-                    );
-
-                    if (!participant) continue;
+                    ) || [];
+                    if (participants.length !== 1 || !participants[0].id) continue;
+                    const participant = participants[0];
 
                     try {
                         let profilePic: string | undefined;
@@ -122,7 +125,7 @@ export async function GET(request: NextRequest) {
                             // Profile fetch failed, use basic info
                         }
 
-                        await supabase
+                        const { error: saveError } = await supabase
                             .from('contacts')
                             .upsert({
                                 page_id: page.id,
@@ -134,6 +137,13 @@ export async function GET(request: NextRequest) {
                             }, {
                                 onConflict: 'page_id,psid'
                             });
+                        if (saveError) throw saveError;
+                        if (page.messaging_auto_tag_enabled !== false) {
+                            const messages = await getConversationMessages(conversation.id, page.access_token, 500, {
+                                throwOnError: true, timeoutMs: 3_000, signal: AbortSignal.timeout(5_000)
+                            });
+                            if (await applyMessengerTags(participant.id, messages, name || undefined)) tagged++;
+                        }
 
                         synced++;
                     } catch {
@@ -156,6 +166,7 @@ export async function GET(request: NextRequest) {
                     pageName: page.name,
                     synced,
                     failed,
+                    tagged,
                     total: conversations.length,
                     nameRepair
                 });

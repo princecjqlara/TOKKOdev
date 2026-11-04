@@ -3,6 +3,8 @@ export type ContactSyncResponse = {
     partial?: boolean;
     synced?: number;
     failed?: number;
+    tagged?: number;
+    syncHadFailures?: boolean;
     total?: number;
     processed?: number;
     remaining?: number;
@@ -83,6 +85,7 @@ async function postSync(
         cursor: string | null;
         syncStartedAt: string | null;
         syncRunId: string;
+        syncHadFailures: boolean;
     }
 ): Promise<ContactSyncResponse> {
     const response = await fetch(`/api/pages/${pageId}/sync`, {
@@ -95,7 +98,8 @@ async function postSync(
             ...(options.resumePsids.length > 0 ? { resumePsids: options.resumePsids } : {}),
             ...(options.cursor ? { cursor: options.cursor } : {}),
             ...(options.syncStartedAt ? { syncStartedAt: options.syncStartedAt } : {}),
-            syncRunId: options.syncRunId
+            syncRunId: options.syncRunId,
+            syncHadFailures: options.syncHadFailures
         })
     });
 
@@ -116,13 +120,14 @@ export async function runContactSyncToCompletion(
     let syncStartedAt: string | null = null;
     const syncRunId = createSyncRunId();
     const seenContinuationKeys = new Set<string>();
+    let syncHadFailures = false;
 
     for (let attempt = 1; ; attempt++) {
         let data: ContactSyncResponse | null = null;
 
         for (let retry = 1; retry <= MAX_TIMEOUT_RETRIES_PER_STEP; retry++) {
             try {
-                data = await postSync(pageId, { resumePsids, cursor, syncStartedAt, syncRunId });
+                data = await postSync(pageId, { resumePsids, cursor, syncStartedAt, syncRunId, syncHadFailures });
                 break;
             } catch (error) {
                 if (error instanceof ContactSyncRequestError && error.status >= 400 && error.status < 500) {
@@ -150,6 +155,7 @@ export async function runContactSyncToCompletion(
         lastData = data;
         totalSynced += data.synced || 0;
         totalFailed += data.failed || 0;
+        syncHadFailures ||= data.syncHadFailures === true || (data.failed || 0) > 0;
         resumePsids = Array.isArray(data.remainingPsids) ? data.remainingPsids : [];
         syncStartedAt = data.syncStartedAt || syncStartedAt;
         cursor = resumePsids.length > 0

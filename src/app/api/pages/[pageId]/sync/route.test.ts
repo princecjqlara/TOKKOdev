@@ -41,6 +41,7 @@ function createSupabaseMock(options?: {
     existingContacts?: Array<{ psid: string; name: string | null; profile_pic: string | null }>;
     leaseAcquired?: boolean;
     leaseError?: { code?: string; message: string };
+    autoTagEnabled?: boolean;
 }) {
     const userPageSingle = vi.fn().mockResolvedValue({
         data: { page_id: 'page_1' },
@@ -54,7 +55,8 @@ function createSupabaseMock(options?: {
         data: {
             fb_page_id: 'fb_page_1',
             access_token: 'page_access_token_1',
-            last_synced_at: null
+            last_synced_at: null,
+            messaging_auto_tag_enabled: options?.autoTagEnabled ?? true
         },
         error: null
     });
@@ -74,10 +76,20 @@ function createSupabaseMock(options?: {
         ],
         error: null
     });
-    const contactsSelectEq = vi.fn().mockReturnValue({ in: contactsSelectIn });
+    const contactSingle = vi.fn().mockResolvedValue({ data: { id: 'contact_row_1' }, error: null });
+    const contactsSelectEq = vi.fn().mockReturnValue({ in: contactsSelectIn,
+        eq: vi.fn().mockReturnValue({ maybeSingle: contactSingle, single: contactSingle }) });
     const contactsSelect = vi.fn().mockReturnValue({ eq: contactsSelectEq });
+    const tagAssignments = vi.fn().mockResolvedValue({ error: null });
+    const tagChain: any = { select: () => tagChain, eq: () => tagChain,
+        then: (resolve: any) => Promise.resolve({ data: [
+            { id: 'paid_tag', name: 'Paid / Availed Service', is_default: true },
+            { id: 'unqualified_tag', name: 'Unqualified', is_default: true }
+        ], error: null }).then(resolve) };
 
     const from = vi.fn((table: string) => {
+        if (table === 'tags') return tagChain;
+        if (table === 'contact_tags') return { upsert: tagAssignments };
         if (table === 'user_pages') {
             return {
                 select: userPageSelect
@@ -109,6 +121,7 @@ function createSupabaseMock(options?: {
         from,
         rpc,
         contactsUpsert,
+        tagAssignments,
         pageUpdateEq
     };
 }
@@ -136,6 +149,93 @@ describe('POST /api/pages/[pageId]/sync', () => {
             id: 'contact_psid_1',
             name: 'UNKNOWN'
         });
+    });
+
+    it.each([
+        ['Lead stage set to Qualified', 'paid_tag'],
+        ['Lead stage set to Converted', 'paid_tag'],
+        ['Lead stage set to Not Qualified', 'unqualified_tag'],
+        ['You created an order for PHP 699.00. View: fb-pma://payments/orderdetails/?invoice_id=12345', 'paid_tag']
+    ])('updates tags from fetched Messenger history: %s', async (text, tagId) => {
+        const { POST } = await loadRoute();
+        const supabase = createSupabaseMock();
+        mocks.getSupabaseAdmin.mockReturnValue(supabase);
+        mocks.getPageConversationsBatch.mockResolvedValue({ conversations: [{ id: 'conversation_1',
+            updated_time: '2026-04-07T02:00:00Z', participants: { data: [{ id: 'contact_psid_1', name: 'Jane Contact' }] }
+        }], nextCursor: null });
+        mocks.getConversationMessages.mockResolvedValue([{ id: 'system_event', from: { id: 'fb_page_1' },
+            message: text, created_time: '2026-04-07T02:00:00Z' }]);
+
+        const response = await POST(createRequest({ forceFullSync: true }), { params: Promise.resolve({ pageId: 'page_1' }) });
+
+        expect(response.status).toBe(200);
+        expect(await response.json()).toMatchObject({ synced: 1, failed: 0, tagged: 1 });
+        expect(supabase.tagAssignments).toHaveBeenCalledWith([{ contact_id: 'contact_row_1', tag_id: tagId }],
+            { onConflict: 'contact_id,tag_id', ignoreDuplicates: true });
+    });
+
+    it('retains the checkpoint and reports a failed tag write for retry', async () => {
+        const { POST } = await loadRoute();
+        const supabase = createSupabaseMock();
+        supabase.tagAssignments.mockResolvedValue({ error: { message: 'Tag write failed' } });
+        mocks.getSupabaseAdmin.mockReturnValue(supabase);
+        mocks.getPageConversationsBatch.mockResolvedValue({ conversations: [{ id: 'conversation_1',
+            updated_time: '2026-04-07T02:00:00Z', participants: { data: [{ id: 'contact_psid_1', name: 'Jane Contact' }] }
+        }], nextCursor: null });
+        mocks.getConversationMessages.mockResolvedValue([{ id: 'system_event', from: { id: 'fb_page_1' },
+            message: 'Lead stage set to Qualified', created_time: '2026-04-07T02:00:00Z' }]);
+
+        const response = await POST(createRequest(), { params: Promise.resolve({ pageId: 'page_1' }) });
+
+        expect(await response.json()).toMatchObject({ synced: 0, failed: 1 });
+        expect(supabase.pageUpdateEq).not.toHaveBeenCalled();
+    });
+
+    it('does not tag customer-authored stage text or a Page with auto-tag disabled', async () => {
+        const { POST } = await loadRoute();
+        for (const autoTagEnabled of [true, false]) {
+            const supabase = createSupabaseMock({ autoTagEnabled });
+            mocks.getSupabaseAdmin.mockReturnValue(supabase);
+            mocks.getPageConversationsBatch.mockResolvedValue({ conversations: [{ id: 'conversation_1',
+                updated_time: '2026-04-07T02:00:00Z', participants: { data: [{ id: 'contact_psid_1', name: 'Jane Contact' }] }
+            }], nextCursor: null });
+            mocks.getConversationMessages.mockResolvedValue([{ id: 'system_event',
+                from: { id: autoTagEnabled ? 'contact_psid_1' : 'fb_page_1' },
+                message: 'Lead stage set to Qualified', created_time: '2026-04-07T02:00:00Z' }]);
+
+            const response = await POST(createRequest(), { params: Promise.resolve({ pageId: 'page_1' }) });
+
+            expect(await response.json()).toMatchObject({ synced: 1, failed: 0, tagged: 0 });
+            expect(supabase.tagAssignments).not.toHaveBeenCalled();
+        }
+    });
+
+    it('keeps saved contacts and the previous checkpoint when history checking fails', async () => {
+        const { POST } = await loadRoute();
+        const supabase = createSupabaseMock();
+        mocks.getSupabaseAdmin.mockReturnValue(supabase);
+        mocks.getPageConversationsBatch.mockResolvedValue({ conversations: [{ id: 'conversation_1',
+            updated_time: '2026-04-07T02:00:00Z', participants: { data: [{ id: 'contact_psid_1', name: 'Jane Contact' }] }
+        }], nextCursor: null });
+        mocks.getConversationMessages.mockRejectedValueOnce(new Error('Facebook history unavailable'));
+
+        const response = await POST(createRequest(), { params: Promise.resolve({ pageId: 'page_1' }) });
+
+        expect(await response.json()).toMatchObject({ synced: 0, failed: 1, syncHadFailures: true });
+        expect(supabase.contactsUpsert).toHaveBeenCalledTimes(2);
+        expect(supabase.pageUpdateEq).not.toHaveBeenCalled();
+        expect(supabase.tagAssignments).not.toHaveBeenCalled();
+    });
+
+    it('does not advance the checkpoint if a previous cursor page failed', async () => {
+        const { POST } = await loadRoute();
+        const supabase = createSupabaseMock();
+        mocks.getSupabaseAdmin.mockReturnValue(supabase);
+
+        const response = await POST(createRequest({ syncHadFailures: true }), { params: Promise.resolve({ pageId: 'page_1' }) });
+
+        expect(await response.json()).toMatchObject({ synced: 0, failed: 0, syncHadFailures: true });
+        expect(supabase.pageUpdateEq).not.toHaveBeenCalled();
     });
 
     it('keeps staff message echoes subscribed after a contact sync', async () => {

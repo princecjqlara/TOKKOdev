@@ -724,7 +724,7 @@ export async function getConversationMessages(
     conversationId: string,
     pageAccessToken: string,
     maxMessages: number = 500, // Safety limit to prevent infinite loops
-    options: { throwOnError?: boolean; initialPage?: ConversationMessagePage } = {}
+    options: { throwOnError?: boolean; initialPage?: ConversationMessagePage; timeoutMs?: number; signal?: AbortSignal } = {}
 ): Promise<ConversationMessage[]> {
     const allMessages: ConversationMessage[] = options.initialPage?.data
         ? [...options.initialPage.data]
@@ -736,6 +736,10 @@ export async function getConversationMessages(
 
     try {
         while (nextUrl && allMessages.length < maxMessages) {
+            const historyUrl = new URL(nextUrl);
+            if (historyUrl.protocol !== 'https:' || historyUrl.hostname !== 'graph.facebook.com' || historyUrl.username || historyUrl.password) {
+                throw new Error('Unexpected Messenger pagination URL');
+            }
             if (seenPageUrls.has(nextUrl)) {
                 const paginationError = new Error(
                     `Facebook returned a repeated message-history cursor for conversation ${conversationId}`
@@ -746,7 +750,7 @@ export async function getConversationMessages(
             }
             seenPageUrls.add(nextUrl);
 
-            const fetchResponse = await fetchFacebookRead(nextUrl);
+            const fetchResponse = await fetchFacebookRead(nextUrl, options.timeoutMs, options.signal);
 
             if (!fetchResponse.ok) {
                 const graphError = await readFacebookError(fetchResponse, `/${conversationId}/messages`);
@@ -756,6 +760,7 @@ export async function getConversationMessages(
             }
 
             const responseData: { data?: ConversationMessage[]; paging?: { next?: string } } = await fetchResponse.json();
+            if (options.throwOnError && !Array.isArray(responseData.data)) throw new Error('Messenger history returned incomplete data');
             const messages = responseData.data || [];
             allMessages.push(...messages);
 

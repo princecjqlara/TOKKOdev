@@ -88,6 +88,19 @@ describe('runContactSyncToCompletion', () => {
         expect(fetchMock).toHaveBeenCalledTimes(1);
     });
 
+    it('carries failures from an earlier cursor page to the final sync request', async () => {
+        const fetchMock = vi.fn()
+            .mockResolvedValueOnce(new Response(JSON.stringify({ success: true, partial: true, synced: 1, failed: 1,
+                nextCursor: 'next', syncHadFailures: true }), { status: 200 }))
+            .mockResolvedValueOnce(new Response(JSON.stringify({ success: true, synced: 1, failed: 0 }), { status: 200 }));
+        vi.stubGlobal('fetch', fetchMock);
+
+        const result = await runContactSyncToCompletion('page_1');
+
+        expect(result.totalFailed).toBe(1);
+        expect(JSON.parse(fetchMock.mock.calls[1][1].body)).toMatchObject({ cursor: 'next', syncHadFailures: true });
+    });
+
     it('continues cursor pages past the previous fixed continuation cap', async () => {
         let callNumber = 0;
         const fetchMock = vi.fn(async (): Promise<Response> => {

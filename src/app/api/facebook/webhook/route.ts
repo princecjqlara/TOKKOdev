@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getSupabaseAdmin } from '@/lib/supabase';
 import { databaseErrorDetails, databaseRequest } from '@/lib/database-request';
+import { createContactMessagingAutoTagger } from '@/lib/messaging-auto-tag-sync';
 import { verifyWebhookSignature, sendMessage, getConversationForPsid, getUserProfile } from '@/lib/facebook';
 import { isExpectedFacebookProfileLookupError } from '@/lib/facebook-errors';
 import { getPhilippinesDayOfWeek, getPhilippinesHour } from '@/lib/philippines-time';
@@ -179,7 +180,7 @@ export async function POST(request: NextRequest) {
                 try {
                     lookup = await databaseRequest(supabase
                         .from('pages')
-                        .select('id, access_token')
+                        .select('id, access_token, messaging_auto_tag_enabled')
                         .eq('fb_page_id', pageId)
                         .single());
                 } catch (error) {
@@ -206,6 +207,7 @@ export async function POST(request: NextRequest) {
                 }
 
                 // Fetch welcome message config for this page (cached per webhook batch)
+                const applyMessengerTags = createContactMessagingAutoTagger(supabase, { ...page, fb_page_id: pageId });
                 let welcomeConfig: { enabled: boolean; message_text: string; buttons: Array<{ type: string; text: string; url?: string; payload?: string }> } | null = null;
                 let welcomeConfigFetched = false;
 
@@ -251,6 +253,18 @@ export async function POST(request: NextRequest) {
                                     : '';
 
                                 if (eventType === 'message' && outboundMessageText && recipientId) {
+                                    try {
+                                        if (await applyMessengerTags(recipientId, [{
+                                            from: { id: pageId }, message: outboundMessageText
+                                        }])) {
+                                            logInfo('Updated contact tags from Messenger lead/order event', { pageId, recipientId });
+                                        }
+                                    } catch (tagError) {
+                                        hadCriticalFailure = true;
+                                        logError('Failed to update Messenger lead/order tags', {
+                                            pageId, recipientId, ...databaseErrorDetails(tagError)
+                                        });
+                                    }
                                     try {
                                         const stopResult = await stopWorkflowAutomationsFromPageMessage({
                                             supabase,

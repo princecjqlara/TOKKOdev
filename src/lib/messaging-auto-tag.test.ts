@@ -13,6 +13,8 @@ describe('classifyMessengerSystemMessage', () => {
     it('accepts explicit created and requested order notifications', () => {
         expect(classifyMessengerSystemMessage('You created an order for PHP699. View: fb-pma://payments/orderdetails/?invoice_id=12345')).toBe('order_created');
         expect(classifyMessengerSystemMessage('You requested PHP699. View: fb-pma://payments/orderdetails/?invoice_id=12345')).toBe('order_created');
+        expect(classifyMessengerSystemMessage('You created an order for PHP 699.00. View: fb-pma://payments/orderdetails/?invoice_id=12345')).toBe('order_created');
+        expect(classifyMessengerSystemMessage('You requested ₱ 699.00. View: fb-pma://payments/orderdetails/?invoice_id=12345')).toBe('order_created');
     });
 
     it('does not mistake payment claims or ordinary text for a qualifying event', () => {

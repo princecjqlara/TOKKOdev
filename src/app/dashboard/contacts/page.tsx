@@ -725,6 +725,10 @@ export default function ContactsPage() {
                 }
             }
             await fetchContacts();
+            await fetchTags();
+            if (data.failed > 0) {
+                alert(`${data.synced} contacts synced. ${data.failed} contacts could not be fully checked. Retry sync to finish updating their details and tags.`);
+            }
         } catch (error) {
             console.error('Error syncing:', error);
             alert((error as Error).message || 'Contact sync failed.');

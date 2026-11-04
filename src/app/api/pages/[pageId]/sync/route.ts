@@ -6,13 +6,15 @@ import {
     getPageConversationsBatch,
     getUserProfile,
     getConversationMessages,
-    subscribePageToAppWebhook
+    subscribePageToAppWebhook,
+    type ConversationMessage
 } from '@/lib/facebook';
 import { getPhilippinesHour } from '@/lib/philippines-time';
 import { chunkArray } from '../../../../../lib/chunking';
 import { composeContactName, hasUsableContactName, normalizeContactName, pickPreferredContactName } from '../../../../../lib/contact-names';
 import { SUPABASE_IN_FILTER_BATCH_SIZE } from '@/lib/supabase-pagination';
 import { isExpectedFacebookProfileLookupError } from '@/lib/facebook-errors';
+import { createContactMessagingAutoTagger } from '@/lib/messaging-auto-tag-sync';
 
 // Increase timeout for sync operations (up to 5 minutes)
 export const maxDuration = 300;
@@ -126,8 +128,10 @@ export async function POST(
         let cursor: string | null = null;
         let requestedSyncStartedAt: string | null = null;
         let requestedSyncRunId: string | null = null;
+        let syncHadFailures = false;
         try {
             const body = await request.json();
+            syncHadFailures = body?.syncHadFailures === true;
             forceFullSync = (body as { forceFullSync?: boolean })?.forceFullSync === true;
             usePagedSync = (body as { paged?: boolean })?.paged !== false;
             cursor = typeof (body as { cursor?: unknown }).cursor === 'string'
@@ -184,7 +188,7 @@ export async function POST(
         // Get page details including last_synced_at
         const { data: page } = await supabase
             .from('pages')
-            .select('fb_page_id, access_token, last_synced_at')
+            .select('fb_page_id, access_token, last_synced_at, messaging_auto_tag_enabled')
             .eq('id', pageId)
             .single();
 
@@ -198,6 +202,8 @@ export async function POST(
                 { status: 404 }
             );
         }
+
+        const applyMessengerTags = createContactMessagingAutoTagger(supabase, { ...page, id: pageId });
 
         // Determine if this is a full sync or incremental sync
         const isIncremental = !forceFullSync && !!page.last_synced_at;
@@ -328,8 +334,8 @@ export async function POST(
 
         // Filter valid conversations first
         let validConversations = conversations.filter(conv => {
-            const participant = conv.participants?.data?.find(p => p.id !== page.fb_page_id);
-            return participant && participant.id;
+            const participants = conv.participants?.data?.filter(p => p.id && p.id !== page.fb_page_id) || [];
+            return participants.length === 1;
         });
 
         if (resumePsids.length > 0) {
@@ -463,6 +469,7 @@ export async function POST(
 
         let synced = 0;
         let failed = 0;
+        let tagged = 0;
         const errors: string[] = [];
 
         // Process contacts in parallel batches to avoid timeout
@@ -508,6 +515,8 @@ export async function POST(
                     synced,
                     failed,
                     total: conversations.length,
+                    tagged,
+                    syncHadFailures: syncHadFailures || failed > 0,
                     processed: i,
                     remaining: remainingConversations.length,
                     remainingPsids: remainingPsids, // Return remaining PSIDs for automatic retry
@@ -603,13 +612,16 @@ export async function POST(
                     let firstInteractionAt: string | null = null;
                     let lastInboundAt: string | null = null;
                     let messageSenderName: string | null = null;
+                    let messages: ConversationMessage[] = [];
+                    let historyError: unknown;
 
                     try {
-                        // Fetch ALL messages from this conversation for analysis
-                        const messages = await getConversationMessages(
+                        // Reuse the history for timing, names, and Messenger lead/order tags.
+                        messages = await getConversationMessages(
                             conversation.id,
-                            page.access_token
-                            // No limit - fetch all messages
+                            page.access_token,
+                            500,
+                            { throwOnError: true, timeoutMs: 5_000, signal: AbortSignal.timeout(12_000) }
                         );
 
                         // Filter messages FROM the contact (not from the page)
@@ -665,6 +677,7 @@ export async function POST(
                             }
                         }
                     } catch (msgError) {
+                        historyError = msgError;
                         // Message fetch failed, fallback to last interaction time
                         logWarn('Could not fetch conversation messages; using fallback heuristics', {
                             psid: participant.id,
@@ -717,7 +730,11 @@ export async function POST(
                         });
                         return { success: false, psid: participant.id, error: upsertError.message };
                     } else {
-                        return { success: true, psid: participant.id };
+                        if (historyError && page.messaging_auto_tag_enabled !== false) {
+                            throw new Error('Messenger history could not be checked for lead/order tags. Retry contact sync.');
+                        }
+                        const contactTagged = await applyMessengerTags(participant.id, messages, name || undefined);
+                        return { success: true, psid: participant.id, tagged: contactTagged };
                     }
                 } catch (error) {
                     logError('Unhandled error processing contact', {
@@ -737,6 +754,7 @@ export async function POST(
                 if (result.status === 'fulfilled') {
                     if (result.value.success) {
                         synced++;
+                        if (result.value.tagged) tagged++;
                     } else {
                         failed++;
                         if (result.value.error) {
@@ -807,6 +825,8 @@ export async function POST(
                 message: `Processed ${validConversations.length} conversations. Continuing with next Facebook page.`,
                 synced,
                 failed,
+                tagged,
+                syncHadFailures: syncHadFailures || failed > 0,
                 total: conversations.length,
                 processed: validConversations.length,
                 remaining: 0,
@@ -828,28 +848,30 @@ export async function POST(
             return NextResponse.json(responsePayload);
         }
 
-        // Always update last_synced_at to the start time of this sync
-        // This ensures that if we retry, we won't re-fetch conversations we've already processed
-        // The upsert with onConflict will handle duplicates correctly
-        const { error: checkpointError } = await supabase
-            .from('pages')
-            .update({
-                last_synced_at: syncStartTime,
-                updated_at: new Date().toISOString()
-            })
-            .eq('id', pageId);
+        // Keep failed contact/tag work eligible for the next incremental sync.
+        let checkpointSaved = false;
+        if (!syncHadFailures && failed === 0) {
+            const { error: checkpointError } = await supabase
+                .from('pages')
+                .update({
+                    last_synced_at: syncStartTime,
+                    updated_at: new Date().toISOString()
+                })
+                .eq('id', pageId);
 
-        if (checkpointError) {
-            logWarn('Failed to update last_synced_at checkpoint', {
-                pageId,
-                syncStartTime,
-                error: checkpointError.message
-            });
-        } else {
-            logInfo('Updated last_synced_at checkpoint', {
-                pageId,
-                syncStartTime
-            });
+            if (checkpointError) {
+                logWarn('Failed to update last_synced_at checkpoint', {
+                    pageId,
+                    syncStartTime,
+                    error: checkpointError.message
+                });
+            } else {
+                checkpointSaved = true;
+                logInfo('Updated last_synced_at checkpoint', {
+                    pageId,
+                    syncStartTime
+                });
+            }
         }
 
         if (synced + failed < validConversations.length) {
@@ -864,10 +886,12 @@ export async function POST(
             success: true,
             synced,
             failed,
+            tagged,
+            syncHadFailures: syncHadFailures || failed > 0,
             total: conversations.length,
             incremental: isIncremental,
             restored: restoredCount, // Number of deleted contacts that were re-added
-            last_synced_at: syncStartTime,
+            last_synced_at: checkpointSaved ? syncStartTime : page.last_synced_at,
             cursor: null,
             nextCursor: null,
             syncStartedAt: syncStartTime,

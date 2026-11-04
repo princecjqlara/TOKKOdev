@@ -86,6 +86,21 @@ describe('getFacebookPages', () => {
 });
 
 describe('strict conversation reads', () => {
+    it('rejects a malformed successful history response during strict contact sync', async () => {
+        vi.stubGlobal('fetch', vi.fn().mockResolvedValue(createJsonResponse(true, {})));
+        await expect(getConversationMessages('thread', 'token', 500, { throwOnError: true }))
+            .rejects.toThrow('incomplete data');
+    });
+
+    it('does not follow a history link outside the Facebook Graph host', async () => {
+        const fetchMock = vi.fn().mockResolvedValue(createJsonResponse(true, { data: [],
+            paging: { next: 'https://unrelated.example/messages?access_token=private-token' } }));
+        vi.stubGlobal('fetch', fetchMock);
+        await expect(getConversationMessages('thread', 'token', 500, { throwOnError: true }))
+            .rejects.toThrow('Unexpected Messenger pagination URL');
+        expect(fetchMock).toHaveBeenCalledTimes(1);
+    });
+
     it('reuses embedded messages and follows paging links even after a short page', async () => {
         const nextPage = 'https://graph.facebook.com/messages-next';
         const finalPage = 'https://graph.facebook.com/messages-final';

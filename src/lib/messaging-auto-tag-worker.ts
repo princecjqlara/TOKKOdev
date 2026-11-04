@@ -1,8 +1,7 @@
 import { getPageConversationsBatch, isFacebookReauthRequired } from '@/lib/facebook';
-import { classifyMessengerSystemMessage } from '@/lib/messaging-auto-tag';
+import { createContactMessagingAutoTagger, loadMessagingAutoTagIds } from '@/lib/messaging-auto-tag-sync';
 import { getSupabaseAdmin } from '@/lib/supabase';
 import { randomUUID } from 'node:crypto';
-import { normalizeContactName } from '@/lib/contact-names';
 
 type Page = {
     id: string;
@@ -14,17 +13,6 @@ type Page = {
 };
 
 type Message = { id: string; message?: string; from?: { id?: string }; created_time: string };
-type PageTag = { id: string; name: string; is_default: boolean };
-
-function autoTagIds(tags: PageTag[]) {
-    const defaults = new Map(tags.filter(tag => tag.is_default)
-        .map(tag => [tag.name.toLowerCase().replace(/[^a-z]/g, ''), tag.id]));
-    const outcomes = new Map(tags.map(tag => [tag.name.toLowerCase().replace(/[^a-z]/g, ''), tag.id]));
-    return {
-        paid: defaults.get('paidavailedservice') || defaults.get('paidavailedservices'),
-        unqualified: outcomes.get('notqualified') || outcomes.get('unqualified')
-    };
-}
 
 async function getMessagesSince(conversationId: string, token: string, since: string, signal: AbortSignal): Promise<Message[]> {
     let next: string | null = `https://graph.facebook.com/v21.0/${encodeURIComponent(conversationId)}/messages?fields=id,message,from,created_time&limit=100`;
@@ -70,18 +58,8 @@ export async function processOneMessagingAutoTagPage(options: { pageId?: string;
     const timeout = setTimeout(() => controller.abort(), Math.max(1000, Math.min(20000, options.maxProcessingTimeMs || 18000)));
 
     try {
-        const { data: tags, error: tagError } = await db.from('tags').select('id,name,is_default')
-            .eq('owner_type', 'page').eq('owner_id', current.id);
-        if (tagError) throw tagError;
-        let ids = autoTagIds(tags || []);
-        if (!ids.paid || !ids.unqualified) {
-            const { data: restored, error: restoreError } = await db.rpc('ensure_page_default_tags', { p_page_id: current.id });
-            if (restoreError) throw new Error(`Could not restore required Page tags: ${restoreError.message || restoreError.code}`);
-            ids = autoTagIds([...(tags || []), ...(Array.isArray(restored) ? restored : [])]);
-        }
-        const paidTagId = ids.paid;
-        const unqualifiedTagId = ids.unqualified;
-        if (!paidTagId || !unqualifiedTagId) throw new Error('Required Page tags are missing');
+        const ids = await loadMessagingAutoTagIds(db, current.id);
+        const applyMessengerTags = createContactMessagingAutoTagger(db, current, ids);
 
         const batch = await getPageConversationsBatch(current.fb_page_id, current.access_token, {
             limit: 10,
@@ -97,40 +75,7 @@ export async function processOneMessagingAutoTagPage(options: { pageId?: string;
                 if (participants.length !== 1) return;
                 const participant = participants[0];
                 const messages = await getMessagesSince(conversation.id, current.access_token, current.messaging_auto_tag_checked_at, controller.signal);
-                const signals = messages
-                    .filter(message => message.from?.id === current.fb_page_id)
-                    .map(message => classifyMessengerSystemMessage(message.message || ''))
-                    .filter(signal => signal !== null);
-                const targetTagIds = new Set<string>();
-                if (signals.some(signal => signal === 'unqualified')) targetTagIds.add(unqualifiedTagId);
-                if (signals.some(signal => signal !== 'unqualified')) targetTagIds.add(paidTagId);
-                if (targetTagIds.size === 0) return;
-
-                let { data: contact, error: contactError } = await db.from('contacts').select('id')
-                    .eq('page_id', current.id).eq('psid', participant.id).maybeSingle();
-                if (contactError) throw contactError;
-                if (!contact) {
-                    const inserted = await db.from('contacts').insert({
-                        page_id: current.id,
-                        psid: participant.id,
-                        name: normalizeContactName(participant.name)
-                    }).select('id').single();
-                    if (inserted.error) {
-                        // Another worker may have created the contact first.
-                        const found = await db.from('contacts').select('id')
-                            .eq('page_id', current.id).eq('psid', participant.id).single();
-                        if (found.error) throw inserted.error;
-                        contact = found.data;
-                    } else {
-                        contact = inserted.data;
-                    }
-                }
-                const { error: assignError } = await db.from('contact_tags').upsert(
-                    Array.from(targetTagIds, tagId => ({ contact_id: contact.id, tag_id: tagId })),
-                    { onConflict: 'contact_id,tag_id', ignoreDuplicates: true }
-                );
-                if (assignError) throw assignError;
-                tagged++;
+                if (await applyMessengerTags(participant.id, messages, participant.name)) tagged++;
             }));
             const failure = chunkResults.find(result => result.status === 'rejected');
             if (failure?.status === 'rejected') throw failure.reason;

@@ -109,6 +109,10 @@ src/
 
 ## Development
 
+Contact imports also refresh Messenger lead-stage and order-created tags. See
+[Messenger auto-tag behavior](docs/messaging-auto-tag.md) for event mappings,
+history limits, Page settings, and retry behavior.
+
 - `npm run dev` - Start development server
 - `npm run build` - Build for production
 - `npm start` - Start production server
