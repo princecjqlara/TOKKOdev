@@ -85,6 +85,6 @@ describe('connecting a shared Page', () => {
         facebookPages = [];
         await act(async () => { screen = create(React.createElement(ConnectPage)); });
         expect(JSON.stringify(screen!.toJSON())).toContain('A Facebook app tester invitation does not grant Page access');
-        expect(JSON.stringify(screen!.toJSON())).toContain('Use the same account that was invited');
+        expect(JSON.stringify(screen!.toJSON())).toContain('Facebook sign-in does not require a Tokko email invitation');
     });
 });

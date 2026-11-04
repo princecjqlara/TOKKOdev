@@ -2,7 +2,7 @@
 
 import { useSession, signOut } from 'next-auth/react';
 import { useRouter, usePathname } from 'next/navigation';
-import { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
 import {
     LayoutDashboard,
@@ -40,6 +40,7 @@ export default function DashboardLayout({
     const [pagesLoaded, setPagesLoaded] = useState(false);
     const [pagesError, setPagesError] = useState<string | null>(null);
     const [reconnectRequiredPages, setReconnectRequiredPages] = useState<Page[]>([]);
+    const [facebookDiscoveryMessage, setFacebookDiscoveryMessage] = useState<string | null>(null);
     const membershipSnapshot = useRef<string | null>(null);
 
     useEffect(() => {
@@ -91,6 +92,7 @@ export default function DashboardLayout({
             const data = await res.json();
             setPages(data.pages || []);
             setReconnectRequiredPages(data.reconnectRequiredPages || []);
+            setFacebookDiscoveryMessage(data.facebookDiscovery?.message || null);
             setPagesError(null);
             membershipSnapshot.current = (data.pages || []).map((page: Page) => page.id).sort().join(',');
             setPagesLoaded(true);
@@ -280,10 +282,18 @@ export default function DashboardLayout({
                             <Link href="/dashboard/connect" className="inline-block mt-3 font-bold underline">Reconnect Facebook Pages</Link>
                         </div>
                     )}
+                    {pagesLoaded && !pages.length && session.user.provider === 'facebook' && pathname !== '/dashboard/connect' && (
+                        <div className="border-2 border-black p-4 mb-6 text-sm">
+                            <p className="font-bold">Facebook sign-in is complete</p>
+                            <p className="mt-2">No connected Pages were found for this Facebook account. You can connect a Page you manage directly; a Tokko email invitation is not required.</p>
+                            {facebookDiscoveryMessage && <p className="mt-2 text-amber-800">{facebookDiscoveryMessage}</p>}
+                            <Link href="/dashboard/connect" className="inline-block mt-3 font-bold underline">Find or connect Facebook Pages</Link>
+                        </div>
+                    )}
                     {pagesError
                         ? <div role="alert" className="border-2 border-black p-6"><p>{pagesError}</p><button className="btn-wireframe mt-4" onClick={() => void fetchPages()}>Retry loading Pages</button></div>
                         : pagesLoaded && !pages.length && session.user.provider === 'credentials'
-                        ? <div className="border-2 border-black p-6"><h1 className="text-2xl font-black">No Pages assigned</h1><p className="mt-3">Your account is ready. Ask your Facebook Page manager to assign a Page. Its contacts, tags, campaigns, and other Page features will appear here.</p></div>
+                        ? <div className="border-2 border-black p-6"><h1 className="text-2xl font-black">No Pages assigned</h1><p className="mt-3">Your account is ready. Ask your Tokko administrator to assign a Page in Team Access. Its contacts, tags, campaigns, and other Page features will appear here.</p></div>
                         : children}
                 </div>
             </main>

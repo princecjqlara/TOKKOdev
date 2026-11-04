@@ -207,6 +207,16 @@ describe('POST /api/facebook/connect', () => {
         expect(supabase.pageUpsert).not.toHaveBeenCalled();
     });
 
+    it('distinguishes missing Page consent from a missing Facebook management role', async () => {
+        const supabase = createSupabaseMock(); mocks.getSupabaseAdmin.mockReturnValue(supabase);
+        mocks.getSessionFromRequest.mockResolvedValue({ user: { id: 'manager', provider: 'facebook' } });
+        mocks.verifiedFacebookPages.mockResolvedValue([{ id: 'fb_page_1', name: 'Page', tasks: ['PROFILE_PLUS_FULL_CONTROL'] }]);
+        const response = await POST(createRequest());
+        expect(response.status).toBe(409);
+        expect(await response.json()).toMatchObject({ requiresReauth: true, message: expect.stringContaining('recognizes your Page management access') });
+        expect(supabase.pageUpsert).not.toHaveBeenCalled(); expect(supabase.userPagesUpsert).not.toHaveBeenCalled();
+    });
+
     it('links two managers to the same Page without resetting sync or writing contacts', async () => {
         const supabase = createSupabaseMock();
         mocks.getSupabaseAdmin.mockReturnValue(supabase);

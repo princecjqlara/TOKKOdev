@@ -59,9 +59,11 @@ export async function POST(request: NextRequest) {
         }
 
         const facebookPage = (await verifiedFacebookPages(session)).find(page => page.id === fbPageId);
-        if (!facebookPage?.access_token || !hasFacebookManagementTask(facebookPage)) throw new AccessError(403, membership
+        if (!facebookPage || !hasFacebookManagementTask(facebookPage)) throw new AccessError(403, membership
             ? 'This Page is already assigned to you. Open Contacts without reconnecting, or ask its Facebook Page administrator to refresh the shared connection.'
             : 'Ask your Tokko administrator to assign this Page in Team Access. To connect a new Page yourself, accept its Facebook Page invitation with management access and refresh permissions. A Facebook app tester invitation alone does not grant Page access.');
+        if (!facebookPage.access_token) throw new AccessError(409,
+            'Facebook recognizes your Page management access but did not provide a Page connection token. Refresh Facebook permissions, select this Page, and approve Tokko’s requested Page permissions.');
         const name = facebookPage.name;
         const accessToken = facebookPage.access_token;
 

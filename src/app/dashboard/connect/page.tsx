@@ -64,6 +64,7 @@ export default function ConnectPage() {
             const res = await fetch('/api/pages');
             const data = await res.json();
             if (!res.ok) throw new Error(data.message || 'Could not load your assigned Pages.');
+            setAssignedError(data.facebookDiscovery?.message || null);
             setAssignedPages(data.pages || []);
             const fbPageIds = new Set((data.pages || []).map((page: Page) => page.fb_page_id));
             setConnectedPages(fbPageIds as Set<string>);
@@ -198,12 +199,16 @@ export default function ConnectPage() {
 
             <section className="border border-black mb-6" aria-label="Your assigned Pages">
                 <div className="p-4 border-b border-black">
-                    <h2 className="font-bold">Your assigned Pages</h2>
-                    <p className="text-sm text-gray-600 mt-1">Tokko invitations give access to the existing contacts and tags. You do not need to connect Facebook again.</p>
+                    <h2 className="font-bold">{hasFacebookSession ? 'Your Facebook Pages' : 'Your assigned Pages'}</h2>
+                    <p className="text-sm text-gray-600 mt-1">{hasFacebookSession
+                        ? 'Pages you manage on Facebook can reuse an existing Tokko connection and its shared contacts. Connect a new Page below when needed.'
+                        : 'Tokko invitations give access to the existing contacts and tags. You do not need to connect Facebook again.'}</p>
                 </div>
                 {assignedLoading ? <p className="p-4 text-sm">Loading assigned Pages...</p>
                     : assignedError ? <p role="alert" className="p-4 text-sm text-red-700">{assignedError}</p>
-                    : !assignedPages.length ? <p className="p-4 text-sm text-gray-600">No Pages are assigned to this account yet. Ask your Tokko administrator to assign the Page in Team Access. Use the same account that was invited.</p>
+                    : !assignedPages.length ? <p className="p-4 text-sm text-gray-600">{hasFacebookSession
+                        ? 'Facebook sign-in does not require a Tokko email invitation. Select a Page you manage below. If it is missing, refresh Facebook permissions and select that Page.'
+                        : 'No Pages are assigned to this account yet. Ask your Tokko administrator to assign the Page in Team Access. Use the same account that was invited.'}</p>
                     : assignedPages.map(page => {
                         const facebookPage = facebookPages.find(candidate => candidate.id === page.fb_page_id);
                         return <div key={page.id} className="flex flex-wrap items-center justify-between gap-3 p-4 border-b last:border-0">

@@ -122,3 +122,19 @@ This fix changes application authorization and navigation. It does not grant
 new Page memberships or require a database migration. Opening Contacts no longer
 automatically calls the manager-only webhook refresh endpoint; subscriptions
 are established during connection, reconnect, and contact sync.
+
+## Direct Facebook sign-in
+
+Facebook login is a complete account path; it does not require a Tokko email
+invitation. When that account has no Page memberships, the initial `/api/pages`
+load verifies the signed Facebook identity and its current Page management
+tasks. It links matching Pages that are already connected to Tokko, using
+`grant_source='facebook'` and duplicate-safe inserts. Existing shared contacts
+then appear without another import. Email matching is never used for this.
+
+Recovery does not create Pages, replace shared tokens, reset sync progress,
+change existing grants, or enroll app testers or messaging-only users in
+unassigned Pages. Normal membership polling stays database-only. A Page not yet
+connected to Tokko can be connected by its verified Facebook manager from
+Connect Pages. Page/token consent failures are shown as permission-refresh
+actions, while Facebook sign-in itself remains independent of Page management.

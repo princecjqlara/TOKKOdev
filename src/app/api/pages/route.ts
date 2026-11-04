@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getSessionFromRequest } from '@/lib/get-session';
 import { getSupabaseAdmin } from '@/lib/supabase';
+import { restoreFacebookPageMemberships } from '@/lib/facebook-page-memberships';
+import { AccessError } from '@/lib/account-security';
 
 export const dynamic = 'force-dynamic';
 
@@ -104,7 +106,7 @@ export async function GET(request: NextRequest) {
 
         const supabase = getSupabaseAdmin();
 
-        const { data: userPages, error } = await supabase
+        const loadAssignments = () => supabase
             .from('user_pages')
             .select(`
         page_id,
@@ -119,8 +121,26 @@ export async function GET(request: NextRequest) {
         )
       `)
             .eq('user_id', userId);
-
+        let { data: userPages, error } = await loadAssignments();
         if (error) throw error;
+        let facebookDiscovery: { restored: number; message?: string; requiresReauth?: boolean } | undefined;
+        // Facebook sign-in admits the account independently of team invitations.
+        // Recover only existing Pages owned/managed by this verified Facebook
+        // identity. Membership-only polling remains a database read.
+        if (!userPages?.length && session.user.provider === 'facebook' && request.nextUrl?.searchParams.get('membershipOnly') !== '1') {
+            try {
+                const restored = await restoreFacebookPageMemberships(session, supabase);
+                facebookDiscovery = { restored };
+                if (restored) {
+                    const refreshed = await loadAssignments();
+                    if (refreshed.error) throw refreshed.error;
+                    userPages = refreshed.data;
+                }
+            } catch (discoveryError) {
+                if (!(discoveryError instanceof AccessError)) throw discoveryError;
+                facebookDiscovery = { restored: 0, message: discoveryError.message, requiresReauth: discoveryError.status === 409 };
+            }
+        }
 
         const pageRecords = (userPages
             ?.map((up) => Array.isArray(up.pages) ? up.pages[0] : up.pages)
@@ -164,7 +184,7 @@ export async function GET(request: NextRequest) {
             }));
         const reconnectRequiredPages = pages.filter(page => page.requiresReconnect);
 
-        return NextResponse.json({ pages, reconnectRequiredPages },
+        return NextResponse.json({ pages, reconnectRequiredPages, ...(facebookDiscovery ? { facebookDiscovery } : {}) },
             { headers: { 'Cache-Control': 'private, no-store' } });
     } catch (error) {
         console.error('Error fetching pages:', error);

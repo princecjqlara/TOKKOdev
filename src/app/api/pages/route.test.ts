@@ -1,10 +1,13 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { NextRequest } from 'next/server';
+import { AccessError } from '@/lib/account-security';
 
 const mocks = vi.hoisted(() => ({
     getSessionFromRequest: vi.fn(),
-    getSupabaseAdmin: vi.fn()
+    getSupabaseAdmin: vi.fn(),
+    restoreFacebookPages: vi.fn()
 }));
+vi.mock('@/lib/facebook-page-memberships', () => ({ restoreFacebookPageMemberships: mocks.restoreFacebookPages }));
 
 vi.mock('@/lib/get-session', () => ({
     getSessionFromRequest: mocks.getSessionFromRequest
@@ -62,6 +65,7 @@ describe('GET /api/pages', () => {
         vi.unstubAllGlobals();
         mocks.getSessionFromRequest.mockResolvedValue({ user: { id: 'user_1', provider: 'facebook' } });
         mocks.getSupabaseAdmin.mockReturnValue(createSupabaseMock());
+        mocks.restoreFacebookPages.mockResolvedValue(0);
         vi.stubGlobal('fetch', vi.fn(async (url: URL) => {
             const pathnameParts = url.pathname.split('/');
             const fbPageId = pathnameParts[pathnameParts.length - 1];
@@ -98,6 +102,54 @@ describe('GET /api/pages', () => {
             '697291860141214'
         ]);
         expect(body.pages.every((page: { access_token?: string }) => !page.access_token)).toBe(true);
+    });
+
+    it('recovers a shared Page for a direct Facebook manager without an email invitation or another sync', async () => {
+        const db = createSupabaseMock();
+        const existing = await db.eq();
+        db.eq.mockClear();
+        db.eq.mockResolvedValueOnce({ data: [], error: null }).mockResolvedValueOnce(existing);
+        mocks.getSupabaseAdmin.mockReturnValue(db);
+        mocks.restoreFacebookPages.mockResolvedValue(2);
+        const response = await GET(createRequest());
+        const body = await response.json();
+        expect(response.status).toBe(200);
+        expect(body.pages).toHaveLength(2);
+        expect(body.facebookDiscovery).toEqual({ restored: 2 });
+        expect(mocks.restoreFacebookPages).toHaveBeenCalledWith(expect.objectContaining({ user: expect.objectContaining({ id: 'user_1', provider: 'facebook' }) }), db);
+        expect(db.eq).toHaveBeenCalledTimes(2);
+        expect(JSON.stringify(body)).not.toMatch(/access_token|fresh_valid_token|old_invalid_token/);
+    });
+
+    it.each([{ provider: 'credentials', search: '' }, { provider: 'facebook', search: '?membershipOnly=1' }])(
+        'does not discover Facebook grants for an empty %j lookup', async ({ provider, search }) => {
+            const db = createSupabaseMock(); db.eq.mockResolvedValue({ data: [], error: null });
+            mocks.getSupabaseAdmin.mockReturnValue(db); mocks.getSessionFromRequest.mockResolvedValue({ user: { id: 'user_1', provider } });
+            const body = await (await GET(createRequest(search))).json();
+            expect(body.pages).toEqual([]);
+            expect(mocks.restoreFacebookPages).not.toHaveBeenCalled(); expect(fetch).not.toHaveBeenCalled();
+        }
+    );
+
+    it('keeps the Facebook account admitted when permissions need refreshing', async () => {
+        const db = createSupabaseMock(); db.eq.mockResolvedValue({ data: [], error: null });
+        mocks.getSupabaseAdmin.mockReturnValue(db);
+        mocks.restoreFacebookPages.mockRejectedValue(new AccessError(409, 'Refresh Facebook permissions'));
+        const response = await GET(createRequest());
+        expect(response.status).toBe(200);
+        expect(await response.json()).toMatchObject({ pages: [], facebookDiscovery: { restored: 0, requiresReauth: true } });
+    });
+
+    it('does not treat a database failure during discovery as missing Facebook access', async () => {
+        const db = createSupabaseMock(); db.eq.mockResolvedValue({ data: [], error: null });
+        mocks.getSupabaseAdmin.mockReturnValue(db);
+        mocks.restoreFacebookPages.mockRejectedValue({ code: '08000', message: 'Database unavailable' });
+        expect((await GET(createRequest())).status).toBe(500);
+    });
+
+    it('does not rediscover or change established Page assignments', async () => {
+        expect((await GET(createRequest())).status).toBe(200);
+        expect(mocks.restoreFacebookPages).not.toHaveBeenCalled();
     });
 
     it('preserves assigned Page access when its Facebook connection expires', async () => {
