@@ -1,7 +1,7 @@
 'use client';
 
 import { useSession, signIn } from 'next-auth/react';
-import { useEffect, useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { FacebookPageSummary, Page } from '@/types';
 import { Check, Facebook, RefreshCw, AlertCircle } from 'lucide-react';
 import { runContactSyncToCompletion } from '@/lib/contact-sync-client';
@@ -18,6 +18,7 @@ export default function ConnectPage() {
     const [error, setError] = useState<string | null>(null);
     const [requiresReauth, setRequiresReauth] = useState(false);
     const [success, setSuccess] = useState<string | null>(null);
+    const [autoTagDuringSync, setAutoTagDuringSync] = useState(true);
 
     useEffect(() => {
         fetchFacebookPages();
@@ -83,10 +84,15 @@ export default function ConnectPage() {
             if (data.success) {
                 setConnectedPages(prev => new Set([...prev, page.id]));
                 const connectedMessage = data.warning?.message || `Successfully connected "${page.name}".`;
+                if (data.needsInitialSync === false) {
+                    setSuccess(`${connectedMessage} Existing Page contacts and tags are ready in Contacts. No new import needed.`);
+                    return;
+                }
                 setSuccess(`${connectedMessage} Syncing contacts...`);
 
                 try {
                     const syncResult = await runContactSyncToCompletion(data.pageId, {
+                        autoTag: autoTagDuringSync,
                         onProgress: ({ attempt, remainingPsids, cursor }) => {
                             if (remainingPsids.length > 0) {
                                 setSuccess(`Successfully connected "${page.name}". Syncing contacts... continuing ${remainingPsids.length} remaining contacts (slice ${attempt + 1}).`);
@@ -196,6 +202,11 @@ export default function ConnectPage() {
                 </div>
             )}
 
+            <label className="flex items-center gap-2 text-sm mb-4">
+                <input type="checkbox" checked={autoTagDuringSync} disabled={connecting !== null}
+                    onChange={event => setAutoTagDuringSync(event.target.checked)} />
+                Auto-tag during the first import. Existing Page contacts are shared with all assigned members.
+            </label>
             {/* Content */}
             {loading ? (
                 <div className="flex justify-center py-20 wireframe-card">

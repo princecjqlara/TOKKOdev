@@ -57,9 +57,9 @@ can retry delivery. Server requests and their diagnostic logs prefer
 
 ## Repair a cleanup that removed setup
 
-`migration_repair_default_page_tags.sql` installs a server-only, idempotent repair
+`migration_messaging_lead_stage_tags.sql` installs a server-only, idempotent repair
 function. It reuses matching tag IDs and their assignments, restores the protected
-Paid / Availed Service and Unqualified definitions, and supports new Pages through
+Qualified, Not Qualified, Converted and Lost definitions, and supports new Pages through
 the existing Page-insert trigger. The auto-tag worker calls it only if a required
 tag is missing. Failed repairs retain the inbox checkpoint for retry.
 

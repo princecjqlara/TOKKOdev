@@ -129,9 +129,11 @@ export async function POST(
         let requestedSyncStartedAt: string | null = null;
         let requestedSyncRunId: string | null = null;
         let syncHadFailures = false;
+        let autoTag = true;
         try {
             const body = await request.json();
             syncHadFailures = body?.syncHadFailures === true;
+            autoTag = body?.autoTag !== false;
             forceFullSync = (body as { forceFullSync?: boolean })?.forceFullSync === true;
             usePagedSync = (body as { paged?: boolean })?.paged !== false;
             cursor = typeof (body as { cursor?: unknown }).cursor === 'string'
@@ -203,7 +205,10 @@ export async function POST(
             );
         }
 
-        const applyMessengerTags = createContactMessagingAutoTagger(supabase, { ...page, id: pageId });
+        const autoTagEnabled = autoTag && page.messaging_auto_tag_enabled !== false;
+        const applyMessengerTags = createContactMessagingAutoTagger(supabase, {
+            ...page, id: pageId, messaging_auto_tag_enabled: autoTagEnabled
+        });
 
         // Determine if this is a full sync or incremental sync
         const isIncremental = !forceFullSync && !!page.last_synced_at;
@@ -730,10 +735,10 @@ export async function POST(
                         });
                         return { success: false, psid: participant.id, error: upsertError.message };
                     } else {
-                        if (historyError && page.messaging_auto_tag_enabled !== false) {
+                        if (historyError && autoTagEnabled) {
                             throw new Error('Messenger history could not be checked for lead/order tags. Retry contact sync.');
                         }
-                        const contactTagged = await applyMessengerTags(participant.id, messages, name || undefined);
+                        const contactTagged = await applyMessengerTags(participant.id, messages);
                         return { success: true, psid: participant.id, tagged: contactTagged };
                     }
                 } catch (error) {

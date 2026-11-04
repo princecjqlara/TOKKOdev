@@ -76,6 +76,7 @@ function createSupabaseMock(options?: {
         id: string;
         name?: string | null;
         profile_pic?: string | null;
+        last_inbound_at?: string | null;
     } | null;
 }) {
     const pageSingle = vi.fn().mockResolvedValue({
@@ -112,8 +113,10 @@ function createSupabaseMock(options?: {
     const tagAssignments = vi.fn().mockResolvedValue({ error: null });
     const tagChain: any = { select: () => tagChain, eq: () => tagChain,
         then: (resolve: any) => Promise.resolve({ data: [
-            { id: 'paid_tag', name: 'Paid / Availed Service', is_default: true },
-            { id: 'negative_tag', name: 'Unqualified', is_default: true }
+            { id: 'qualified_tag', name: 'Qualified', is_default: true },
+            { id: 'converted_tag', name: 'Converted', is_default: true },
+            { id: 'lost_tag', name: 'Lost', is_default: true },
+            { id: 'negative_tag', name: 'Not Qualified', is_default: true }
         ], error: null }).then(resolve) };
 
     const welcomeSingle = vi.fn().mockResolvedValue({
@@ -427,12 +430,13 @@ describe('POST /api/facebook/webhook', () => {
     }
 
     it.each([
-        ['Lead stage set to Qualified', 'paid_tag'],
-        ['Lead stage set to Converted', 'paid_tag'],
+        ['Lead stage set to Qualified', 'qualified_tag'],
+        ['Lead stage set to Converted', 'converted_tag'],
+        ['Lead stage set to Lost', 'lost_tag'],
         ['Lead stage set to Unqualified', 'negative_tag'],
-        ['You created an order for PHP 699. View: fb-pma://payments/orderdetails/?invoice_id=12345', 'paid_tag']
+        ['You created an order for PHP 699. View: fb-pma://payments/orderdetails/?invoice_id=12345', 'converted_tag']
     ])('applies Messenger lead/order tags immediately from a Page echo: %s', async (text, tagId) => {
-        const supabase = createSupabaseMock({ existingContact: { id: 'contact_row_1' } });
+        const supabase = createSupabaseMock({ existingContact: { id: 'contact_row_1', last_inbound_at: new Date().toISOString() } });
         mocks.getSupabaseAdmin.mockReturnValue(supabase);
 
         const response = await POST(pageEcho(text));
@@ -445,7 +449,7 @@ describe('POST /api/facebook/webhook', () => {
     });
 
     it('returns failure when an echo tag write fails so Facebook can retry', async () => {
-        const supabase = createSupabaseMock({ existingContact: { id: 'contact_row_1' } });
+        const supabase = createSupabaseMock({ existingContact: { id: 'contact_row_1', last_inbound_at: new Date().toISOString() } });
         supabase.tagAssignments.mockResolvedValue({ error: { code: '08000', message: 'Connection failed' } });
         mocks.getSupabaseAdmin.mockReturnValue(supabase);
 
@@ -459,6 +463,16 @@ describe('POST /api/facebook/webhook', () => {
 
         expect((await POST(pageEcho('Lead stage set to Qualified'))).status).toBe(200);
         expect(supabase.tagAssignments).not.toHaveBeenCalled();
+    });
+
+    it('does not auto-tag or extend an expired inbound window from an outbound stage echo', async () => {
+        const supabase = createSupabaseMock({ existingContact: { id: 'contact_row_1',
+            last_inbound_at: new Date(Date.now() - 8 * 86400000).toISOString() } });
+        mocks.getSupabaseAdmin.mockReturnValue(supabase);
+        expect((await POST(pageEcho('Lead stage set to Lost'))).status).toBe(200);
+        expect(supabase.tagAssignments).not.toHaveBeenCalled();
+        expect(supabase.contactsUpsert).not.toHaveBeenCalled();
+        expect(mocks.sendMessage).not.toHaveBeenCalled();
     });
 
     it('reports the HTTP status for gateway errors without a message and requests a retry', async () => {

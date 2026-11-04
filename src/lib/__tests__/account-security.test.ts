@@ -26,8 +26,17 @@ describe('account credential safety', () => {
         expect(await verifyAccountPassword(password + 'x', first)).toBe(false);
         expect(await verifyAccountPassword('changeme123', '$2a$10$legacy')).toBe(false);
         expect(await verifyAccountPassword(password, null)).toBe(false);
-        await expect(hashAccountPassword('short')).rejects.toThrow();
+        await expect(hashAccountPassword('')).rejects.toThrow();
         await expect(hashAccountPassword('x'.repeat(1025))).rejects.toThrow();
+    });
+    it.each(['a', '123', '💙', ' '])('accepts a short non-empty password without changing its content: %j', async password => {
+        const hash = await hashAccountPassword(password);
+        expect(hash).toMatch(/^scrypt-v1\$/);
+        expect(await verifyAccountPassword(password, hash)).toBe(true);
+        expect(await verifyAccountPassword(password + 'x', hash)).toBe(false);
+    });
+    it.each([undefined, null, 123, false, {}, [], ''])('rejects missing or non-text passwords: %j', async password => {
+        await expect(hashAccountPassword(password)).rejects.toMatchObject({ status: 400 });
     });
     it('encrypts queued setup tokens and detects tampering', () => {
         vi.stubEnv('NEXTAUTH_SECRET', 'test-only-account-mail-key');

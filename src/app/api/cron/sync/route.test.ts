@@ -56,12 +56,14 @@ function createSupabaseMock(options: { autoTagEnabled?: boolean } = {}) {
 
     const contactsUpsert = vi.fn().mockResolvedValue({ error: null });
     const contactChain: any = { eq: () => contactChain,
-        maybeSingle: async () => ({ data: { id: 'contact_1' }, error: null }) };
+        maybeSingle: async () => ({ data: { id: 'contact_1', last_inbound_at: new Date().toISOString() }, error: null }) };
     const tagAssignments = vi.fn().mockResolvedValue({ error: null });
     const tagChain: any = { select: () => tagChain, eq: () => tagChain,
         then: (resolve: any) => Promise.resolve({ data: [
-            { id: 'paid_tag', name: 'Paid / Availed Service', is_default: true },
-            { id: 'negative_tag', name: 'Unqualified', is_default: true }
+            { id: 'qualified_tag', name: 'Qualified', is_default: true },
+            { id: 'converted_tag', name: 'Converted', is_default: true },
+            { id: 'lost_tag', name: 'Lost', is_default: true },
+            { id: 'negative_tag', name: 'Not Qualified', is_default: true }
         ], error: null }).then(resolve) };
 
     const from = vi.fn((table: string) => {
@@ -117,16 +119,17 @@ describe('GET /api/cron/sync', () => {
         const { GET } = await loadRoute();
         const supabase = createSupabaseMock();
         mocks.getSupabaseAdmin.mockReturnValue(supabase);
-        mocks.getPageConversations.mockResolvedValue([{ id: 'conversation_1', updated_time: '2026-04-07T02:00:00Z',
+        mocks.getPageConversations.mockResolvedValue([{ id: 'conversation_1', updated_time: new Date().toISOString(),
             participants: { data: [{ id: 'contact_psid_1', name: 'Jane Contact' }] } }]);
         mocks.getUserProfile.mockResolvedValue({ name: 'Jane Contact' });
         mocks.getConversationMessages.mockResolvedValue([{ id: 'stage', from: { id: 'fb_page_1' },
-            message: 'Lead stage set to Qualified', created_time: '2026-04-07T02:00:00Z' }]);
+            message: 'Lead stage set to Qualified', created_time: new Date().toISOString() },
+            { id: 'inbound', from: { id: 'contact_psid_1' }, message: 'Hello', created_time: new Date().toISOString() }]);
 
         const response = await GET(createRequest());
 
         expect((await response.json()).results[0]).toMatchObject({ synced: 1, failed: 0, tagged: 1 });
-        expect(supabase.tagAssignments).toHaveBeenCalledWith([{ contact_id: 'contact_1', tag_id: 'paid_tag' }],
+        expect(supabase.tagAssignments).toHaveBeenCalledWith([{ contact_id: 'contact_1', tag_id: 'qualified_tag' }],
             { onConflict: 'contact_id,tag_id', ignoreDuplicates: true });
     });
 
@@ -158,6 +161,19 @@ describe('GET /api/cron/sync', () => {
 
         expect((await response.json()).results[0]).toMatchObject({ synced: 1, failed: 0, tagged: 0 });
         expect(mocks.getConversationMessages).not.toHaveBeenCalled();
+    });
+
+    it('does not fetch tag history for a conversation outside the seven-day window', async () => {
+        const { GET } = await loadRoute();
+        const supabase = createSupabaseMock();
+        mocks.getSupabaseAdmin.mockReturnValue(supabase);
+        mocks.getPageConversations.mockResolvedValue([{ id: 'old', updated_time: new Date(Date.now() - 8 * 86400000).toISOString(),
+            participants: { data: [{ id: 'contact_psid_1', name: 'Jane Contact' }] } }]);
+        mocks.getUserProfile.mockResolvedValue({ name: 'Jane Contact' });
+        const response = await GET(createRequest());
+        expect((await response.json()).results[0]).toMatchObject({ synced: 1, failed: 0, tagged: 0 });
+        expect(mocks.getConversationMessages).not.toHaveBeenCalled();
+        expect(supabase.tagAssignments).not.toHaveBeenCalled();
     });
 
     it('keeps the participant name when profile lookup returns placeholder UNKNOWN', async () => {

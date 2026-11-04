@@ -86,6 +86,7 @@ async function postSync(
         syncStartedAt: string | null;
         syncRunId: string;
         syncHadFailures: boolean;
+        autoTag: boolean;
     }
 ): Promise<ContactSyncResponse> {
     const response = await fetch(`/api/pages/${pageId}/sync`, {
@@ -94,6 +95,7 @@ async function postSync(
         credentials: 'include',
         body: JSON.stringify({
             forceFullSync: true,
+            autoTag: options.autoTag,
             paged: true,
             ...(options.resumePsids.length > 0 ? { resumePsids: options.resumePsids } : {}),
             ...(options.cursor ? { cursor: options.cursor } : {}),
@@ -110,6 +112,7 @@ export async function runContactSyncToCompletion(
     pageId: string,
     options: {
         onProgress?: (progress: ContactSyncProgress) => void;
+        autoTag?: boolean;
     } = {}
 ): Promise<ContactSyncResult> {
     let resumePsids: string[] = [];
@@ -127,7 +130,7 @@ export async function runContactSyncToCompletion(
 
         for (let retry = 1; retry <= MAX_TIMEOUT_RETRIES_PER_STEP; retry++) {
             try {
-                data = await postSync(pageId, { resumePsids, cursor, syncStartedAt, syncRunId, syncHadFailures });
+                data = await postSync(pageId, { resumePsids, cursor, syncStartedAt, syncRunId, syncHadFailures, autoTag: options.autoTag !== false });
                 break;
             } catch (error) {
                 if (error instanceof ContactSyncRequestError && error.status >= 400 && error.status < 500) {

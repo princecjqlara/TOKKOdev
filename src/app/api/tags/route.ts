@@ -19,7 +19,7 @@ function normalizeUserIdList(value: unknown): string[] {
 
 function isReservedDefaultTagName(name: string): boolean {
     const normalized = name.toLowerCase().replace(/[^a-z]/g, '');
-    return normalized === 'paidavailedservice' || normalized === 'paidavailedservices' || normalized === 'unqualified';
+    return ['qualified', 'notqualified', 'converted', 'lost', 'paidavailedservice', 'paidavailedservices', 'unqualified'].includes(normalized);
 }
 
 // GET /api/tags - Get tags with pagination

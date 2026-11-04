@@ -24,13 +24,14 @@ describe('runContactSyncToCompletion', () => {
             }), { status: 200 }));
         vi.stubGlobal('fetch', fetchMock);
 
-        const result = await runContactSyncToCompletion('page_1');
+        const result = await runContactSyncToCompletion('page_1', { autoTag: false });
 
         expect(result.completed).toBe(true);
         expect(result.totalSynced).toBe(16);
         expect(fetchMock).toHaveBeenCalledTimes(2);
         expect(JSON.parse(fetchMock.mock.calls[1][1].body)).toEqual(expect.objectContaining({
             forceFullSync: true,
+            autoTag: false,
             paged: true,
             resumePsids: ['psid_2'],
             syncRunId: expect.any(String)

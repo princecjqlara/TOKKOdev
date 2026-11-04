@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getSupabaseAdmin } from '@/lib/supabase';
 import { getPageConversations, getUserProfile, getConversationMessages } from '@/lib/facebook';
 import { createContactMessagingAutoTagger } from '@/lib/messaging-auto-tag-sync';
+import { isWithinMessagingAutoTagWindow } from '@/lib/messaging-auto-tag';
 import { composeContactName, normalizeContactName, pickPreferredContactName } from '../../../../lib/contact-names';
 import { repairMissingContactNamesForPage } from '../../../../lib/contact-name-repair';
 
@@ -138,11 +139,20 @@ export async function GET(request: NextRequest) {
                                 onConflict: 'page_id,psid'
                             });
                         if (saveError) throw saveError;
-                        if (page.messaging_auto_tag_enabled !== false) {
+                        if (page.messaging_auto_tag_enabled !== false && isWithinMessagingAutoTagWindow(conversation.updated_time)) {
                             const messages = await getConversationMessages(conversation.id, page.access_token, 500, {
                                 throwOnError: true, timeoutMs: 3_000, signal: AbortSignal.timeout(5_000)
                             });
-                            if (await applyMessengerTags(participant.id, messages, name || undefined)) tagged++;
+                            const inbound = messages.filter(message => message.from?.id === participant.id &&
+                                isWithinMessagingAutoTagWindow(message.created_time))
+                                .sort((a, b) => Date.parse(b.created_time) - Date.parse(a.created_time))[0];
+                            if (inbound) {
+                                const { error: inboundError } = await supabase.from('contacts').upsert({
+                                    page_id: page.id, psid: participant.id, last_inbound_at: inbound.created_time
+                                }, { onConflict: 'page_id,psid' });
+                                if (inboundError) throw inboundError;
+                            }
+                            if (await applyMessengerTags(participant.id, messages)) tagged++;
                         }
 
                         synced++;

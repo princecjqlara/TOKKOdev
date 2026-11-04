@@ -308,6 +308,7 @@ export default function ContactsPage() {
     const [tags, setTags] = useState<TagType[]>([]);
     const [loading, setLoading] = useState(true);
     const [syncing, setSyncing] = useState(false);
+    const [autoTagDuringSync, setAutoTagDuringSync] = useState(true);
     const [exportingConversations, setExportingConversations] = useState(false);
     const [availableTemplates, setAvailableTemplates] = useState<AvailableTemplate[]>([]);
     const [selectedTemplateName, setSelectedTemplateName] = useState<string | null>(null);
@@ -694,6 +695,7 @@ export default function ContactsPage() {
         syncingRef.current = true;
         try {
             const result = await runContactSyncToCompletion(selectedPageId, {
+                autoTag: autoTagDuringSync,
                 onProgress: ({ attempt, totalSynced, totalFailed, remainingPsids, cursor }) => {
                     if (remainingPsids.length > 0) {
                         console.warn(`Sync slice ${attempt} finished. Continuing ${remainingPsids.length} remaining contacts automatically.`);
@@ -2071,14 +2073,17 @@ export default function ContactsPage() {
                         </select>
                     </div>
 
-                    <button
-                        onClick={handleSync}
-                        disabled={syncing}
-                        className="btn-wireframe"
-                    >
-                        <RefreshCw className={`w-4 h-4 mr-2 ${syncing ? 'animate-spin' : ''}`} />
-                        Sync
-                    </button>
+                    <div className="flex flex-col gap-1">
+                        <button onClick={handleSync} disabled={syncing} className="btn-wireframe">
+                            <RefreshCw className={`w-4 h-4 mr-2 ${syncing ? 'animate-spin' : ''}`} />
+                            Sync
+                        </button>
+                        <label className="flex items-center gap-1.5 text-xs whitespace-nowrap">
+                            <input type="checkbox" checked={autoTagDuringSync} disabled={syncing}
+                                onChange={event => setAutoTagDuringSync(event.target.checked)} />
+                            Auto-tag
+                        </label>
+                    </div>
 
                     <button
                         onClick={handleExportConversations}
@@ -2095,6 +2100,7 @@ export default function ContactsPage() {
                 </div>
             </div>
 
+            <p className="text-xs text-gray-500 mb-3">Contacts are shared with everyone assigned to this Page. One sync updates the whole team. Auto-tag follows this Page&apos;s setting in Settings.</p>
             {/* Filters & Actions Bar */}
             <div className="wireframe-card mb-6 p-4">
                 <div className="flex flex-wrap items-center gap-4">
@@ -2414,32 +2420,17 @@ export default function ContactsPage() {
                                         </div>
                                     </td>
                                     <td>
-                                        <div className="flex flex-wrap gap-2">
-                                            {contact.tags?.slice(0, 3).map((tag) => (
-                                                <div
+                                        <div className="flex flex-wrap gap-1 max-w-xs">
+                                            {contact.tags?.map((tag) => (
+                                                <span
                                                     key={tag.id}
-                                                    className="flex items-center gap-2 border border-black bg-white px-2 py-1"
+                                                    className="inline-flex items-center gap-1 border border-gray-300 px-1.5 py-0.5 text-[11px] leading-4"
+                                                    title={`Added by ${tag.tagged_by_name || 'automation'}`}
                                                 >
-                                                    <span
-                                                        className="badge-wireframe"
-                                                        style={{
-                                                            backgroundColor: tag.color,
-                                                            color: '#fff',
-                                                            borderColor: 'black'
-                                                        }}
-                                                    >
-                                                        {tag.name}
-                                                    </span>
-                                                    <span className="font-mono text-[10px] text-gray-500 whitespace-nowrap">
-                                                        by {tag.tagged_by_name || 'unknown'}
-                                                    </span>
-                                                </div>
-                                            ))}
-                                            {(contact.tags?.length || 0) > 3 && (
-                                                <span className="badge-wireframe bg-gray-100 text-black">
-                                                    +{(contact.tags?.length || 0) - 3}
+                                                    <span className="w-2 h-2 shrink-0" style={{ backgroundColor: tag.color }} />
+                                                    {tag.name}
                                                 </span>
-                                            )}
+                                            ))}
                                         </div>
                                     </td>
                                     <td>
@@ -2539,27 +2530,29 @@ export default function ContactsPage() {
                     setSelectedTagIds(new Set());
                 }}
                 title="Add Tags"
+                size="sm"
             >
                 <div className="space-y-4">
                     <p className="font-mono text-sm text-gray-500 mb-4">
                         Select tags to add to <span className="font-bold text-black">{getSelectionCount()}</span> contacts.
                     </p>
-                    <div className="max-h-64 overflow-y-auto border border-black p-2 space-y-1">
+                    <div className="max-h-56 overflow-y-auto flex flex-wrap gap-1.5" role="group" aria-label="Tags to add">
                         {tags.map((tag) => (
                             <button
                                 key={tag.id}
                                 onClick={() => toggleTagSelection(tag.id)}
-                                className={`w-full flex items-center justify-between p-3 border border-transparent hover:bg-gray-50 transition-colors ${selectedTagIds.has(tag.id)
+                                aria-pressed={selectedTagIds.has(tag.id)}
+                                className={`inline-flex items-center gap-2 px-2 py-1.5 border border-gray-300 hover:bg-gray-50 transition-colors ${selectedTagIds.has(tag.id)
                                     ? 'bg-gray-100 border-black'
                                     : ''
                                     }`}
                             >
-                                <span className="flex items-center gap-3">
+                                <span className="flex items-center gap-1.5">
                                     <span
                                         className="w-3 h-3 border border-black"
                                         style={{ backgroundColor: tag.color }}
                                     ></span>
-                                    <span className="font-bold uppercase text-sm">{tag.name}</span>
+                                    <span className="font-medium text-xs">{tag.name}</span>
                                 </span>
                                 {selectedTagIds.has(tag.id) && (
                                     <Check className="w-4 h-4 text-black" />
@@ -2593,27 +2586,29 @@ export default function ContactsPage() {
                     setSelectedTagIds(new Set());
                 }}
                 title="Remove Tags"
+                size="sm"
             >
                 <div className="space-y-4">
                     <p className="font-mono text-sm text-gray-500 mb-4">
                         Select tags to remove from <span className="font-bold text-black">{getSelectionCount()}</span> contacts.
                     </p>
-                    <div className="max-h-64 overflow-y-auto border border-black p-2 space-y-1">
+                    <div className="max-h-56 overflow-y-auto flex flex-wrap gap-1.5" role="group" aria-label="Tags to remove">
                         {tags.map((tag) => (
                             <button
                                 key={tag.id}
                                 onClick={() => toggleTagSelection(tag.id)}
-                                className={`w-full flex items-center justify-between p-3 border border-transparent hover:bg-gray-50 transition-colors ${selectedTagIds.has(tag.id)
+                                aria-pressed={selectedTagIds.has(tag.id)}
+                                className={`inline-flex items-center gap-2 px-2 py-1.5 border border-gray-300 hover:bg-gray-50 transition-colors ${selectedTagIds.has(tag.id)
                                     ? 'bg-red-50 border-red-200'
                                     : ''
                                     }`}
                             >
-                                <span className="flex items-center gap-3">
+                                <span className="flex items-center gap-1.5">
                                     <span
                                         className="w-3 h-3 border border-black"
                                         style={{ backgroundColor: tag.color }}
                                     ></span>
-                                    <span className="font-bold uppercase text-sm">{tag.name}</span>
+                                    <span className="font-medium text-xs">{tag.name}</span>
                                 </span>
                                 {selectedTagIds.has(tag.id) && (
                                     <X className="w-4 h-4 text-red-500" />

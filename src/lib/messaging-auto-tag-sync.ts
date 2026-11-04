@@ -1,20 +1,20 @@
 import type { getSupabaseAdmin } from './supabase';
-import { normalizeContactName } from './contact-names';
-import { classifyMessengerSystemMessage, type MessengerSystemSignal } from './messaging-auto-tag';
+import { classifyMessengerSystemMessage, isWithinMessagingAutoTagWindow, MESSENGER_STAGE_TAG_NAMES,
+    type MessengerLeadStage, type MessengerSystemSignal } from './messaging-auto-tag';
 
 type Database = ReturnType<typeof getSupabaseAdmin>;
 export type MessengerTagMessage = { message?: string; from?: { id?: string } };
-export type MessagingAutoTagIds = { paid: string; unqualified: string };
+export type MessagingAutoTagIds = Record<MessengerLeadStage, string>;
 type PageTag = { id: string; name: string; is_default: boolean };
 
 function findTagIds(tags: PageTag[]) {
-    const defaults = new Map(tags.filter(tag => tag.is_default)
-        .map(tag => [tag.name.toLowerCase().replace(/[^a-z]/g, ''), tag.id]));
-    const outcomes = new Map(tags.map(tag => [tag.name.toLowerCase().replace(/[^a-z]/g, ''), tag.id]));
-    return {
-        paid: defaults.get('paidavailedservice') || defaults.get('paidavailedservices'),
-        unqualified: outcomes.get('notqualified') || outcomes.get('unqualified')
-    };
+    const defaults = new Map(tags.filter(tag => tag.is_default).map(tag => [tag.name, tag.id]));
+    return Object.fromEntries(Object.entries(MESSENGER_STAGE_TAG_NAMES)
+        .map(([stage, name]) => [stage, defaults.get(name)])) as Partial<MessagingAutoTagIds>;
+}
+
+function complete(ids: Partial<MessagingAutoTagIds>): ids is MessagingAutoTagIds {
+    return Object.keys(MESSENGER_STAGE_TAG_NAMES).every(stage => Boolean(ids[stage as MessengerLeadStage]));
 }
 
 export async function loadMessagingAutoTagIds(db: Database, pageId: string): Promise<MessagingAutoTagIds> {
@@ -22,13 +22,13 @@ export async function loadMessagingAutoTagIds(db: Database, pageId: string): Pro
         .eq('owner_type', 'page').eq('owner_id', pageId);
     if (error) throw error;
     let ids = findTagIds(tags || []);
-    if (!ids.paid || !ids.unqualified) {
+    if (!complete(ids)) {
         const restored = await db.rpc('ensure_page_default_tags', { p_page_id: pageId });
         if (restored.error) throw new Error(`Could not restore required Page tags: ${restored.error.message || restored.error.code}`);
         ids = findTagIds([...(tags || []), ...(Array.isArray(restored.data) ? restored.data : [])]);
     }
-    if (!ids.paid || !ids.unqualified) throw new Error('Required Page tags are missing');
-    return { paid: ids.paid, unqualified: ids.unqualified };
+    if (!complete(ids)) throw new Error('Required Page tags are missing');
+    return ids;
 }
 
 /** Reuse the same observed Messenger events for imports, echoes, and the background scan. */
@@ -37,7 +37,7 @@ export function createContactMessagingAutoTagger(db: Database, page: {
 }, initialIds?: MessagingAutoTagIds) {
     let idsPromise: Promise<MessagingAutoTagIds> | undefined = initialIds ? Promise.resolve(initialIds) : undefined;
 
-    return async (psid: string, messages: MessengerTagMessage[], name?: string): Promise<boolean> => {
+    return async (psid: string, messages: MessengerTagMessage[]): Promise<boolean> => {
         if (page.messaging_auto_tag_enabled === false || !psid || psid === page.fb_page_id) return false;
         const signals = new Set<MessengerSystemSignal>();
         for (const message of messages) {
@@ -46,6 +46,12 @@ export function createContactMessagingAutoTagger(db: Database, page: {
             if (signal) signals.add(signal);
         }
         if (!signals.size) return false;
+        // Contacts are shared by Page. Only a real recent inbound message makes
+        // a contact eligible; a stage echo must never open or extend that window.
+        const { data: contact, error } = await db.from('contacts').select('id,last_inbound_at')
+            .eq('page_id', page.id).eq('psid', psid).maybeSingle();
+        if (error) throw error;
+        if (!contact || !isWithinMessagingAutoTagWindow(contact.last_inbound_at)) return false;
         if (!idsPromise) {
             idsPromise = loadMessagingAutoTagIds(db, page.id).catch(error => {
                 idsPromise = undefined;
@@ -54,23 +60,7 @@ export function createContactMessagingAutoTagger(db: Database, page: {
         }
         const ids = await idsPromise;
         const targetIds = new Set<string>();
-        if (signals.has('unqualified')) targetIds.add(ids.unqualified);
-        if ([...signals].some(signal => signal !== 'unqualified')) targetIds.add(ids.paid);
-
-        let { data: contact, error } = await db.from('contacts').select('id')
-            .eq('page_id', page.id).eq('psid', psid).maybeSingle();
-        if (error) throw error;
-        if (!contact) {
-            const inserted = await db.from('contacts').insert({
-                page_id: page.id, psid, name: normalizeContactName(name)
-            }).select('id').single();
-            if (inserted.error) {
-                const found = await db.from('contacts').select('id')
-                    .eq('page_id', page.id).eq('psid', psid).single();
-                if (found.error || !found.data) throw inserted.error;
-                contact = found.data;
-            } else contact = inserted.data;
-        }
+        for (const signal of signals) targetIds.add(ids[signal === 'order_created' ? 'converted' : signal]);
         if (!contact?.id) throw new Error('Could not resolve contact for Messenger tags');
         const assigned = await db.from('contact_tags').upsert(
             [...targetIds].map(tagId => ({ contact_id: contact.id, tag_id: tagId })),

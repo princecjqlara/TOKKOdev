@@ -2,6 +2,7 @@ import { getPageConversationsBatch, isFacebookReauthRequired } from '@/lib/faceb
 import { createContactMessagingAutoTagger, loadMessagingAutoTagIds } from '@/lib/messaging-auto-tag-sync';
 import { getSupabaseAdmin } from '@/lib/supabase';
 import { randomUUID } from 'node:crypto';
+import { MESSAGING_AUTO_TAG_WINDOW_MS } from './messaging-auto-tag';
 
 type Page = {
     id: string;
@@ -60,13 +61,27 @@ export async function processOneMessagingAutoTagPage(options: { pageId?: string;
     try {
         const ids = await loadMessagingAutoTagIds(db, current.id);
         const applyMessengerTags = createContactMessagingAutoTagger(db, current, ids);
+        const windowStart = new Date(Date.parse(runStartedAt) - MESSAGING_AUTO_TAG_WINDOW_MS).toISOString();
+        const since = new Date(Math.max(Date.parse(windowStart), Date.parse(current.messaging_auto_tag_checked_at) || 0)).toISOString();
 
         const batch = await getPageConversationsBatch(current.fb_page_id, current.access_token, {
             limit: 10,
             after: current.messaging_auto_tag_cursor,
-            sinceTimestamp: current.messaging_auto_tag_checked_at,
+            sinceTimestamp: since,
             signal: controller.signal
         });
+        const psids = [...new Set(batch.conversations.flatMap(conversation => {
+            const participants = conversation.participants?.data?.filter(p => p.id !== current.fb_page_id) || [];
+            return participants.length === 1 && participants[0].id ? [participants[0].id] : [];
+        }))];
+        const eligible = new Set<string>();
+        if (psids.length) {
+            const { data: contacts, error } = await db.from('contacts').select('psid')
+                .eq('page_id', current.id).in('psid', psids)
+                .gte('last_inbound_at', windowStart).lte('last_inbound_at', runStartedAt);
+            if (error) throw error;
+            for (const contact of contacts || []) eligible.add(contact.psid);
+        }
         let tagged = 0;
         // Bound Meta concurrency while avoiding ten sequential history waits.
         for (let offset = 0; offset < batch.conversations.length; offset += 3) {
@@ -74,8 +89,9 @@ export async function processOneMessagingAutoTagPage(options: { pageId?: string;
                 const participants = conversation.participants?.data?.filter(p => p.id !== current.fb_page_id) || [];
                 if (participants.length !== 1) return;
                 const participant = participants[0];
-                const messages = await getMessagesSince(conversation.id, current.access_token, current.messaging_auto_tag_checked_at, controller.signal);
-                if (await applyMessengerTags(participant.id, messages, participant.name)) tagged++;
+                if (!eligible.has(participant.id)) return;
+                const messages = await getMessagesSince(conversation.id, current.access_token, since, controller.signal);
+                if (await applyMessengerTags(participant.id, messages)) tagged++;
             }));
             const failure = chunkResults.find(result => result.status === 'rejected');
             if (failure?.status === 'rejected') throw failure.reason;

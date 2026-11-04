@@ -28,8 +28,8 @@ function derive(password: string, salt: string): Promise<Buffer> {
 }
 
 export async function hashAccountPassword(password: unknown): Promise<string> {
-    if (typeof password !== 'string' || password.length < 12 || Buffer.byteLength(password) > 1024) {
-        throw new AccessError(400, 'Use a password of at least 12 characters and no more than 1,024 bytes.');
+    if (typeof password !== 'string' || password.length === 0 || Buffer.byteLength(password) > 1024) {
+        throw new AccessError(400, 'Enter a password of no more than 1,024 bytes.');
     }
     const salt = randomBytes(24).toString('hex');
     return `scrypt-v1$${salt}$${(await derive(password, salt)).toString('hex')}`;

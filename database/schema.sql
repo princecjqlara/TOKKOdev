@@ -351,8 +351,10 @@
     BEGIN
         INSERT INTO tags (name, color, owner_type, owner_id, page_id, is_default)
         VALUES
-            ('Paid / Availed Service', '#16a34a', 'page', NEW.id, NEW.id, TRUE),
-            ('Unqualified', '#dc2626', 'page', NEW.id, NEW.id, TRUE);
+            ('Qualified', '#2563eb', 'page', NEW.id, NEW.id, TRUE),
+            ('Not Qualified', '#dc2626', 'page', NEW.id, NEW.id, TRUE),
+            ('Converted', '#16a34a', 'page', NEW.id, NEW.id, TRUE),
+            ('Lost', '#6b7280', 'page', NEW.id, NEW.id, TRUE);
         RETURN NEW;
     END;
     $$;

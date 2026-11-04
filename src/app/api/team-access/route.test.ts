@@ -24,7 +24,7 @@ beforeEach(() => {
     mocks.manager.mockResolvedValue([]); mocks.ready.mockResolvedValue(true); mocks.mail.mockResolvedValue(true);
     mocks.mailConfig.mockReset(); mocks.mailAvailable.mockReturnValue(true);
     mocks.hash.mockImplementation(async password => {
-        if (typeof password !== 'string' || password.length < 12) throw new AccessError(400, 'Use at least 12 characters.');
+        if (typeof password !== 'string' || !password.length || Buffer.byteLength(password) > 1024) throw new AccessError(400, 'Enter a password.');
         return 'scrypt-v1$server-generated-hash';
     });
 });
@@ -103,12 +103,18 @@ describe('manager-only account and Page assignment endpoints', () => {
         expect(rpc.mock.calls[0][1].p_fingerprint).toBe(rpc.mock.calls[1][1].p_fingerprint);
         expect(rpc.mock.calls[0][1].p_fingerprint).not.toBe(rpc.mock.calls[2][1].p_fingerprint);
     });
-    it('rejects overwriting existing credentials and rejects weak initial passwords', async () => {
+    it('accepts a one-character initial password', async () => {
+        const rpc = vi.fn().mockResolvedValue({ data: { passwordCreated: true, pending: false }, error: null });
+        mocks.db.mockReturnValue({ rpc });
+        expect((await POST(request('POST', { name: 'Member', email: 'member@example.com', pageIds: [page], setupMethod: 'password', password: 'a' }))).status).toBe(200);
+        expect(mocks.hash).toHaveBeenCalledWith('a');
+    });
+    it('rejects overwriting existing credentials and rejects empty initial passwords', async () => {
         const rpc = vi.fn().mockResolvedValue({ data: null, error: { code: '42501' } }); mocks.db.mockReturnValue({ rpc });
         const body = { name: 'Member', email: 'member@example.com', pageIds: [page], setupMethod: 'password', password: 'An initial password 123!' };
         expect((await POST(request('POST', body))).status).toBe(403);
         rpc.mockClear();
-        expect((await POST(request('POST', { ...body, password: 'short' }))).status).toBe(400);
+        expect((await POST(request('POST', { ...body, password: '' }))).status).toBe(400);
         expect(rpc).not.toHaveBeenCalled();
     });
     it('assigns an existing account without mail or password changes and refuses unknown accounts', async () => {

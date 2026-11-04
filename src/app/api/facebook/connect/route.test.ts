@@ -46,21 +46,17 @@ function createRequest(): NextRequest {
     }) as unknown as NextRequest;
 }
 
-function createSupabaseMock() {
-    const pageSelectSingle = vi.fn().mockResolvedValue({ data: { id: 'page_row_1' }, error: null });
-    const pageSelectEq = vi.fn().mockReturnValue({ single: pageSelectSingle });
-    const pageSelect = vi.fn().mockReturnValue({ eq: pageSelectEq });
-
-    const pageUpdateEq = vi.fn().mockResolvedValue({ error: null });
-    const pageUpdate = vi.fn().mockReturnValue({ eq: pageUpdateEq });
+function createSupabaseMock(options: { lastSyncedAt?: string | null; hasContacts?: boolean } = {}) {
+    const pageSelectSingle = vi.fn().mockResolvedValue({ data: { id: 'page_row_1',
+        last_synced_at: options.lastSyncedAt === undefined ? '2026-11-01T00:00:00Z' : options.lastSyncedAt }, error: null });
+    const pageUpsert = vi.fn().mockReturnValue({ select: vi.fn().mockReturnValue({ single: pageSelectSingle }) });
 
     const userPagesUpsert = vi.fn().mockResolvedValue({ error: null });
 
     const from = vi.fn((table: string) => {
         if (table === 'pages') {
             return {
-                select: pageSelect,
-                update: pageUpdate
+                upsert: pageUpsert
             };
         }
 
@@ -69,12 +65,16 @@ function createSupabaseMock() {
                 upsert: userPagesUpsert
             };
         }
+        if (table === 'contacts') return { select: () => ({ eq: () => ({ limit: () => ({ maybeSingle: async () => ({
+            data: options.hasContacts ? { id: 'shared_contact' } : null, error: null
+        }) }) }) }) };
 
         throw new Error(`Unexpected table: ${table}`);
     });
 
     return {
         from,
+        pageUpsert,
         userPagesUpsert
     };
 }
@@ -122,6 +122,32 @@ describe('POST /api/facebook/connect', () => {
         expect(response.status).toBe(403);
         expect(mocks.getSupabaseAdmin).not.toHaveBeenCalled();
         expect(mocks.subscribePageToAppWebhook).not.toHaveBeenCalled();
+    });
+
+    it('links two managers to the same Page without resetting sync or writing contacts', async () => {
+        const supabase = createSupabaseMock();
+        mocks.getSupabaseAdmin.mockReturnValue(supabase);
+        mocks.subscribePageToAppWebhook.mockResolvedValue(undefined);
+        for (const userId of ['manager_1', 'manager_2']) {
+            mocks.getSessionFromRequest.mockResolvedValue({ user: { id: userId } });
+            const response = await POST(createRequest());
+            expect(await response.json()).toMatchObject({ success: true, pageId: 'page_row_1', needsInitialSync: false });
+            expect(supabase.userPagesUpsert).toHaveBeenLastCalledWith({ user_id: userId,
+                page_id: 'page_row_1', grant_source: 'facebook' }, { onConflict: 'user_id,page_id' });
+        }
+        for (const [payload, options] of supabase.pageUpsert.mock.calls) {
+            expect(options).toEqual({ onConflict: 'fb_page_id' });
+            expect(Object.keys(payload).sort()).toEqual(['access_token', 'fb_page_id', 'name', 'updated_at']);
+        }
+        expect(supabase.from.mock.calls.every(([table]) => ['pages', 'user_pages'].includes(table))).toBe(true);
+    });
+
+    it.each([true, false])('requests an initial import only when a never-synced Page has no contacts: existing=%s', async hasContacts => {
+        const supabase = createSupabaseMock({ lastSyncedAt: null, hasContacts });
+        mocks.getSupabaseAdmin.mockReturnValue(supabase);
+        mocks.getSessionFromRequest.mockResolvedValue({ user: { id: 'another_manager' } });
+        const response = await POST(createRequest());
+        expect(await response.json()).toMatchObject({ success: true, needsInitialSync: !hasContacts });
     });
 
     it('still saves the fresh page token when webhook subscription fails', async () => {

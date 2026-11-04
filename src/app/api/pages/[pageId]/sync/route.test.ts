@@ -76,15 +76,17 @@ function createSupabaseMock(options?: {
         ],
         error: null
     });
-    const contactSingle = vi.fn().mockResolvedValue({ data: { id: 'contact_row_1' }, error: null });
+    const contactSingle = vi.fn().mockResolvedValue({ data: { id: 'contact_row_1', last_inbound_at: new Date().toISOString() }, error: null });
     const contactsSelectEq = vi.fn().mockReturnValue({ in: contactsSelectIn,
         eq: vi.fn().mockReturnValue({ maybeSingle: contactSingle, single: contactSingle }) });
     const contactsSelect = vi.fn().mockReturnValue({ eq: contactsSelectEq });
     const tagAssignments = vi.fn().mockResolvedValue({ error: null });
     const tagChain: any = { select: () => tagChain, eq: () => tagChain,
         then: (resolve: any) => Promise.resolve({ data: [
-            { id: 'paid_tag', name: 'Paid / Availed Service', is_default: true },
-            { id: 'unqualified_tag', name: 'Unqualified', is_default: true }
+            { id: 'qualified_tag', name: 'Qualified', is_default: true },
+            { id: 'converted_tag', name: 'Converted', is_default: true },
+            { id: 'lost_tag', name: 'Lost', is_default: true },
+            { id: 'unqualified_tag', name: 'Not Qualified', is_default: true }
         ], error: null }).then(resolve) };
 
     const from = vi.fn((table: string) => {
@@ -152,10 +154,11 @@ describe('POST /api/pages/[pageId]/sync', () => {
     });
 
     it.each([
-        ['Lead stage set to Qualified', 'paid_tag'],
-        ['Lead stage set to Converted', 'paid_tag'],
+        ['Lead stage set to Qualified', 'qualified_tag'],
+        ['Lead stage set to Converted', 'converted_tag'],
+        ['Lead stage set to Lost', 'lost_tag'],
         ['Lead stage set to Not Qualified', 'unqualified_tag'],
-        ['You created an order for PHP 699.00. View: fb-pma://payments/orderdetails/?invoice_id=12345', 'paid_tag']
+        ['You created an order for PHP 699.00. View: fb-pma://payments/orderdetails/?invoice_id=12345', 'converted_tag']
     ])('updates tags from fetched Messenger history: %s', async (text, tagId) => {
         const { POST } = await loadRoute();
         const supabase = createSupabaseMock();
@@ -189,6 +192,20 @@ describe('POST /api/pages/[pageId]/sync', () => {
 
         expect(await response.json()).toMatchObject({ synced: 0, failed: 1 });
         expect(supabase.pageUpdateEq).not.toHaveBeenCalled();
+    });
+
+    it('allows a manual sync to skip auto-tagging without changing the Page setting', async () => {
+        const { POST } = await loadRoute();
+        const supabase = createSupabaseMock();
+        mocks.getSupabaseAdmin.mockReturnValue(supabase);
+        mocks.getPageConversationsBatch.mockResolvedValue({ conversations: [{ id: 'conversation_1',
+            updated_time: new Date().toISOString(), participants: { data: [{ id: 'contact_psid_1', name: 'Jane Contact' }] }
+        }], nextCursor: null });
+        mocks.getConversationMessages.mockResolvedValue([{ id: 'system_event', from: { id: 'fb_page_1' },
+            message: 'Lead stage set to Lost', created_time: new Date().toISOString() }]);
+        const response = await POST(createRequest({ autoTag: false }), { params: Promise.resolve({ pageId: 'page_1' }) });
+        expect(await response.json()).toMatchObject({ synced: 1, failed: 0, tagged: 0 });
+        expect(supabase.tagAssignments).not.toHaveBeenCalled();
     });
 
     it('does not tag customer-authored stage text or a Page with auto-tag disabled', async () => {

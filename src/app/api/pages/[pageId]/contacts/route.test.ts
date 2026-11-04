@@ -170,6 +170,7 @@ function createSupabaseMock(options?: {
     return {
         from,
         contactsSelect,
+        contactsEq: contactsBuilder.eq,
         contactsIn: contactsBuilder.in,
         contactsIs: contactsBuilder.is,
         contactsNot: contactsBuilder.not,
@@ -204,6 +205,23 @@ describe('GET /api/pages/[pageId]/contacts', () => {
         expect(response.status).toBe(200);
         expect(body.items[0].tags[0].tagged_by_user_id).toBe('user_2');
         expect(body.items[0].tags[0].tagged_by_name).toBe('Teammate A');
+    });
+
+    it('returns the same existing contacts to two members of a shared Page without another sync', async () => {
+        const supabase = createSupabaseMock({ contactsData: [{ id: 'shared_contact', page_id: 'page_1', psid: 'shared_psid',
+            name: 'Shared Contact', contact_tags: [] }] });
+        mocks.getSupabaseAdmin.mockReturnValue(supabase);
+        const results = [];
+        for (const id of ['user_1', 'user_2']) {
+            mocks.getServerSession.mockResolvedValue({ user: { id } });
+            const response = await GET(createRequest('http://localhost:3000/api/pages/page_1/contacts'),
+                { params: Promise.resolve({ pageId: 'page_1' }) });
+            expect(response.status).toBe(200);
+            results.push((await response.json()).items);
+        }
+        expect(results[0]).toEqual(results[1]);
+        expect(results[0]).toMatchObject([{ id: 'shared_contact' }]);
+        expect(supabase.contactsEq.mock.calls).toEqual([['page_id', 'page_1'], ['page_id', 'page_1']]);
     });
 
     it('applies include and exclude tag filters together', async () => {

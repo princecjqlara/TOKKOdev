@@ -407,7 +407,7 @@ export default function TagsPage() {
             ) : (
                 <>
                     <div className="overflow-x-auto border border-black">
-                        <table className="table-wireframe">
+                        <table className="table-wireframe [&_th]:px-3 [&_th]:py-2 [&_td]:px-3 [&_td]:py-2">
                             <thead>
                                 <tr>
                                     <th className="w-12">
@@ -437,13 +437,13 @@ export default function TagsPage() {
                                             />
                                         </td>
                                         <td>
-                                            <div className="flex items-center gap-3">
+                                            <div className="flex items-center gap-2">
                                                 <span
-                                                    className="w-4 h-4 border border-black"
+                                                    className="w-2.5 h-2.5 shrink-0"
                                                     style={{ backgroundColor: tag.color }}
                                                 ></span>
-                                                <span className="font-bold">{tag.name}</span>
-                                                {tag.is_default && <span className="badge-wireframe bg-gray-100">Default</span>}
+                                                <span className="font-medium text-sm">{tag.name}</span>
+                                                {tag.is_default && <span className="text-[10px] text-gray-500">Auto</span>}
                                             </div>
                                         </td>
                                         <td>

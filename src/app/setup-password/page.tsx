@@ -28,9 +28,9 @@ export default function SetupPasswordPage() {
     return <main className="min-h-screen flex items-center justify-center bg-gray-50 p-6"><div className="w-full max-w-md border-2 border-black bg-white p-8 space-y-5">
         <h1 className="text-2xl font-black">Choose your Tokko password</h1>
         {!done && (token ? <form onSubmit={submit} className="space-y-4">
-            <p className="text-sm text-gray-600">Use at least 12 characters. Only Pages assigned by your manager will be available.</p>
-            <label className="block font-bold text-sm">New password<PasswordInput disabled={busy} className="input-wireframe mt-2" autoComplete="new-password" required minLength={12} value={password} onChange={e => setPassword(e.target.value)} /></label>
-            <label className="block font-bold text-sm">Confirm password<PasswordInput disabled={busy} className="input-wireframe mt-2" autoComplete="new-password" required minLength={12} value={confirmation} onChange={e => setConfirmation(e.target.value)} /></label>
+            <p className="text-sm text-gray-600">Choose any password length. Only Pages assigned by your manager will be available.</p>
+            <label className="block font-bold text-sm">New password<PasswordInput disabled={busy} className="input-wireframe mt-2" autoComplete="new-password" required value={password} onChange={e => setPassword(e.target.value)} /></label>
+            <label className="block font-bold text-sm">Confirm password<PasswordInput disabled={busy} className="input-wireframe mt-2" autoComplete="new-password" required value={confirmation} onChange={e => setConfirmation(e.target.value)} /></label>
             <button className="btn-wireframe-dark" disabled={busy}>{busy ? 'Saving…' : 'Save password'}</button>
         </form> : <p>Open the complete setup or reset link from your email. If it has expired, request a new link.</p>)}
         {message && <p role="status" className="text-sm">{message}</p>}

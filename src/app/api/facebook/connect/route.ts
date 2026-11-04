@@ -56,43 +56,14 @@ export async function POST(request: NextRequest) {
 
         const supabase = getSupabaseAdmin();
 
-        // Check if page already exists
-        const { data: existingPage } = await supabase
-            .from('pages')
-            .select('id')
-            .eq('fb_page_id', fbPageId)
-            .single();
-
-        let pageId: string;
-
-        if (existingPage) {
-            // Update existing page with new access token
-            const { error: updateError } = await supabase
-                .from('pages')
-                .update({
-                    access_token: accessToken,
-                    name,
-                    updated_at: new Date().toISOString()
-                })
-                .eq('id', existingPage.id);
-
-            if (updateError) throw updateError;
-            pageId = existingPage.id;
-        } else {
-            // Create new page
-            const { data: newPage, error: pageError } = await supabase
-                .from('pages')
-                .insert({
-                    fb_page_id: fbPageId,
-                    name,
-                    access_token: accessToken
-                })
-                .select('id')
-                .single();
-
-            if (pageError) throw pageError;
-            pageId = newPage.id;
-        }
+        // One shared Page row even when two managers connect concurrently.
+        // Preserve its contacts, tags, settings and existing sync checkpoint.
+        const { data: page, error: pageError } = await supabase.from('pages').upsert({
+            fb_page_id: fbPageId, name, access_token: accessToken, updated_at: new Date().toISOString()
+        }, { onConflict: 'fb_page_id' }).select('id,last_synced_at').single();
+        if (pageError) throw pageError;
+        if (!page) throw new Error('Could not resolve the shared Facebook Page');
+        const pageId = page.id;
 
         // Link user to page
         const { error: linkError } = await supabase
@@ -106,6 +77,13 @@ export async function POST(request: NextRequest) {
             });
 
         if (linkError) throw linkError;
+
+        let needsInitialSync = !page.last_synced_at;
+        if (needsInitialSync) {
+            const existing = await supabase.from('contacts').select('id').eq('page_id', pageId).limit(1).maybeSingle();
+            if (existing.error) throw existing.error;
+            needsInitialSync = !existing.data;
+        }
 
         let warning: WebhookRefreshWarning | null = null;
         try {
@@ -126,6 +104,7 @@ export async function POST(request: NextRequest) {
         return NextResponse.json({
             success: true,
             pageId,
+            needsInitialSync,
             warning,
             message: warning?.message || 'Page connected successfully'
         });
