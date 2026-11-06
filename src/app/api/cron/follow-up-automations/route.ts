@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getSupabaseAdmin } from '@/lib/supabase';
 import { processDueFollowUpAutomationSteps } from '@/lib/workflow-automations';
 import { processOneMessagingAutoTagPage } from '@/lib/messaging-auto-tag-worker';
+import { processContactImport } from '@/lib/contact-import';
 
 export const dynamic = 'force-dynamic';
 
@@ -25,6 +26,9 @@ export async function GET(_request: NextRequest) {
             errors: results.flatMap(result => result.status === 'rejected' ? [result.reason instanceof Error ? result.reason.message : String(result.reason)] : [])
         };
     })();
+
+    const contactImportTask = processContactImport().catch(() => ({ success: false, retryable: true,
+        message: 'Contact import is pending; its database checkpoint is retained.' }));
 
     try {
         // Follow-ups are this route's primary job. Run them before the nested
@@ -60,23 +64,25 @@ export async function GET(_request: NextRequest) {
             }
         };
 
-        const [campaignWorker, messagingAutoTag] = await Promise.all([campaignTask(), messagingAutoTagTask]);
+        const [campaignWorker, messagingAutoTag, contactImport] = await Promise.all([campaignTask(), messagingAutoTagTask, contactImportTask]);
 
         return NextResponse.json({
             success: true,
             ...result,
             campaignWorker,
             messagingAutoTag,
+            contactImport,
             duration: Date.now() - startTime
         });
     } catch (error) {
         console.error('Follow-up automation cron failed:', error);
-        const messagingAutoTag = await messagingAutoTagTask;
+        const [messagingAutoTag, contactImport] = await Promise.all([messagingAutoTagTask, contactImportTask]);
         return NextResponse.json(
             {
                 error: 'Follow-up automation cron failed',
                 message: (error as Error).message,
                 messagingAutoTag,
+                contactImport,
                 duration: Date.now() - startTime
             },
             { status: 500 }

@@ -40,6 +40,17 @@ describe('Facebook response deadlines', () => {
 });
 
 describe('conversation checkpoint safety', () => {
+    it('rejects an empty continuation token when Facebook advertises another page',async()=>{
+        vi.stubGlobal('fetch',vi.fn().mockResolvedValue(createJsonResponse(true,{data:[],paging:{next:'https://graph.facebook.com/next',cursors:{after:''}}})));
+        await expect(getPageConversationsBatch('page','token')).rejects.toThrow('pagination is incomplete');
+    });
+    it.each(['inbox','other','page_done','spam'] as const)('requests Messenger folder %s explicitly',async folder=>{
+        const transport=vi.fn().mockResolvedValue(createJsonResponse(true,{data:[]}));vi.stubGlobal('fetch',transport);
+        await getPageConversationsBatch('page','token',{folder,includeMessages:true,messageLimit:20});
+        const url=new URL(transport.mock.calls[0][0]);
+        expect(url.searchParams.get('folder')).toBe(folder);expect(url.searchParams.get('platform')).toBe('messenger');
+        expect(url.searchParams.get('fields')).toContain('messages.limit(20)');
+    });
     it('rejects an incomplete response instead of treating it as an empty completed scan', async () => {
         vi.stubGlobal('fetch', vi.fn().mockResolvedValue(createJsonResponse(true, {})));
         await expect(getPageConversationsBatch('page_1', 'token')).rejects.toThrow('checkpoint must be retained');

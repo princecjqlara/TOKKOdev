@@ -115,8 +115,10 @@ export default function ConnectPage() {
                 try {
                     const syncResult = await runContactSyncToCompletion(data.pageId, {
                         autoTag: autoTagDuringSync,
-                        onProgress: ({ attempt, remainingPsids, cursor }) => {
-                            if (remainingPsids.length > 0) {
+                        onProgress: ({ attempt, remainingPsids, cursor, totalSynced, response }) => {
+                            if (response.durable) {
+                                setSuccess(`${connectedMessage} ${totalSynced.toLocaleString()} contacts checked. Importing all Messenger folders...`);
+                            } else if (remainingPsids.length > 0) {
                                 setSuccess(`Successfully connected "${page.name}". Syncing contacts... continuing ${remainingPsids.length} remaining contacts (slice ${attempt + 1}).`);
                             } else if (cursor) {
                                 setSuccess(`Successfully connected "${page.name}". Syncing contacts... continuing with the next Facebook page (slice ${attempt + 1}).`);

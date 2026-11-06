@@ -10,12 +10,14 @@ const mocks = vi.hoisted(() => ({
     getUserProfile: vi.fn(),
     getConversationMessages: vi.fn(),
     subscribePageToAppWebhook: vi.fn(),
-    isFacebookReauthRequired: vi.fn()
+    isFacebookReauthRequired: vi.fn(),
+    processContactImport: vi.fn()
 }));
 
 vi.mock('@/lib/get-session', () => ({
     getSessionFromRequest: mocks.getSessionFromRequest
 }));
+vi.mock('@/lib/contact-import', () => ({ processContactImport: mocks.processContactImport }));
 
 vi.mock('@/lib/supabase', () => ({
     getSupabaseAdmin: mocks.getSupabaseAdmin
@@ -157,6 +159,18 @@ describe('POST /api/pages/[pageId]/sync', () => {
             id: 'contact_psid_1',
             name: 'UNKNOWN'
         });
+    });
+
+    it('uses a durable all-folder import after checking the Page assignment', async () => {
+        const { POST } = await loadRoute();
+        const supabase = createSupabaseMock(); mocks.getSupabaseAdmin.mockReturnValue(supabase);
+        mocks.processContactImport.mockResolvedValue({ success: true, durable: true, partial: true, synced: 100, folder: 'other' });
+        const response = await POST(createRequest({ importOnly: true, syncRunId: 'saved-run', autoTag: false }),
+            { params: Promise.resolve({ pageId: 'page_1' }) });
+        expect(await response.json()).toMatchObject({ durable: true, partial: true, folder: 'other' });
+        expect(mocks.processContactImport).toHaveBeenCalledWith({ pageId: 'page_1', syncRunId: 'saved-run', autoTag: false, supabase });
+        expect(mocks.subscribePageToAppWebhook).toHaveBeenCalledOnce();
+        expect(mocks.getPageConversationsBatch).not.toHaveBeenCalled();
     });
 
     it('reports a database outage without claiming that the user lost Page access', async () => {

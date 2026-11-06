@@ -65,6 +65,9 @@ SUPABASE_SERVICE_ROLE_KEY=your-supabase-service-role-key
 4. Set up the database:
 Run the SQL schema from `database/schema.sql` in your Supabase SQL editor.
 Then run `database/migration_database_retention.sql` to install bounded campaign-history retention and automatic database maintenance.
+Run `database/migration_durable_contact_import.sql` after `migration_database_control_plane.sql` and `migration_contact_sync_load_control.sql`
+before deploying resumable contact imports. It scans Inbox, Requests, Done, and
+Spam and saves contacts with each cursor checkpoint in one transaction.
 For production, also run `database/migration_database_control_plane.sql` to add schema-version tracking, database health snapshots, integrity constraints, and maintenance observability.
 Run `database/migration_conversation_export_jobs.sql` to enable durable background conversation exports and the Exports download page.
 Run `database/migration_page_worker_coordination.sql` before deploying the coordinated campaign and Messenger auto-tag workers. It adds Page-level sending leases, shared Meta rate-limit cooldowns, and stable auto-tag scan checkpoints. See `docs/ads-guard.md` for Ads Guard setup and decision rules.
@@ -163,6 +166,8 @@ For original Facebook parent users and their email/password team subaccounts, fo
 Vercel Cron is not used. Configure cron jobs in [cron-jobs.org](https://cron-jobs.org) to call the deployed API routes:
 
 - Contact/name sync, every 30 minutes: `https://your-app.vercel.app/api/cron/sync`
+  Each call advances a saved contact-import batch; the existing minute follow-up
+  worker also advances imports between these runs.
 - Scheduled campaigns, every minute: `https://your-app.vercel.app/api/cron/campaign-scheduled`
 - Loop campaigns, every minute: `https://your-app.vercel.app/api/cron/campaign-loop`
 - Follow-up automations, every minute: `https://your-app.vercel.app/api/cron/follow-up-automations`

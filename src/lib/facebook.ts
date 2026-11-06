@@ -270,13 +270,17 @@ export async function getPageConversationsBatch(
         sinceTimestamp?: string;
         signal?: AbortSignal;
         includeMessages?: boolean;
+        folder?: 'inbox' | 'other' | 'page_done' | 'spam';
+        messageLimit?: number;
     } = {}
 ): Promise<PageConversationBatch> {
     const limit = options.limit || 100;
+    const messageLimit = Math.max(1,Math.min(100,Math.floor(options.messageLimit || 100)));
     const fields = options.includeMessages
-        ? 'id,participants,updated_time,messages.limit(100){id,message,from,created_time}'
+        ? `id,participants,updated_time,messages.limit(${messageLimit}){id,message,from,created_time}`
         : 'id,participants,updated_time';
     let url = `${FACEBOOK_GRAPH_URL}/${pageId}/conversations?fields=${encodeURIComponent(fields)}&limit=${limit}&access_token=${pageAccessToken}`;
+    if (options.folder) url += `&folder=${encodeURIComponent(options.folder)}&platform=messenger`;
 
     if (options.after) {
         url += `&after=${encodeURIComponent(options.after)}`;
@@ -305,7 +309,7 @@ export async function getPageConversationsBatch(
     } = body;
 
     if (!Array.isArray(responseData.data)) throw new Error('Facebook conversations response is incomplete; checkpoint must be retained');
-    if (responseData.paging?.next && typeof responseData.paging.cursors?.after !== 'string') {
+    if (responseData.paging?.next && (typeof responseData.paging.cursors?.after !== 'string' || !responseData.paging.cursors.after.trim())) {
         throw new Error('Facebook conversations pagination is incomplete; checkpoint must be retained');
     }
     const rawConversations = responseData.data;

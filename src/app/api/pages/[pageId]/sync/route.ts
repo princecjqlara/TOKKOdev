@@ -18,6 +18,7 @@ import { isExpectedFacebookProfileLookupError } from '@/lib/facebook-errors';
 import { createContactMessagingAutoTagger } from '@/lib/messaging-auto-tag-sync';
 import { databaseRequest } from '@/lib/database-request';
 import { AccessError } from '@/lib/account-security';
+import { processContactImport } from '@/lib/contact-import';
 
 // Increase timeout for sync operations (up to 5 minutes)
 export const maxDuration = 300;
@@ -134,10 +135,12 @@ export async function POST(
         let requestedSyncRunId: string | null = null;
         let syncHadFailures = false;
         let autoTag = true;
+        let importOnly = false;
         try {
             const body = await request.json();
             syncHadFailures = body?.syncHadFailures === true;
             autoTag = body?.autoTag !== false;
+            importOnly = body?.importOnly === true;
             forceFullSync = (body as { forceFullSync?: boolean })?.forceFullSync === true;
             usePagedSync = (body as { paged?: boolean })?.paged !== false;
             cursor = typeof (body as { cursor?: unknown }).cursor === 'string'
@@ -209,6 +212,14 @@ export async function POST(
                 { error: 'Not Found', message: 'Page not found' },
                 { status: 404 }
             );
+        }
+
+        if (importOnly) {
+            if (!requestedSyncStartedAt) {
+                try { await subscribePageToAppWebhook(page.fb_page_id, page.access_token, ['messages', 'messaging_postbacks', 'message_echoes']); }
+                catch { logWarn('Webhook subscription could not be refreshed; continuing the contact import', { pageId }); }
+            }
+            return NextResponse.json(await processContactImport({ pageId, syncRunId: requestedSyncRunId || undefined, autoTag, supabase }));
         }
 
         const autoTagEnabled = autoTag && page.messaging_auto_tag_enabled !== false;
@@ -332,7 +343,7 @@ export async function POST(
                 return NextResponse.json(
                     {
                         error: 'Permission Error',
-                        message: 'The page access token is missing required permissions. Please disconnect and reconnect this page to refresh permissions.',
+                        message: 'The page access token is missing required permissions. Reconnect this Page in Connect Pages to refresh its permissions.',
                         requiresReconnect: true
                     },
                     { status: 403 }
@@ -916,7 +927,8 @@ export async function POST(
             error: (error as Error).message
         });
         return NextResponse.json(
-            { error: 'Failed to sync contacts', message: (error as Error).message },
+            { error: 'Failed to sync contacts', message: (error as Error).message,
+                ...(error instanceof AccessError && error.status === 403 ? { requiresReconnect: true } : {}) },
             { status: error instanceof AccessError ? error.status : 500 }
         );
     } finally {

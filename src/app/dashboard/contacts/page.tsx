@@ -308,6 +308,7 @@ export default function ContactsPage() {
     const [tags, setTags] = useState<TagType[]>([]);
     const [loading, setLoading] = useState(true);
     const [syncing, setSyncing] = useState(false);
+    const [syncProgress, setSyncProgress] = useState('');
     const [autoTagDuringSync, setAutoTagDuringSync] = useState(true);
     const [contactFetchError, setContactFetchError] = useState<string | null>(null);
     const [exportingConversations, setExportingConversations] = useState(false);
@@ -663,11 +664,13 @@ export default function ContactsPage() {
         if (!selectedPageId || syncing) return;
 
         setSyncing(true);
+        setSyncProgress('Starting contact import...');
         syncingRef.current = true;
         try {
             const result = await runContactSyncToCompletion(selectedPageId, {
                 autoTag: autoTagDuringSync,
-                onProgress: ({ attempt, totalSynced, totalFailed, remainingPsids, cursor }) => {
+                onProgress: ({ attempt, totalSynced, totalFailed, remainingPsids, cursor, response }) => {
+                    setSyncProgress(`${totalSynced.toLocaleString()} contacts checked${response.partial ? ' — importing remaining folders...' : ' — import complete'}`);
                     if (remainingPsids.length > 0) {
                         console.warn(`Sync slice ${attempt} finished. Continuing ${remainingPsids.length} remaining contacts automatically.`);
                         return;
@@ -697,17 +700,18 @@ export default function ContactsPage() {
                     console.log(`✅ Full sync: ${data.synced} contacts synced${(data.restored || 0) > 0 ? `, ${data.restored} deleted contacts restored` : ''}`);
                 }
             }
-            await fetchContacts();
             await fetchTags();
             if (data.failed > 0) {
                 alert(`${data.synced} contacts synced. ${data.failed} contacts could not be fully checked. Retry sync to finish updating their details and tags.`);
             }
         } catch (error) {
             console.error('Error syncing:', error);
+            setSyncProgress('Progress saved. Retry Sync to continue the remaining contacts.');
             alert((error as Error).message || 'Contact sync failed.');
         } finally {
             syncingRef.current = false;
             setSyncing(false);
+            await fetchContacts();
         }
     };
 
@@ -2054,6 +2058,7 @@ export default function ContactsPage() {
                                 onChange={event => setAutoTagDuringSync(event.target.checked)} />
                             Auto-tag
                         </label>
+                        {syncProgress && <p role="status" className="text-xs max-w-xs">{syncProgress}</p>}
                     </div>
 
                     <button

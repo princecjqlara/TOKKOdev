@@ -19,11 +19,36 @@ Page and its assignments; deleting it is unnecessary. Reconnecting the shared
 token restores access for its members. A healthy Tokko login does not establish
 that its saved Facebook Page token is still valid.
 
-Manual contact imports use bounded requests and continue through Facebook
-cursors. Keep the browser open until completion. A stalled request is cancelled
-and retried using the same run and continuation. A response marked partial must
-include a continuation; otherwise the import reports an error. Database and tag
-failures retain the previous successful sync checkpoint for a later retry.
+Contact imports scan **Inbox, Requests, Done, and Spam**. Install
+`database/migration_durable_contact_import.sql` after the database control-plane and sync-lease migrations
+before deploying this importer. Each bounded slice saves its contacts and the
+next folder/cursor atomically. Failed saves retain the current batch. Retrying
+Sync, including after reopening the browser, attaches to an unfinished Page import; the regular
+sync and existing minute follow-up workers also continue saved imports. Their
+worker credentials still need to be configured correctly.
+
+The importer reads conversation participants first. It no longer fetches a
+separate profile and up to 500 historical messages for every contact before
+advancing to the next Page of contacts. Existing profile pictures, timing
+statistics, and newer inbound/activity timestamps survive reimports. Optional
+auto-tagging uses the recent messages included in a conversation response after
+the contacts and checkpoint are saved; the existing tag worker scans longer
+recent histories separately. Tag failures cannot discard a batch of contacts.
+
+For an operational recovery using the same application worker, run:
+
+```powershell
+node --env-file=.env.local scripts/recover-contacts.mjs --apply --all-pages
+```
+
+Use `--page-id <UUID>` instead of `--all-pages` to recover one Page. `--with-tags`
+also processes the recent embedded messages. This writes imported contacts and
+checkpoints and never invokes an outbound sender. Summary counts are saved in
+`outputs/contact-import-recovery.json`; `--resume` keeps that report's original
+before-counts and skips completed Pages when restarting the recovery command.
+Verify the migration first with
+`node --env-file=.env.local scripts/verify-contact-import.mjs`; those SQL fixtures
+and schema changes are rolled back.
 
 Temporary account-service failures show an account-check retry and deny workspace
 access until the check succeeds. They do not establish that an account was

@@ -50,6 +50,46 @@ describe('runContactSyncToCompletion', () => {
         expect(JSON.parse(String(calls[1000][1].body))).toMatchObject({ cursor: 'cursor_1000' });
     });
 
+    it('continues durable imports through every folder even when a folder ends without a cursor', async () => {
+        const run='00000000-0000-4000-8000-000000000001';
+        const fetchMock=vi.fn()
+            .mockResolvedValueOnce(Response.json({success:true,durable:true,partial:true,synced:100,totalSynced:100,folder:'other',syncRunId:run,cursor:null}))
+            .mockResolvedValueOnce(Response.json({success:true,durable:true,partial:true,synced:5,totalSynced:105,folder:'page_done',syncRunId:run,cursor:null}))
+            .mockResolvedValueOnce(Response.json({success:true,durable:true,partial:true,synced:2,totalSynced:107,folder:'spam',syncRunId:run,cursor:null}))
+            .mockResolvedValueOnce(Response.json({success:true,durable:true,partial:false,synced:0,totalSynced:107,folder:'spam',syncRunId:run,cursor:null}));
+        vi.stubGlobal('fetch',fetchMock);
+        const result=await runContactSyncToCompletion('page_1');
+        expect(result.totalSynced).toBe(107);expect(result.completed).toBe(true);expect(fetchMock).toHaveBeenCalledTimes(4);
+        expect(JSON.parse(fetchMock.mock.calls[1][1].body)).toMatchObject({importOnly:true,syncRunId:run});
+    });
+
+    it('stops a cyclic durable cursor even if the processed count keeps increasing',async()=>{
+        const transport=vi.fn()
+            .mockResolvedValueOnce(Response.json({success:true,durable:true,partial:true,folder:'inbox',cursor:'a',totalSynced:100}))
+            .mockResolvedValueOnce(Response.json({success:true,durable:true,partial:true,folder:'inbox',cursor:'b',totalSynced:200}))
+            .mockResolvedValueOnce(Response.json({success:true,durable:true,partial:true,folder:'inbox',cursor:'a',totalSynced:300}));
+        vi.stubGlobal('fetch',transport);await expect(runContactSyncToCompletion('page')).rejects.toThrow('made no progress');
+        expect(transport).toHaveBeenCalledTimes(3);
+    });
+
+    it('reports optional tagging failures without claiming contacts were omitted from a completed import',async()=>{
+        vi.stubGlobal('fetch',vi.fn().mockResolvedValue(Response.json({success:true,durable:true,partial:false,totalSynced:100,tagFailures:2})));
+        const result=await runContactSyncToCompletion('page');
+        expect(result).toMatchObject({completed:true,totalSynced:100,totalFailed:2});
+    });
+
+    it('waits for a durable worker and uses cumulative saved totals without double counting', async () => {
+        vi.useFakeTimers();
+        const fetchMock=vi.fn()
+            .mockResolvedValueOnce(Response.json({success:true,durable:true,partial:true,waiting:true,totalSynced:100,folder:'inbox',cursor:'saved',retryAfterMs:2000}))
+            .mockResolvedValueOnce(Response.json({success:true,durable:true,partial:true,totalSynced:200,synced:100,folder:'other',cursor:null}))
+            .mockResolvedValueOnce(Response.json({success:true,durable:true,partial:false,totalSynced:200,synced:0,folder:'spam',cursor:null}));
+        vi.stubGlobal('fetch',fetchMock);const pending=runContactSyncToCompletion('page_1');
+        await vi.advanceTimersByTimeAsync(2000);
+        expect((await pending).totalSynced).toBe(200);
+        expect(fetchMock).toHaveBeenCalledTimes(3);
+    });
+
     it('continues partial contact sync responses until complete', async () => {
         const fetchMock = vi.fn()
             .mockResolvedValueOnce(new Response(JSON.stringify({

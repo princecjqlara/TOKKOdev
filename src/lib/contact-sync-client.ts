@@ -18,6 +18,12 @@ export type ContactSyncResponse = {
     restored?: number;
     incremental?: boolean;
     message?: string;
+    durable?: boolean;
+    totalSynced?: number;
+    folder?: string;
+    waiting?: boolean;
+    retryAfterMs?: number;
+    tagFailures?: number;
 };
 
 export type ContactSyncProgress = {
@@ -99,6 +105,7 @@ async function postSync(
             credentials: 'include',
             signal,
             body: JSON.stringify({
+                importOnly: true,
                 forceFullSync: true,
                 autoTag: options.autoTag,
                 paged: true,
@@ -126,9 +133,10 @@ export async function runContactSyncToCompletion(
     let totalFailed = 0;
     let cursor: string | null = null;
     let syncStartedAt: string | null = null;
-    const syncRunId = createSyncRunId();
+    let syncRunId = createSyncRunId();
     const seenContinuationKeys = new Set<string>();
     let syncHadFailures = false;
+    let waitingSince: number | null = null;
 
     for (let attempt = 1; ; attempt++) {
         let data: ContactSyncResponse | null = null;
@@ -160,8 +168,9 @@ export async function runContactSyncToCompletion(
             throw new Error('Sync failed without a response');
         }
 
-        totalSynced += data.synced || 0;
-        totalFailed += data.failed || 0;
+        totalSynced = data.durable && typeof data.totalSynced === 'number' ? data.totalSynced : totalSynced + (data.synced || 0);
+        totalFailed += (data.failed || 0) + (data.tagFailures || 0);
+        if (data.durable && data.syncRunId) syncRunId = data.syncRunId;
         syncHadFailures ||= data.syncHadFailures === true || (data.failed || 0) > 0;
         resumePsids = Array.isArray(data.remainingPsids) ? data.remainingPsids : [];
         syncStartedAt = data.syncStartedAt || syncStartedAt;
@@ -191,6 +200,21 @@ export async function runContactSyncToCompletion(
                 totalFailed,
                 completed: true
             };
+        }
+        if (data.durable) {
+            if (data.waiting) {
+                waitingSince ??= Date.now();
+                if (Date.now() - waitingSince > 180_000) {
+                    throw new Error('Contact import is saved and waiting to continue. Retry Sync to resume the remaining contacts.');
+                }
+                await wait(Math.max(1000,Math.min(data.retryAfterMs || 2000,30_000)));
+                continue;
+            }
+            waitingSince = null;
+            const key = `run:${syncRunId}:folder:${data.folder}:cursor:${cursor || ''}`;
+            if (seenContinuationKeys.has(key)) throw new Error('Contact import made no progress. Its saved checkpoint can be retried.');
+            seenContinuationKeys.add(key);
+            continue;
         }
         if (resumePsids.length === 0 && !cursor) {
             throw new Error('Sync returned an incomplete response without a continuation. Please retry syncing.');

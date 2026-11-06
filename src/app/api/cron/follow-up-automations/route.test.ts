@@ -4,7 +4,8 @@ import type { NextRequest } from 'next/server';
 const mocks = vi.hoisted(() => ({
     getSupabaseAdmin: vi.fn(),
     processDueFollowUpAutomationSteps: vi.fn(),
-    processOneMessagingAutoTagPage: vi.fn()
+    processOneMessagingAutoTagPage: vi.fn(),
+    processContactImport: vi.fn()
 }));
 
 vi.mock('@/lib/supabase', () => ({
@@ -20,6 +21,7 @@ vi.mock('@/lib/messaging-auto-tag-worker', () => ({
 }));
 
 import { GET } from './route';
+vi.mock('@/lib/contact-import', () => ({ processContactImport: mocks.processContactImport }));
 
 describe('GET /api/cron/follow-up-automations', () => {
     afterEach(() => { vi.restoreAllMocks(); });
@@ -28,6 +30,7 @@ describe('GET /api/cron/follow-up-automations', () => {
         mocks.getSupabaseAdmin.mockReturnValue({ database: true });
         mocks.processDueFollowUpAutomationSteps.mockResolvedValue({ processed: 0 });
         mocks.processOneMessagingAutoTagPage.mockResolvedValue({ pages: 1, conversations: 0, tagged: 0 });
+        mocks.processContactImport.mockResolvedValue({ success: true, synced: 100, partial: true });
     });
 
     it('uses the existing minute cron invocation to continue campaigns', async () => {
@@ -50,6 +53,7 @@ describe('GET /api/cron/follow-up-automations', () => {
             processed: 1
         }));
         expect(mocks.processDueFollowUpAutomationSteps).toHaveBeenCalledTimes(1);
+        expect(mocks.processContactImport).toHaveBeenCalledOnce();
         expect(mocks.processOneMessagingAutoTagPage).toHaveBeenCalledTimes(3);
         expect(mocks.processOneMessagingAutoTagPage).toHaveBeenCalledWith({ maxProcessingTimeMs: 18000, conversationLimit: 10 });
         expect(fetchMock).toHaveBeenCalledTimes(1);

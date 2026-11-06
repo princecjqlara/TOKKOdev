@@ -127,7 +127,7 @@ export default function DashboardPage() {
             if ((data.restored || 0) > 0) {
                 message += `\n\nRestored: ${data.restored} previously deleted contacts`;
             }
-            message += '\n\nAll available contacts have been synced.';
+            message += result.totalFailed > 0 ? '\n\nSome contacts still need attention. Retry Sync to continue.' : '\n\nAll available Messenger folders have been imported.';
             alert(message);
             await fetchStats(selectedPageId);
         } catch (error) {
