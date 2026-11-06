@@ -3,6 +3,8 @@ import { createContactMessagingAutoTagger, loadMessagingAutoTagIds } from '@/lib
 import { getSupabaseAdmin } from '@/lib/supabase';
 import { randomUUID } from 'node:crypto';
 import { MESSAGING_AUTO_TAG_WINDOW_MS } from './messaging-auto-tag';
+import { databaseRequest } from './database-request';
+import { requestWithTimeout } from './request-timeout';
 
 type Page = {
     id: string;
@@ -25,11 +27,14 @@ async function getMessagesSince(conversationId: string, token: string, since: st
         if (url.protocol !== 'https:' || url.hostname !== 'graph.facebook.com' || url.username || url.password || seen.has(next)) throw new Error('Unexpected Messenger pagination URL');
         seen.add(next);
         url.searchParams.delete('access_token');
-        const response: Response = await fetch(url, {
-            headers: { Authorization: `Bearer ${token}` },
-            signal, cache: 'no-store'
-        });
-        const body: { data?: Message[]; paging?: { next?: string }; error?: { message?: string } } = await response.json();
+        const { response, body } = await requestWithTimeout(async requestSignal => {
+            const response = await fetch(url, {
+                headers: { Authorization: `Bearer ${token}` },
+                signal: requestSignal, cache: 'no-store'
+            });
+            const body: { data?: Message[]; paging?: { next?: string }; error?: { message?: string } } = await response.json();
+            return { response, body };
+        }, 5_000, 'Messenger history request timed out', signal);
         if (!response.ok || body.error) throw new Error(body.error?.message || `Messenger history HTTP ${response.status}`);
         if (!Array.isArray(body.data)) throw new Error('Messenger history returned incomplete data');
         const rows = body.data;
@@ -49,9 +54,9 @@ export async function processOneMessagingAutoTagPage(options: {
 } = {}) {
     const db = getSupabaseAdmin();
     const owner = randomUUID();
-    const { data: claimed, error: pageError } = await db.rpc('claim_messaging_auto_tag_page', {
+    const { data: claimed, error: pageError } = await databaseRequest(db.rpc('claim_messaging_auto_tag_page', {
         p_owner: owner, p_page_id: options.pageId || null
-    });
+    }));
     if (pageError) throw pageError;
     const page = Array.isArray(claimed) ? claimed[0] : claimed;
     if (!page) return { pages: 0, conversations: 0, tagged: 0 };
@@ -78,9 +83,9 @@ export async function processOneMessagingAutoTagPage(options: {
         }))];
         const eligible = new Set<string>();
         if (psids.length) {
-            const { data: contacts, error } = await db.from('contacts').select('psid')
+            const { data: contacts, error } = await databaseRequest(db.from('contacts').select('psid')
                 .eq('page_id', current.id).in('psid', psids)
-                .gte('last_inbound_at', windowStart).lte('last_inbound_at', runStartedAt);
+                .gte('last_inbound_at', windowStart).lte('last_inbound_at', runStartedAt));
             if (error) throw error;
             for (const contact of contacts || []) eligible.add(contact.psid);
         }
@@ -99,7 +104,8 @@ export async function processOneMessagingAutoTagPage(options: {
             if (failure?.status === 'rejected') throw failure.reason;
         }
 
-        const { error: checkpointError } = await db.from('pages').update({
+        controller.signal.throwIfAborted();
+        const { error: checkpointError } = await databaseRequest(db.from('pages').update({
             // A scan spanning several cron invocations must finish at its original
             // start time, otherwise updates to early threads during the scan vanish.
             messaging_auto_tag_checked_at: batch.nextCursor ? current.messaging_auto_tag_checked_at
@@ -109,17 +115,19 @@ export async function processOneMessagingAutoTagPage(options: {
             messaging_auto_tag_attempted_at: runStartedAt,
             messaging_auto_tag_last_error: null,
             messaging_auto_tag_owner: null, messaging_auto_tag_lease_until: null
-        }).eq('id', current.id).eq('messaging_auto_tag_owner', owner);
+        }).eq('id', current.id).eq('messaging_auto_tag_owner', owner));
         if (checkpointError) throw checkpointError;
         return { pages: 1, pageId: current.id, conversations: batch.conversations.length, tagged, more: Boolean(batch.nextCursor) };
     } catch (error) {
-        await db.from('pages').update({
+        await databaseRequest(db.from('pages').update({
             messaging_auto_tag_attempted_at: runStartedAt,
             messaging_auto_tag_last_error: controller.signal.aborted ? 'Auto-tag scan timed out; checkpoint kept for retry'
                 : isFacebookReauthRequired(error) ? 'Facebook Page access expired or was revoked. Reconnect this Page to resume lead tagging.'
                 : error instanceof Error ? error.message.slice(0, 500) : 'Unknown error',
             messaging_auto_tag_owner: null, messaging_auto_tag_lease_until: null
-        }).eq('id', current.id).eq('messaging_auto_tag_owner', owner);
+        }).eq('id', current.id).eq('messaging_auto_tag_owner', owner)).catch(() => {
+            console.warn('[MESSAGING_AUTO_TAG] Could not record failure; Page lease will expire automatically.');
+        });
         throw error;
     } finally {
         clearTimeout(timeout); controller.abort();

@@ -1,15 +1,28 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-const mocks = vi.hoisted(() => ({ rpc: vi.fn(), previous: vi.fn(), active: vi.fn() }));
+const mocks = vi.hoisted(() => ({ rpc: vi.fn(), previous: vi.fn(), active: vi.fn(), authenticate: vi.fn() }));
 vi.mock('../supabase', () => ({ getSupabaseAdmin: () => ({ rpc: mocks.rpc }) }));
 vi.mock('../server-auth-token', () => ({ getServerAuthToken: mocks.previous }));
-vi.mock('../account-auth', () => ({ authenticateEmail: vi.fn(), getActiveAccount: mocks.active }));
+vi.mock('../account-auth', () => ({ authenticateEmail: mocks.authenticate, getActiveAccount: mocks.active }));
 import { authOptions } from '../auth';
 import { ACCOUNT_REQUEST_TIMEOUT_MS } from '../account-request';
+import { AccessError } from '../account-security';
 const callback = () => ({ token: {}, user: { id: 'facebook-subject', email: 'existing@example.com', name: 'Existing' },
     account: { provider: 'facebook', providerAccountId: 'facebook-subject', access_token: 'secret-facebook-token' } });
 beforeEach(() => { vi.clearAllMocks(); mocks.previous.mockResolvedValue(null); mocks.active.mockResolvedValue({ id: 'stable-user', created_by: null, account_kind: 'facebook' }); });
 afterEach(() => { vi.useRealTimers(); vi.restoreAllMocks(); });
 describe('provider identity binding and session redaction', () => {
+    it('preserves invalid credentials while distinguishing rate limiting and a temporary service outage', async () => {
+        const authorize = (authOptions.providers.find(provider => provider.id === 'credentials') as any).options.authorize;
+        const credentials = { email: 'member@example.com', password: 'private-password' };
+        mocks.authenticate.mockResolvedValueOnce(null);
+        expect(await authorize(credentials, { headers: {} })).toBeNull();
+        mocks.authenticate.mockRejectedValueOnce(new AccessError(429, 'private internal limit details'));
+        await expect(authorize(credentials, { headers: {} })).rejects.toThrow('AccountRateLimited');
+        const logged = vi.spyOn(console, 'error').mockImplementation(() => {});
+        mocks.authenticate.mockRejectedValueOnce(new Error('private database details'));
+        await expect(authorize(credentials, { headers: {} })).rejects.toThrow('AccountServiceUnavailable');
+        expect(JSON.stringify(logged.mock.calls)).not.toMatch(/private|member@example/);
+    });
     it('logs a structured database status without exposing OAuth identities or credentials', async () => {
         const logged = vi.spyOn(console, 'error').mockImplementation(() => {});
         mocks.rpc.mockResolvedValueOnce({ data: null, error: { error: 'gateway failure' }, status: 521 });

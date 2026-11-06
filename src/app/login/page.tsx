@@ -6,6 +6,8 @@ import Link from 'next/link';
 import { FACEBOOK_PERMISSION_SCOPE } from '@/lib/facebook-permissions';
 import { facebookSignInCallback, loginDestination } from '@/lib/facebook-signin';
 import PasswordInput from '@/components/PasswordInput';
+import { emailSignInMessage } from '@/lib/sign-in-errors';
+import { requestWithTimeout } from '@/lib/request-timeout';
 
 export default function LoginPage() {
     const { data: session } = useSession();
@@ -22,27 +24,31 @@ export default function LoginPage() {
     useEffect(() => {
         const error = new URLSearchParams(window.location.search).get('error');
         if (new URLSearchParams(window.location.search).get('password') === 'updated') setNotice('Password saved. Sign in with your email and new password, or continue with Facebook.');
-        if (error === 'CredentialsSignin') setError('Unable to sign in with email. Check your details and account activation.');
+        if (['CredentialsSignin', 'AccountRateLimited', 'AccountServiceUnavailable'].includes(error || '')) setError(emailSignInMessage(error));
         else if (error) router.replace(`${facebookSignInCallback()}&${new URLSearchParams({ error })}`);
     }, [router]);
     async function submit(event: React.FormEvent) {
         event.preventDefault(); setBusy(true); setError('');
         try {
-            const result = await signIn('credentials', { email, password, redirect: false });
-            if (result?.error || !result?.ok) setError('Unable to sign in. Check your email and password, activate your account, or try again later.');
+            const result = await requestWithTimeout(() => signIn('credentials', { email, password, redirect: false }),
+                45_000, 'Sign-in took too long. Please retry.');
+            if (result?.error || !result?.ok) setError(emailSignInMessage(result?.error));
             else {
-                const current = await getSession();
-                if (!current?.accountActive) setError('Your sign-in could not be confirmed. Please retry.');
+                const current = await requestWithTimeout(() => getSession(), 20_000, 'The account check took too long. Please retry.');
+                if (current?.authenticationError === 'service_unavailable') setError(emailSignInMessage('AccountServiceUnavailable'));
+                else if (!current?.accountActive) setError('Your sign-in could not be confirmed. Please retry.');
                 else router.replace(loginDestination(current, 'email') || '/dashboard');
             }
-        } catch { setError('Sign-in is temporarily unavailable. Please retry.'); }
+        } catch (error) { setError(error instanceof Error ? error.message : 'Sign-in is temporarily unavailable. Please retry.'); }
         finally { setBusy(false); }
     }
     async function continueWithFacebook() {
         setBusy(true); setError('');
         try {
-            await signIn('facebook', { callbackUrl: facebookSignInCallback() }, { auth_type: 'rerequest', scope: FACEBOOK_PERMISSION_SCOPE });
-        } catch { setError('Could not connect to Facebook. Please retry.'); setBusy(false); }
+            await requestWithTimeout(() => signIn('facebook', { callbackUrl: facebookSignInCallback() }, { auth_type: 'rerequest', scope: FACEBOOK_PERMISSION_SCOPE }),
+                20_000, 'Could not connect to Facebook. Please retry.');
+        } catch { setError('Could not connect to Facebook. Please retry.'); }
+        finally { setBusy(false); }
     }
     return <main className="min-h-screen flex items-center justify-center bg-gray-50 p-6">
         <div className="w-full max-w-md border-2 border-black bg-white p-8 space-y-6">

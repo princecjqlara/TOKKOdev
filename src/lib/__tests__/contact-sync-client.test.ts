@@ -1,9 +1,35 @@
 import { describe, expect, it, vi, afterEach } from 'vitest';
-import { runContactSyncToCompletion } from '../contact-sync-client';
+import { CONTACT_SYNC_REQUEST_TIMEOUT_MS, runContactSyncToCompletion } from '../contact-sync-client';
 
 describe('runContactSyncToCompletion', () => {
     afterEach(() => {
         vi.restoreAllMocks();
+        vi.unstubAllGlobals();
+        vi.useRealTimers();
+    });
+
+    it.each(['fetch', 'body'])('times out a stalled %s and retries the same run without losing its continuation', async stage => {
+        vi.useFakeTimers();
+        const stalled = new Promise<Response>(() => {});
+        const fetchMock = vi.fn()
+            .mockResolvedValueOnce(Response.json({ success: true, partial: true, synced: 1, nextCursor: 'next' }))
+            .mockImplementationOnce(() => stage === 'fetch' ? stalled : Promise.resolve({ ok: true, text: () => new Promise(() => {}) }))
+            .mockResolvedValueOnce(Response.json({ success: true, synced: 1 }));
+        vi.stubGlobal('fetch', fetchMock);
+        const pending = runContactSyncToCompletion('page_1');
+        await vi.advanceTimersByTimeAsync(CONTACT_SYNC_REQUEST_TIMEOUT_MS + 1500);
+        const result = await pending;
+        expect(result.totalSynced).toBe(2);
+        expect(fetchMock).toHaveBeenCalledTimes(3);
+        expect(fetchMock.mock.calls[1][1].signal.aborted).toBe(true);
+        expect(fetchMock.mock.calls[1][1].body).toBe(fetchMock.mock.calls[2][1].body);
+        expect(JSON.parse(fetchMock.mock.calls[2][1].body)).toMatchObject({ cursor: 'next' });
+        expect(vi.getTimerCount()).toBe(0);
+    });
+
+    it('does not claim completion when a partial response has no continuation', async () => {
+        vi.stubGlobal('fetch', vi.fn().mockResolvedValue(Response.json({ success: true, partial: true })));
+        await expect(runContactSyncToCompletion('page_1')).rejects.toThrow('without a continuation');
     });
 
     it('continues partial contact sync responses until complete', async () => {

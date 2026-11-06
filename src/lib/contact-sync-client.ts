@@ -1,3 +1,5 @@
+import { requestWithTimeout } from './request-timeout';
+
 export type ContactSyncResponse = {
     success?: boolean;
     partial?: boolean;
@@ -36,6 +38,7 @@ export type ContactSyncResult = {
 
 const MAX_TIMEOUT_RETRIES_PER_STEP = 3;
 const RETRY_DELAY_MS = 1500;
+export const CONTACT_SYNC_REQUEST_TIMEOUT_MS = 180_000;
 
 class ContactSyncRequestError extends Error {
     constructor(message: string, readonly status: number) {
@@ -89,23 +92,26 @@ async function postSync(
         autoTag: boolean;
     }
 ): Promise<ContactSyncResponse> {
-    const response = await fetch(`/api/pages/${pageId}/sync`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        credentials: 'include',
-        body: JSON.stringify({
-            forceFullSync: true,
-            autoTag: options.autoTag,
-            paged: true,
-            ...(options.resumePsids.length > 0 ? { resumePsids: options.resumePsids } : {}),
-            ...(options.cursor ? { cursor: options.cursor } : {}),
-            ...(options.syncStartedAt ? { syncStartedAt: options.syncStartedAt } : {}),
-            syncRunId: options.syncRunId,
-            syncHadFailures: options.syncHadFailures
-        })
-    });
+    return requestWithTimeout(async signal => {
+        const response = await fetch(`/api/pages/${pageId}/sync`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            credentials: 'include',
+            signal,
+            body: JSON.stringify({
+                forceFullSync: true,
+                autoTag: options.autoTag,
+                paged: true,
+                ...(options.resumePsids.length > 0 ? { resumePsids: options.resumePsids } : {}),
+                ...(options.cursor ? { cursor: options.cursor } : {}),
+                ...(options.syncStartedAt ? { syncStartedAt: options.syncStartedAt } : {}),
+                syncRunId: options.syncRunId,
+                syncHadFailures: options.syncHadFailures
+            })
+        });
 
-    return parseSyncResponse(response);
+        return parseSyncResponse(response);
+    }, CONTACT_SYNC_REQUEST_TIMEOUT_MS, 'Contact sync request timed out. Please retry syncing.');
 }
 
 export async function runContactSyncToCompletion(
@@ -118,7 +124,6 @@ export async function runContactSyncToCompletion(
     let resumePsids: string[] = [];
     let totalSynced = 0;
     let totalFailed = 0;
-    let lastData: ContactSyncResponse = {};
     let cursor: string | null = null;
     let syncStartedAt: string | null = null;
     const syncRunId = createSyncRunId();
@@ -155,7 +160,6 @@ export async function runContactSyncToCompletion(
             throw new Error('Sync failed without a response');
         }
 
-        lastData = data;
         totalSynced += data.synced || 0;
         totalFailed += data.failed || 0;
         syncHadFailures ||= data.syncHadFailures === true || (data.failed || 0) > 0;
@@ -180,7 +184,7 @@ export async function runContactSyncToCompletion(
             response: data
         });
 
-        if (!data.partial || (resumePsids.length === 0 && !cursor)) {
+        if (!data.partial) {
             return {
                 data,
                 totalSynced,
@@ -188,9 +192,12 @@ export async function runContactSyncToCompletion(
                 completed: true
             };
         }
+        if (resumePsids.length === 0 && !cursor) {
+            throw new Error('Sync returned an incomplete response without a continuation. Please retry syncing.');
+        }
 
         const continuationKey = resumePsids.length > 0
-            ? `psids:${resumePsids.join(',')}`
+            ? `cursor:${cursor || ''}:psids:${resumePsids.join(',')}`
             : `cursor:${cursor || ''}`;
         if (seenContinuationKeys.has(continuationKey)) {
             throw new Error('Sync stopped because Facebook returned a repeated continuation cursor.');

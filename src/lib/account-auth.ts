@@ -13,11 +13,12 @@ export async function takeAccountRateLimit(bucket: string, limit: number, second
 
 export async function accountsReady(): Promise<boolean> {
     const { data, error } = await accountRequest(getSupabaseAdmin().rpc('tokko_accounts_ready'));
-    return !error && data === true;
+    if (error) throw new AccessError(503, 'Account service is temporarily unavailable.');
+    return data === true;
 }
 
 export async function authenticateEmail(credentials: Record<string, unknown> | undefined, ip = 'unknown') {
-    if (!await accountsReady()) return null;
+    if (!await accountsReady()) throw new AccessError(503, 'Account service is temporarily unavailable.');
     let email: string;
     try { email = normalizeEmail(credentials?.email); } catch { email = ''; }
     await takeAccountRateLimit(`login-ip:${ip}`, 40, 900);
@@ -50,6 +51,9 @@ export async function getActiveAccount(id: string, version: number, provider: st
     if (error) throw new AccessError(503, 'Sign-in is temporarily unavailable.');
     if (!data?.is_active || Number(data.session_version) !== version || accountHasExpired(data.expires_at)) return null;
     if (provider === 'facebook' && (data.created_by || ['email', 'invited'].includes(data.account_kind))) return null;
-    if (provider === 'credentials' && (!data.email_login_enabled || !data.email_verified_at || !await accountsReady())) return null;
+    if (provider === 'credentials') {
+        if (!data.email_login_enabled || !data.email_verified_at) return null;
+        if (!await accountsReady()) throw new AccessError(503, 'Account service is temporarily unavailable.');
+    }
     return data;
 }

@@ -22,7 +22,7 @@ vi.mock('@/lib/messaging-auto-tag-worker', () => ({
 import { GET } from './route';
 
 describe('GET /api/cron/follow-up-automations', () => {
-    afterEach(() => vi.restoreAllMocks());
+    afterEach(() => { vi.restoreAllMocks(); });
     beforeEach(() => {
         vi.clearAllMocks();
         mocks.getSupabaseAdmin.mockReturnValue({ database: true });

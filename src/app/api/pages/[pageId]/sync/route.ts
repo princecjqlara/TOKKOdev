@@ -7,6 +7,7 @@ import {
     getUserProfile,
     getConversationMessages,
     subscribePageToAppWebhook,
+    isFacebookReauthRequired,
     type ConversationMessage
 } from '@/lib/facebook';
 import { getPhilippinesHour } from '@/lib/philippines-time';
@@ -15,6 +16,8 @@ import { composeContactName, hasUsableContactName, normalizeContactName, pickPre
 import { SUPABASE_IN_FILTER_BATCH_SIZE } from '@/lib/supabase-pagination';
 import { isExpectedFacebookProfileLookupError } from '@/lib/facebook-errors';
 import { createContactMessagingAutoTagger } from '@/lib/messaging-auto-tag-sync';
+import { databaseRequest } from '@/lib/database-request';
+import { AccessError } from '@/lib/account-security';
 
 // Increase timeout for sync operations (up to 5 minutes)
 export const maxDuration = 300;
@@ -30,11 +33,11 @@ async function acquireSyncLease(
     pageId: string,
     owner: string
 ): Promise<boolean | null> {
-    const { data, error } = await supabase.rpc('acquire_page_sync_lease', {
+    const { data, error } = await databaseRequest(supabase.rpc('acquire_page_sync_lease', {
         p_page_id: pageId,
         p_owner: owner,
         p_lease_seconds: 360
-    });
+    }));
 
     if (error) {
         // Allow a rolling deployment before the migration reaches Supabase.
@@ -48,10 +51,10 @@ async function acquireSyncLease(
 }
 
 async function releaseSyncLease(lease: SyncLease) {
-    const { error } = await lease.supabase.rpc('release_page_sync_lease', {
+    const { error } = await databaseRequest(lease.supabase.rpc('release_page_sync_lease', {
         p_page_id: lease.pageId,
         p_owner: lease.owner
-    });
+    }));
 
     if (error && error.code !== 'PGRST202' && !error.message?.includes('release_page_sync_lease')) {
         console.warn('[CONTACT_SYNC] Failed to release sync lease', {
@@ -66,6 +69,7 @@ export async function POST(
     request: NextRequest,
     { params }: { params: Promise<{ pageId: string }> }
 ) {
+    const requestStartedAt = Date.now();
     const requestId = typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
         ? crypto.randomUUID()
         : `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
@@ -169,12 +173,13 @@ export async function POST(
         });
 
         // Verify user has access to page
-        const { data: userPage } = await supabase
+        const { data: userPage, error: membershipError } = await databaseRequest(supabase
             .from('user_pages')
             .select('page_id')
             .eq('user_id', userId)
             .eq('page_id', pageId)
-            .single();
+            .single());
+        if (membershipError && membershipError.code !== 'PGRST116') throw membershipError;
 
         if (!userPage) {
             logWarn('User attempted sync for page without access', {
@@ -188,11 +193,12 @@ export async function POST(
         }
 
         // Get page details including last_synced_at
-        const { data: page } = await supabase
+        const { data: page, error: pageError } = await databaseRequest(supabase
             .from('pages')
             .select('fb_page_id, access_token, last_synced_at, messaging_auto_tag_enabled')
             .eq('id', pageId)
-            .single();
+            .single());
+        if (pageError && pageError.code !== 'PGRST116') throw pageError;
 
         if (!page) {
             logWarn('Page not found for sync request', {
@@ -251,18 +257,20 @@ export async function POST(
             );
         }
 
-        try {
-            await subscribePageToAppWebhook(page.fb_page_id, page.access_token, ['messages', 'messaging_postbacks', 'message_echoes']);
-            logInfo('Verified page webhook subscription before sync', {
-                pageId,
-                fbPageId: page.fb_page_id
-            });
-        } catch (subscriptionError) {
-            logWarn('Failed to verify page webhook subscription before sync', {
-                pageId,
-                fbPageId: page.fb_page_id,
-                error: (subscriptionError as Error).message
-            });
+        if (!cursor && resumePsids.length === 0) {
+            try {
+                await subscribePageToAppWebhook(page.fb_page_id, page.access_token, ['messages', 'messaging_postbacks', 'message_echoes']);
+                logInfo('Verified page webhook subscription before sync', {
+                    pageId,
+                    fbPageId: page.fb_page_id
+                });
+            } catch (subscriptionError) {
+                logWarn('Failed to verify page webhook subscription before sync', {
+                    pageId,
+                    fbPageId: page.fb_page_id,
+                    error: (subscriptionError as Error).message
+                });
+            }
         }
 
         logInfo('Starting sync run', {
@@ -320,7 +328,7 @@ export async function POST(
             const errorMessage = (error as Error).message || String(error);
 
             // Check if it's a permissions error
-            if (errorMessage.includes('permission') || errorMessage.includes('must be granted')) {
+            if (isFacebookReauthRequired(error) || errorMessage.toLowerCase().includes('permission') || errorMessage.includes('must be granted')) {
                 return NextResponse.json(
                     {
                         error: 'Permission Error',
@@ -338,9 +346,12 @@ export async function POST(
         }
 
         // Filter valid conversations first
+        const seenPsids = new Set<string>();
         let validConversations = conversations.filter(conv => {
             const participants = conv.participants?.data?.filter(p => p.id && p.id !== page.fb_page_id) || [];
-            return participants.length === 1;
+            if (participants.length !== 1 || seenPsids.has(participants[0].id)) return false;
+            seenPsids.add(participants[0].id);
+            return true;
         });
 
         if (resumePsids.length > 0) {
@@ -396,12 +407,12 @@ export async function POST(
         for (const rows of basicContactRowGroups) {
             for (let i = 0; i < rows.length; i += BASIC_CONTACT_UPSERT_CHUNK_SIZE) {
                 const chunk = rows.slice(i, i + BASIC_CONTACT_UPSERT_CHUNK_SIZE);
-                const { error: basicUpsertError } = await supabase
+                const { error: basicUpsertError } = await databaseRequest(supabase
                     .from('contacts')
                     .upsert(chunk, {
                         onConflict: 'page_id,psid',
                         ignoreDuplicates: false
-                    });
+                    }));
 
                 if (basicUpsertError) throw basicUpsertError;
             }
@@ -428,11 +439,11 @@ export async function POST(
             try {
                 const existingContacts: Array<{ psid?: string | null; name?: string | null; profile_pic?: string | null }> = [];
                 for (const psidBatch of chunkArray(Array.from(conversationPsids), SUPABASE_IN_FILTER_BATCH_SIZE)) {
-                    const { data: batchContacts, error: existingContactsError } = await supabase
+                    const { data: batchContacts, error: existingContactsError } = await databaseRequest(supabase
                         .from('contacts')
                         .select('psid,name,profile_pic')
                         .eq('page_id', pageId)
-                        .in('psid', psidBatch);
+                        .in('psid', psidBatch));
 
                     if (existingContactsError) {
                         throw existingContactsError;
@@ -482,7 +493,7 @@ export async function POST(
         const DELAY_BETWEEN_BATCHES = 20; // 20ms delay between batches (reduced for faster processing)
         const MAX_PROCESSING_TIME = 45000; // Return partials early so the client can continue before hosting timeouts.
         const PROFILE_FETCH_TIMEOUT = 4000; // 4 seconds max per profile fetch for more reliable name enrichment
-        const startTime = Date.now();
+        const startTime = requestStartedAt;
 
         logInfo('Beginning conversation processing', {
             validConversations: validConversations.length,
@@ -573,17 +584,7 @@ export async function POST(
                     const shouldFetchProfile = !hasUsableContactName(name) || !profilePic;
                     if (shouldFetchProfile) {
                         try {
-                            const profilePromise = getUserProfile(participant.id, page.access_token);
-                            const timeoutPromise = new Promise((_, reject) =>
-                                setTimeout(() => reject(new Error('Profile fetch timeout')), PROFILE_FETCH_TIMEOUT)
-                            );
-
-                            const profile = await Promise.race([profilePromise, timeoutPromise]) as {
-                                name?: string;
-                                first_name?: string;
-                                last_name?: string;
-                                profile_pic?: string;
-                            };
+                            const profile = await getUserProfile(participant.id, page.access_token, { timeoutMs: PROFILE_FETCH_TIMEOUT });
                             name = pickPreferredContactName(
                                 profile.name,
                                 composeContactName(profile.first_name, profile.last_name),
@@ -700,7 +701,7 @@ export async function POST(
                         interactionCount = 1;
                     }
 
-                    const { error: upsertError } = await supabase
+                    const { error: upsertError } = await databaseRequest(supabase
                         .from('contacts')
                         .upsert({
                             page_id: pageId,
@@ -718,7 +719,7 @@ export async function POST(
                         }, {
                             onConflict: 'page_id,psid',
                             ignoreDuplicates: false
-                        });
+                        }));
 
                     if (!upsertError) {
                         existingContactsByPsid.set(participant.id, {
@@ -856,13 +857,13 @@ export async function POST(
         // Keep failed contact/tag work eligible for the next incremental sync.
         let checkpointSaved = false;
         if (!syncHadFailures && failed === 0) {
-            const { error: checkpointError } = await supabase
+            const { error: checkpointError } = await databaseRequest(supabase
                 .from('pages')
                 .update({
                     last_synced_at: syncStartTime,
                     updated_at: new Date().toISOString()
                 })
-                .eq('id', pageId);
+                .eq('id', pageId));
 
             if (checkpointError) {
                 logWarn('Failed to update last_synced_at checkpoint', {
@@ -916,11 +917,12 @@ export async function POST(
         });
         return NextResponse.json(
             { error: 'Failed to sync contacts', message: (error as Error).message },
-            { status: 500 }
+            { status: error instanceof AccessError ? error.status : 500 }
         );
     } finally {
         if (syncLease && !keepSyncLease) {
-            await releaseSyncLease(syncLease);
+            try { await releaseSyncLease(syncLease); }
+            catch (error) { logWarn('Failed to release sync lease; it will expire automatically', { error: (error as Error).message }); }
         }
     }
 }

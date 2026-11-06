@@ -5,6 +5,7 @@ import { createContactMessagingAutoTagger } from '@/lib/messaging-auto-tag-sync'
 import { isWithinMessagingAutoTagWindow } from '@/lib/messaging-auto-tag';
 import { composeContactName, normalizeContactName, pickPreferredContactName } from '../../../../lib/contact-names';
 import { repairMissingContactNamesForPage } from '../../../../lib/contact-name-repair';
+import { databaseRequest } from '@/lib/database-request';
 
 export const dynamic = 'force-dynamic';
 
@@ -32,14 +33,14 @@ async function withTimeout<T>(promise: Promise<T>, timeoutMs: number, label: str
     }
 }
 
-async function markPageAttempted(supabase: any, pageId: string) {
+async function markPageAttempted(supabase: ReturnType<typeof getSupabaseAdmin>, pageId: string) {
     try {
-        const { error } = await supabase
+        const { error } = await databaseRequest(supabase
             .from('pages')
             .update({
                 updated_at: new Date().toISOString()
             })
-            .eq('id', pageId);
+            .eq('id', pageId));
 
         if (error) {
             console.warn('Failed to update cron sync checkpoint:', error);
@@ -61,11 +62,11 @@ export async function GET(request: NextRequest) {
                 : MAX_PAGES_PER_RUN;
 
         // Process the least recently touched page first so public cron runs rotate quickly.
-        const { data: pages, error: pagesError } = await supabase
+        const { data: pages, error: pagesError } = await databaseRequest(supabase
             .from('pages')
             .select('id, fb_page_id, access_token, name, updated_at, messaging_auto_tag_enabled')
             .order('updated_at', { ascending: true, nullsFirst: true })
-            .limit(pageLimit);
+            .limit(pageLimit));
 
         if (pagesError) throw pagesError;
 
@@ -112,7 +113,7 @@ export async function GET(request: NextRequest) {
 
                         try {
                             const profile = await withTimeout(
-                                getUserProfile(participant.id, page.access_token),
+                                getUserProfile(participant.id, page.access_token, { timeoutMs: PROFILE_FETCH_TIMEOUT_MS }),
                                 PROFILE_FETCH_TIMEOUT_MS,
                                 'Facebook profile fetch'
                             );
@@ -126,7 +127,7 @@ export async function GET(request: NextRequest) {
                             // Profile fetch failed, use basic info
                         }
 
-                        const { error: saveError } = await supabase
+                        const { error: saveError } = await databaseRequest(supabase
                             .from('contacts')
                             .upsert({
                                 page_id: page.id,
@@ -137,7 +138,7 @@ export async function GET(request: NextRequest) {
                                 updated_at: new Date().toISOString()
                             }, {
                                 onConflict: 'page_id,psid'
-                            });
+                            }));
                         if (saveError) throw saveError;
                         if (page.messaging_auto_tag_enabled !== false && isWithinMessagingAutoTagWindow(conversation.updated_time)) {
                             const messages = await getConversationMessages(conversation.id, page.access_token, 500, {
@@ -147,9 +148,9 @@ export async function GET(request: NextRequest) {
                                 isWithinMessagingAutoTagWindow(message.created_time))
                                 .sort((a, b) => Date.parse(b.created_time) - Date.parse(a.created_time))[0];
                             if (inbound) {
-                                const { error: inboundError } = await supabase.from('contacts').upsert({
+                                const { error: inboundError } = await databaseRequest(supabase.from('contacts').upsert({
                                     page_id: page.id, psid: participant.id, last_inbound_at: inbound.created_time
-                                }, { onConflict: 'page_id,psid' });
+                                }, { onConflict: 'page_id,psid' }));
                                 if (inboundError) throw inboundError;
                             }
                             if (await applyMessengerTags(participant.id, messages)) tagged++;

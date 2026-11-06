@@ -109,6 +109,9 @@ src/
 
 ## Development
 
+See [sync and sign-in recovery](docs/sync-and-signin-troubleshooting.md) for
+worker authentication, expired Page connections, and temporary account failures.
+
 Contact imports also refresh Messenger lead-stage and order-created tags. See
 [Messenger auto-tag behavior](docs/messaging-auto-tag.md) for event mappings,
 history limits, Page settings, and retry behavior.
@@ -145,6 +148,7 @@ For original Facebook parent users and their email/password team subaccounts, fo
    - `SUPABASE_URL` - The server's Supabase project URL; use the same project as the public URL
    - `NEXT_PUBLIC_SUPABASE_ANON_KEY` - Your Supabase anon key
    - `SUPABASE_SERVICE_ROLE_KEY` - Your Supabase service role key
+   - `CRON_SECRET` - A private random secret shared only with your external scheduler
 
 5. Update Facebook App settings:
    - Add your Vercel URL to Facebook App redirect URIs:
@@ -164,7 +168,11 @@ Vercel Cron is not used. Configure cron jobs in [cron-jobs.org](https://cron-job
 - Follow-up automations, every minute: `https://your-app.vercel.app/api/cron/follow-up-automations`
 - Conversation export worker, every minute: `https://your-app.vercel.app/api/cron/exports`
 
-Use `GET` requests. These cron routes do not require a cron secret.
+Use `GET` requests and configure the HTTP header `Authorization: Bearer <CRON_SECRET>`
+on every job, using the same secret as the deployed environment. Requests without
+that header return `401`; missing server configuration returns `503`. Check each
+job's execution history after changing deployment settings. A failed or disabled
+scheduler stops background sync, campaign continuation, and follow-ups.
 
 **Note:** The `vercel.json` file is configured with extended function timeouts (5 minutes) for sync operations, but does not define Vercel Cron schedules.
 

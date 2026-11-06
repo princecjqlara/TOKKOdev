@@ -1,4 +1,5 @@
 import type { getSupabaseAdmin } from './supabase';
+import { databaseRequest } from './database-request';
 import { classifyMessengerSystemMessage, isWithinMessagingAutoTagWindow, MESSENGER_STAGE_TAG_NAMES,
     type MessengerLeadStage, type MessengerSystemSignal } from './messaging-auto-tag';
 
@@ -18,12 +19,12 @@ function complete(ids: Partial<MessagingAutoTagIds>): ids is MessagingAutoTagIds
 }
 
 export async function loadMessagingAutoTagIds(db: Database, pageId: string): Promise<MessagingAutoTagIds> {
-    const { data: tags, error } = await db.from('tags').select('id,name,is_default')
-        .eq('owner_type', 'page').eq('owner_id', pageId);
+    const { data: tags, error } = await databaseRequest(db.from('tags').select('id,name,is_default')
+        .eq('owner_type', 'page').eq('owner_id', pageId));
     if (error) throw error;
     let ids = findTagIds(tags || []);
     if (!complete(ids)) {
-        const restored = await db.rpc('ensure_page_default_tags', { p_page_id: pageId });
+        const restored = await databaseRequest(db.rpc('ensure_page_default_tags', { p_page_id: pageId }));
         if (restored.error) throw new Error(`Could not restore required Page tags: ${restored.error.message || restored.error.code}`);
         ids = findTagIds([...(tags || []), ...(Array.isArray(restored.data) ? restored.data : [])]);
     }
@@ -48,8 +49,8 @@ export function createContactMessagingAutoTagger(db: Database, page: {
         if (!signals.size) return false;
         // Contacts are shared by Page. Only a real recent inbound message makes
         // a contact eligible; a stage echo must never open or extend that window.
-        const { data: contact, error } = await db.from('contacts').select('id,last_inbound_at')
-            .eq('page_id', page.id).eq('psid', psid).maybeSingle();
+        const { data: contact, error } = await databaseRequest(db.from('contacts').select('id,last_inbound_at')
+            .eq('page_id', page.id).eq('psid', psid).maybeSingle());
         if (error) throw error;
         if (!contact || !isWithinMessagingAutoTagWindow(contact.last_inbound_at)) return false;
         if (!idsPromise) {
@@ -62,10 +63,10 @@ export function createContactMessagingAutoTagger(db: Database, page: {
         const targetIds = new Set<string>();
         for (const signal of signals) targetIds.add(ids[signal === 'order_created' ? 'converted' : signal]);
         if (!contact?.id) throw new Error('Could not resolve contact for Messenger tags');
-        const assigned = await db.from('contact_tags').upsert(
+        const assigned = await databaseRequest(db.from('contact_tags').upsert(
             [...targetIds].map(tagId => ({ contact_id: contact.id, tag_id: tagId })),
             { onConflict: 'contact_id,tag_id', ignoreDuplicates: true }
-        );
+        ));
         if (assigned.error) throw assigned.error;
         return true;
     };

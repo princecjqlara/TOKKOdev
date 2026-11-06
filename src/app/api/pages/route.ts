@@ -192,7 +192,7 @@ export async function GET(request: NextRequest) {
         console.error('Error fetching pages:', error);
         return NextResponse.json(
             { error: 'Failed to fetch pages', message: (error as Error).message },
-            { status: 500 }
+            { status: error instanceof AccessError ? error.status : 500 }
         );
     }
 }

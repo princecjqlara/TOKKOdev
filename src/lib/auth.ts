@@ -8,11 +8,13 @@ import { getServerAuthToken } from './server-auth-token';
 import { needsSubaccountProfile } from './subaccount-profile';
 import { accountRequest } from './account-request';
 import { databaseErrorDetails } from './database-request';
+import { AccessError } from './account-security';
 
 export const authOptions: NextAuthOptions = {
     providers: [
         FacebookProvider({
             clientId: process.env.FACEBOOK_CLIENT_ID!, clientSecret: process.env.FACEBOOK_CLIENT_SECRET!,
+            httpOptions: { timeout: 15_000 },
             authorization: { params: { scope: FACEBOOK_PERMISSION_SCOPE } }
         }),
         CredentialsProvider({
@@ -21,7 +23,11 @@ export const authOptions: NextAuthOptions = {
                 try {
                     const ip = String(request.headers?.['x-forwarded-for'] || 'unknown').split(',')[0].trim();
                     return await authenticateEmail(credentials, ip);
-                } catch { return null; }
+                } catch (error) {
+                    if (error instanceof AccessError && error.status === 429) throw new Error('AccountRateLimited');
+                    console.error('[EMAIL_SIGNIN] Account lookup failed', databaseErrorDetails(error));
+                    throw new Error('AccountServiceUnavailable');
+                }
             }
         })
     ],

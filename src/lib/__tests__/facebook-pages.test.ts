@@ -6,6 +6,7 @@ import {
     getConversationMessages,
     getFacebookPages,
     getPageConversationsBatch,
+    subscribePageToAppWebhook,
     isFacebookReauthRequired
 } from '../facebook';
 
@@ -19,8 +20,23 @@ function createJsonResponse(ok: boolean, payload: unknown, status: number = 200,
 }
 
 afterEach(() => {
+    vi.useRealTimers();
     vi.restoreAllMocks();
     vi.unstubAllGlobals();
+});
+
+describe('Facebook response deadlines', () => {
+    it.each(['conversations', 'subscription'])('bounds a stalled %s response body after its headers arrive', async operation => {
+        vi.useFakeTimers();
+        const fetchMock = vi.fn().mockResolvedValue({ ok: true, json: () => new Promise(() => {}) });
+        vi.stubGlobal('fetch', fetchMock);
+        const pending = operation === 'conversations' ? getPageConversationsBatch('page', 'token') : subscribePageToAppWebhook('page', 'token');
+        const failed = expect(pending).rejects.toThrow('timed out');
+        await vi.advanceTimersByTimeAsync(30_000);
+        await failed;
+        expect(fetchMock.mock.calls[0][1].signal.aborted).toBe(true);
+        expect(vi.getTimerCount()).toBe(0);
+    });
 });
 
 describe('conversation checkpoint safety', () => {

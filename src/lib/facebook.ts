@@ -3,6 +3,7 @@ import { FACEBOOK_REAUTH_MESSAGE } from './facebook-permissions';
 import { isFacebookReauthMessage } from './facebook-errors';
 import type { TemplateMediaType } from './facebook-templates';
 import { getUtilityTemplateParameterValidationError } from './send-errors';
+import { requestWithTimeout } from './request-timeout';
 
 // Re-export templates from dedicated file
 export { UTILITY_TEMPLATES } from './facebook-templates';
@@ -89,8 +90,8 @@ export function isFacebookReauthRequired(error: unknown) {
     return isFacebookReauthMessage(message);
 }
 
-async function readFacebookError(response: Response, endpoint: string) {
-    const body = await response
+async function readFacebookError(response: Response, endpoint: string, parsedBody?: FacebookGraphErrorBody) {
+    const body = parsedBody ?? await response
         .json()
         .catch(() => ({} as FacebookGraphErrorBody));
     const error = body.error;
@@ -113,24 +114,15 @@ async function readFacebookError(response: Response, endpoint: string) {
     );
 }
 
-async function fetchFacebookRead(input: string, timeoutMs: number = FACEBOOK_READ_TIMEOUT_MS, signal?: AbortSignal): Promise<Response> {
-    const controller = new AbortController();
-    const abort = () => controller.abort();
-    if (signal?.aborted) controller.abort();
-    signal?.addEventListener('abort', abort, { once: true });
-    const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
-
-    try {
-        return await fetch(input, { signal: controller.signal });
-    } catch (error) {
-        if (controller.signal.aborted) {
-            throw new Error(`Facebook read request timed out after ${timeoutMs / 1000} seconds`);
-        }
-        throw error;
-    } finally {
-        clearTimeout(timeoutId);
-        signal?.removeEventListener('abort', abort);
-    }
+async function fetchFacebookRead(input: string, timeoutMs: number = FACEBOOK_READ_TIMEOUT_MS, signal?: AbortSignal) {
+    return requestWithTimeout(async requestSignal => {
+        const response = await fetch(input, { signal: requestSignal });
+        const body = await response.json().catch(error => {
+            if (response.ok) throw error;
+            return {};
+        });
+        return { response, body };
+    }, timeoutMs, `Facebook read request timed out after ${timeoutMs / 1000} seconds`, signal);
 }
 
 // Get user's Facebook pages (including business pages)
@@ -209,13 +201,14 @@ export async function getPageConversations(
         seenPageUrls.add(nextUrl);
 
         pageCount++;
-        const res: Response = await fetchFacebookRead(nextUrl);
+        const { response: res, body } = await fetchFacebookRead(nextUrl);
 
         if (!res.ok) {
-            throw await readFacebookError(res, `/${pageId}/conversations`);
+            throw await readFacebookError(res, `/${pageId}/conversations`, body);
         }
 
-        const responseData: { data?: FacebookConversation[]; paging?: { next?: string } } = await res.json();
+        const responseData: { data?: FacebookConversation[]; paging?: { next?: string } } = body;
+        if (!Array.isArray(responseData.data)) throw new Error('Facebook conversations response is incomplete');
         const conversations = responseData.data || [];
 
         console.log(`📄 Facebook API page ${pageCount}: fetched ${conversations.length} conversations (total so far: ${allConversations.length + conversations.length})`);
@@ -291,10 +284,10 @@ export async function getPageConversationsBatch(
         url += `&since=${unixTimestamp}`;
     }
 
-    const response: Response = await fetchFacebookRead(url, FACEBOOK_READ_TIMEOUT_MS, options.signal);
+    const { response, body } = await fetchFacebookRead(url, FACEBOOK_READ_TIMEOUT_MS, options.signal);
 
     if (!response.ok) {
-        throw await readFacebookError(response, `/${pageId}/conversations`);
+        throw await readFacebookError(response, `/${pageId}/conversations`, body);
     }
 
     const responseData: {
@@ -305,7 +298,7 @@ export async function getPageConversationsBatch(
                 after?: string;
             };
         };
-    } = await response.json();
+    } = body;
 
     if (!Array.isArray(responseData.data)) throw new Error('Facebook conversations response is incomplete; checkpoint must be retained');
     if (responseData.paging?.next && typeof responseData.paging.cursors?.after !== 'string') {
@@ -343,17 +336,16 @@ export async function getUserProfile(
     pageAccessToken: string,
     options: { timeoutMs?: number } = {}
 ): Promise<{ id: string; name?: string; first_name?: string; last_name?: string; profile_pic?: string }> {
-    const response = await fetchFacebookRead(
+    const { response, body } = await fetchFacebookRead(
         `${FACEBOOK_GRAPH_URL}/${psid}?fields=id,name,first_name,last_name,profile_pic&access_token=${pageAccessToken}`,
         options.timeoutMs
     );
 
     if (!response.ok) {
-        const error = await response.json();
-        throw new Error(error.error?.message || 'Failed to fetch user profile');
+        throw new Error(body.error?.message || 'Failed to fetch user profile');
     }
 
-    return await response.json();
+    return body;
 }
 
 // Subscribe a page to this app's webhook events
@@ -369,20 +361,24 @@ export async function subscribePageToAppWebhook(
         formData.set('subscribed_fields', subscribedFields.join(','));
     }
 
-    const response = await fetch(
-        `${FACEBOOK_GRAPH_URL}/${pageId}/subscribed_apps`,
-        {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/x-www-form-urlencoded'
-            },
-            body: formData.toString()
-        }
-    );
+    const { response, result } = await requestWithTimeout(async signal => {
+        const response = await fetch(
+            `${FACEBOOK_GRAPH_URL}/${pageId}/subscribed_apps`,
+            {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/x-www-form-urlencoded'
+                },
+                body: formData.toString(),
+                signal
+            }
+        );
 
-    const result = await response
-        .json()
-        .catch(() => ({} as { error?: { message?: string }; success?: boolean }));
+        const result = await response
+            .json()
+            .catch(() => ({} as { error?: { message?: string }; success?: boolean }));
+        return { response, result };
+    }, 8_000, 'Facebook webhook subscription timed out');
 
     if (!response.ok) {
         const errorMessage =
@@ -750,16 +746,16 @@ export async function getConversationMessages(
             }
             seenPageUrls.add(nextUrl);
 
-            const fetchResponse = await fetchFacebookRead(nextUrl, options.timeoutMs, options.signal);
+            const { response: fetchResponse, body } = await fetchFacebookRead(nextUrl, options.timeoutMs, options.signal);
 
             if (!fetchResponse.ok) {
-                const graphError = await readFacebookError(fetchResponse, `/${conversationId}/messages`);
+                const graphError = await readFacebookError(fetchResponse, `/${conversationId}/messages`, body);
                 if (options.throwOnError) throw graphError;
                 console.warn('⚠️ Failed to fetch conversation messages:', graphError.message);
                 break;
             }
 
-            const responseData: { data?: ConversationMessage[]; paging?: { next?: string } } = await fetchResponse.json();
+            const responseData: { data?: ConversationMessage[]; paging?: { next?: string } } = body;
             if (options.throwOnError && !Array.isArray(responseData.data)) throw new Error('Messenger history returned incomplete data');
             const messages = responseData.data || [];
             allMessages.push(...messages);
@@ -790,18 +786,18 @@ export async function getConversationIdForPsid(
     try {
         // Construct the conversation ID format used by Facebook
         // Format: t_<psid> for messenger conversations
-        const response = await fetchFacebookRead(
+        const { response, body } = await fetchFacebookRead(
             `${FACEBOOK_GRAPH_URL}/${pageId}/conversations?user_id=${psid}&fields=id&access_token=${pageAccessToken}`
         );
 
         if (!response.ok) {
-            const graphError = await readFacebookError(response, `/${pageId}/conversations`);
+            const graphError = await readFacebookError(response, `/${pageId}/conversations`, body);
             if (options.throwOnError && !isMissingConversationParticipant(graphError)) throw graphError;
             console.warn('⚠️ Failed to find conversation for PSID:', psid);
             return null;
         }
 
-        const data = await response.json();
+        const data = body;
         if (data.data && data.data.length > 0) {
             return data.data[0].id;
         }
@@ -830,16 +826,16 @@ export async function getConversationForPsid(
         url.searchParams.set('user_id', psid);
         url.searchParams.set('fields', fields);
         url.searchParams.set('access_token', pageAccessToken);
-        const response = await fetchFacebookRead(url.toString(), options.timeoutMs);
+        const { response, body } = await fetchFacebookRead(url.toString(), options.timeoutMs);
 
         if (!response.ok) {
-            const graphError = await readFacebookError(response, `/${pageId}/conversations`);
+            const graphError = await readFacebookError(response, `/${pageId}/conversations`, body);
             if (options.throwOnError && !isMissingConversationParticipant(graphError)) throw graphError;
             console.warn('⚠️ Failed to find conversation for PSID:', psid);
             return null;
         }
 
-        const data: { data?: FacebookConversation[] } = await response.json();
+        const data: { data?: FacebookConversation[] } = body;
         return data.data?.[0] || null;
     } catch (error) {
         if (options.throwOnError) throw error;
@@ -981,10 +977,10 @@ export async function getPageTemplates(
             throw new Error('Facebook repeated a template pagination cursor');
         }
         visitedUrls.add(nextUrl);
-        const response: Response = await fetchFacebookRead(nextUrl);
+        const { response, body } = await fetchFacebookRead(nextUrl);
 
         if (!response.ok) {
-            const errorData = await response.json().catch(() => ({ error: { message: 'Unknown error' } }));
+            const errorData = body;
             const errorMessage = errorData.error?.message || 'Failed to fetch templates';
             const errorCode = errorData.error?.code;
             const errorSubcode = errorData.error?.error_subcode;
@@ -1001,7 +997,7 @@ export async function getPageTemplates(
             throw new Error(diagnosticParts.join(' | '));
         }
 
-        const data: { data?: any[]; paging?: { next?: string } } = await response.json();
+        const data: { data?: any[]; paging?: { next?: string } } = body;
         for (const template of data.data || []) {
             const language = typeof template.language === 'string' ? template.language : template.language?.code || '';
             const key = template.id ? `id:${template.id}` : template.name ? `name:${template.name}:${language}` : null;

@@ -1,4 +1,5 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { DATABASE_REQUEST_TIMEOUT_MS } from '@/lib/database-request';
 import type { NextRequest } from 'next/server';
 
 const mocks = vi.hoisted(() => ({
@@ -8,7 +9,8 @@ const mocks = vi.hoisted(() => ({
     getPageConversationsBatch: vi.fn(),
     getUserProfile: vi.fn(),
     getConversationMessages: vi.fn(),
-    subscribePageToAppWebhook: vi.fn()
+    subscribePageToAppWebhook: vi.fn(),
+    isFacebookReauthRequired: vi.fn()
 }));
 
 vi.mock('@/lib/get-session', () => ({
@@ -24,7 +26,8 @@ vi.mock('@/lib/facebook', () => ({
     getPageConversationsBatch: mocks.getPageConversationsBatch,
     getUserProfile: mocks.getUserProfile,
     getConversationMessages: mocks.getConversationMessages,
-    subscribePageToAppWebhook: mocks.subscribePageToAppWebhook
+    subscribePageToAppWebhook: mocks.subscribePageToAppWebhook,
+    isFacebookReauthRequired: mocks.isFacebookReauthRequired
 }));
 
 function createRequest(body: Record<string, unknown> = {}): NextRequest {
@@ -124,6 +127,7 @@ function createSupabaseMock(options?: {
         rpc,
         contactsUpsert,
         tagAssignments,
+        userPageSingle,
         pageUpdateEq
     };
 }
@@ -134,6 +138,7 @@ async function loadRoute() {
 }
 
 describe('POST /api/pages/[pageId]/sync', () => {
+    afterEach(() => { vi.useRealTimers(); });
     beforeEach(() => {
         vi.clearAllMocks();
         mocks.getSessionFromRequest.mockResolvedValue({
@@ -142,6 +147,7 @@ describe('POST /api/pages/[pageId]/sync', () => {
             }
         });
         mocks.subscribePageToAppWebhook.mockResolvedValue(undefined);
+        mocks.isFacebookReauthRequired.mockReturnValue(false);
         mocks.getConversationMessages.mockResolvedValue([]);
         mocks.getPageConversationsBatch.mockResolvedValue({
             conversations: [],
@@ -151,6 +157,57 @@ describe('POST /api/pages/[pageId]/sync', () => {
             id: 'contact_psid_1',
             name: 'UNKNOWN'
         });
+    });
+
+    it('reports a database outage without claiming that the user lost Page access', async () => {
+        const { POST } = await loadRoute();
+        const supabase = createSupabaseMock();
+        supabase.userPageSingle.mockResolvedValueOnce({ data: null, error: { code: '08000', message: 'Database unavailable' } });
+        mocks.getSupabaseAdmin.mockReturnValue(supabase);
+        const response = await POST(createRequest(), { params: Promise.resolve({ pageId: 'page_1' }) });
+        expect(response.status).toBe(500);
+        expect((await response.json()).error).toBe('Failed to sync contacts');
+        expect(mocks.getPageConversationsBatch).not.toHaveBeenCalled();
+    });
+
+    it('bounds a stalled database write, retains the checkpoint, and releases the Page lease', async () => {
+        const { POST } = await loadRoute();
+        vi.useFakeTimers();
+        const supabase = createSupabaseMock();
+        supabase.contactsUpsert.mockImplementationOnce(() => new Promise(() => {}));
+        mocks.getSupabaseAdmin.mockReturnValue(supabase);
+        mocks.getPageConversationsBatch.mockResolvedValueOnce({ conversations: [{ id: 'thread',
+            participants: { data: [{ id: 'psid', name: 'Customer' }] } }], nextCursor: null });
+        const pending = POST(createRequest(), { params: Promise.resolve({ pageId: 'page_1' }) });
+        await vi.advanceTimersByTimeAsync(DATABASE_REQUEST_TIMEOUT_MS);
+        const response = await pending;
+        expect(response.status).toBe(503);
+        expect(supabase.pageUpdateEq).not.toHaveBeenCalled();
+        expect(supabase.rpc).toHaveBeenCalledWith('release_page_sync_lease', expect.objectContaining({ p_page_id: 'page_1' }));
+        expect(vi.getTimerCount()).toBe(0);
+    });
+
+    it('returns a reconnect action when Facebook rejects an expired Page token', async () => {
+        const { POST } = await loadRoute();
+        mocks.getSupabaseAdmin.mockReturnValue(createSupabaseMock());
+        mocks.getPageConversationsBatch.mockRejectedValueOnce(new Error('Facebook session expired'));
+        mocks.isFacebookReauthRequired.mockReturnValueOnce(true);
+        const response = await POST(createRequest(), { params: Promise.resolve({ pageId: 'page_1' }) });
+        expect(response.status).toBe(403);
+        expect(await response.json()).toMatchObject({ requiresReconnect: true });
+    });
+
+    it('skips duplicate participants before the basic upsert and verifies webhooks only on the first slice', async () => {
+        const { POST } = await loadRoute();
+        const supabase = createSupabaseMock();
+        mocks.getSupabaseAdmin.mockReturnValue(supabase);
+        mocks.getPageConversationsBatch.mockResolvedValueOnce({ conversations: ['first', 'duplicate'].map(id => ({ id,
+            updated_time: '2026-04-07T02:00:00Z', participants: { data: [{ id: 'contact_psid_1', name: 'Jane Contact' }] } })), nextCursor: null });
+        const response = await POST(createRequest({ cursor: 'next' }), { params: Promise.resolve({ pageId: 'page_1' }) });
+        expect(response.status).toBe(200);
+        expect(supabase.contactsUpsert.mock.calls[0][0]).toHaveLength(1);
+        expect(mocks.getConversationMessages).toHaveBeenCalledTimes(1);
+        expect(mocks.subscribePageToAppWebhook).not.toHaveBeenCalled();
     });
 
     it.each([

@@ -41,7 +41,7 @@ describe('email account identity and live session validation', () => {
     });
     it('disables email login before database finalization', async () => {
         mocks.db.mockReturnValue(database(user, false));
-        expect(await authenticateEmail({ email: 'member@example.com', password: 'test-password' })).toBeNull();
+        await expect(authenticateEmail({ email: 'member@example.com', password: 'test-password' })).rejects.toMatchObject({ status: 503 });
         expect(mocks.compare).not.toHaveBeenCalled();
     });
     it('invalidates already signed-in sessions after password reset or account deactivation', async () => {
@@ -50,6 +50,14 @@ describe('email account identity and live session validation', () => {
         expect(await getActiveAccount('member', 2, 'credentials')).toBeTruthy();
         mocks.db.mockReturnValue(database({ ...user, is_active: false }));
         expect(await getActiveAccount('member', 2, 'facebook')).toBeNull();
+    });
+    it('reports readiness service failures without treating an active email account as revoked', async () => {
+        const db = database();
+        mocks.db.mockReturnValue(db);
+        db.rpc.mockResolvedValueOnce({ data: null, error: { code: '08000', message: 'Connection failed' } } as any);
+        await expect(getActiveAccount('member', 2, 'credentials')).rejects.toMatchObject({ status: 503 });
+        mocks.db.mockReturnValue(database(user, false));
+        await expect(getActiveAccount('member', 2, 'credentials')).rejects.toMatchObject({ status: 503 });
     });
     it('rejects expired accounts on login and on subsequent requests from existing sessions', async () => {
         mocks.db.mockReturnValue(database({ ...user, expires_at: new Date(Date.now() - 1000).toISOString() }));

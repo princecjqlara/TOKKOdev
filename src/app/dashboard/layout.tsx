@@ -25,13 +25,14 @@ import {
 } from 'lucide-react';
 import { Page } from '@/types';
 import { facebookSignInCallback } from '@/lib/facebook-signin';
+import { requestWithTimeout } from '@/lib/request-timeout';
 
 export default function DashboardLayout({
     children,
 }: {
     children: React.ReactNode;
 }) {
-    const { data: session, status } = useSession();
+    const { data: session, status, update } = useSession();
     const router = useRouter();
     const pathname = usePathname();
     const [pages, setPages] = useState<Page[]>([]);
@@ -42,12 +43,13 @@ export default function DashboardLayout({
     const [reconnectRequiredPages, setReconnectRequiredPages] = useState<Page[]>([]);
     const [facebookDiscoveryMessage, setFacebookDiscoveryMessage] = useState<string | null>(null);
     const membershipSnapshot = useRef<string | null>(null);
+    const [checkingAccount, setCheckingAccount] = useState(false);
 
     useEffect(() => {
         // Only redirect if we're sure the user is unauthenticated (not loading)
         if (status === 'unauthenticated') router.replace('/login');
         else if (status === 'authenticated' && session?.requiresProfileCompletion) router.replace('/complete-profile');
-        else if (status === 'authenticated' && !session?.user?.id) {
+        else if (status === 'authenticated' && !session?.user?.id && session?.authenticationError !== 'service_unavailable') {
             router.replace(session?.signInProvider === 'facebook' || session?.requiresFacebookVerification ? facebookSignInCallback(pathname) : '/login');
         }
     }, [status, session, router, pathname]);
@@ -112,6 +114,20 @@ export default function DashboardLayout({
                 <div className="spinner w-8 h-8"></div>
             </div>
         );
+    }
+
+    if (session?.authenticationError === 'service_unavailable') {
+        return <main className="min-h-screen flex items-center justify-center bg-gray-50 p-6">
+            <div role="alert" className="max-w-md border-2 border-black bg-white p-6 space-y-4">
+                <p>Your account could not be checked because the sign-in service is temporarily unavailable.</p>
+                <button className="btn-wireframe" disabled={checkingAccount} onClick={async () => {
+                    setCheckingAccount(true);
+                    try { await requestWithTimeout(() => update(), 20_000, 'Account check timed out.'); }
+                    catch { /* Keep the recovery screen available for another attempt. */ }
+                    finally { setCheckingAccount(false); }
+                }}>{checkingAccount ? 'Checking account...' : 'Retry account check'}</button>
+            </div>
+        </main>;
     }
 
     // Only show content if authenticated, otherwise redirect will happen
