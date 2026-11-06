@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { getSupabaseAdmin } from './supabase';
+import { databaseRequest } from './database-request';
 
 export function waitForPageDeliveryBatch(milliseconds: number): Promise<void> {
     return new Promise(resolve => setTimeout(resolve, milliseconds));
@@ -7,7 +8,7 @@ export function waitForPageDeliveryBatch(milliseconds: number): Promise<void> {
 
 export async function acquirePageDelivery(supabase: ReturnType<typeof getSupabaseAdmin>, pageId: string) {
     const owner = randomUUID();
-    const { data, error } = await supabase.rpc('acquire_page_campaign_delivery', { p_page_id: pageId, p_owner: owner });
+    const { data, error } = await databaseRequest(supabase.rpc('acquire_page_campaign_delivery', { p_page_id: pageId, p_owner: owner }));
     if (error) throw error;
     const row = Array.isArray(data) ? data[0] : data;
     if (!row || typeof row.acquired !== 'boolean') throw new Error('Page delivery coordination returned an invalid response');
@@ -15,9 +16,9 @@ export async function acquirePageDelivery(supabase: ReturnType<typeof getSupabas
 }
 
 export async function releasePageDelivery(supabase: ReturnType<typeof getSupabaseAdmin>, pageId: string, owner: string, rateLimited: boolean) {
-    const { data, error } = await supabase.rpc('release_page_campaign_delivery', {
+    const { data, error } = await databaseRequest(supabase.rpc('release_page_campaign_delivery', {
         p_page_id: pageId, p_owner: owner, p_rate_limited: rateLimited
-    });
+    }));
     if (error) throw error;
     return data as string | null;
 }

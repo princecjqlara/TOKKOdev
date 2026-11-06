@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { getPageTemplates, sendMessage, sendUtilityMessage, takeThreadControl } from '../facebook';
+import { getPageTemplates, sendMessage, sendMessengerMediaAttachment, sendUtilityMessage, takeThreadControl } from '../facebook';
 
 function createJsonResponse(ok: boolean, payload: unknown, status: number = 200, statusText: string = 'OK') {
     return {
@@ -14,6 +14,24 @@ afterEach(() => {
     vi.useRealTimers();
     vi.restoreAllMocks();
     vi.unstubAllGlobals();
+});
+
+describe('complete Facebook send deadlines', () => {
+    it.each([
+        ['message', () => sendMessage('page', 'token', 'psid', 'Hello')],
+        ['utility', () => sendUtilityMessage('page', 'token', 'psid', 'general_msg_v1', 'en_US', 'Hello')],
+        ['media', () => sendMessengerMediaAttachment('page', 'token', 'psid', { type: 'image', url: 'https://example.test/image.png' })],
+        ['thread control', () => takeThreadControl('token', 'psid')]
+    ] as const)('bounds a stalled %s response body after its headers arrive', async (_kind, send) => {
+        vi.useFakeTimers();
+        const transport = vi.fn().mockResolvedValue({ ok: true, json: () => new Promise(() => {}) });
+        vi.stubGlobal('fetch', transport);
+        const failure = expect(send()).rejects.toThrow('timed out');
+        await vi.advanceTimersByTimeAsync(20_000);
+        await failure;
+        expect(transport.mock.calls[0][1].signal.aborted).toBe(true);
+        expect(vi.getTimerCount()).toBe(0);
+    });
 });
 
 describe('getPageTemplates', () => {

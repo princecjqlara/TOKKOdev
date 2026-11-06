@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getServerSession } from 'next-auth';
-import { authOptions } from '@/lib/auth';
+import { getSessionFromRequest } from '@/lib/get-session';
+import { accountErrorResponse } from '@/lib/account-security';
 import { sendCampaignById } from '@/lib/campaign-send';
 import type { TemplateMediaType } from '@/lib/facebook-templates';
 
@@ -29,7 +29,9 @@ export async function POST(
     request: NextRequest,
     { params }: { params: Promise<{ campaignId: string }> }
 ) {
-    const session = await getServerSession(authOptions);
+    let session;
+    try { session = await getSessionFromRequest(request); }
+    catch (error) { return accountErrorResponse(error); }
 
     if (!session?.user?.id) {
         return NextResponse.json(

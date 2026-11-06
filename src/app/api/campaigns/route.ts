@@ -1,9 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getServerSession } from 'next-auth';
+import { getSessionFromRequest } from '@/lib/get-session';
 import { assertContactsOnPage } from '@/lib/page-access';
 import { assertReadableTagIds } from '@/lib/tag-access';
 import { AccessError } from '@/lib/account-security';
-import { authOptions } from '@/lib/auth';
 import { normalizeCampaignMessageParts, serializeCampaignMessageSequence } from '../../../lib/campaign-message-sequence';
 import { getNextPhilippinesScheduledAtIso, getPhilippinesDatePartsFromDateString, getPhilippinesScheduledAtIso } from '@/lib/philippines-time';
 import { getSupabaseAdmin } from '@/lib/supabase';
@@ -47,7 +46,7 @@ function normalizeTemplateMediaHeader(value: unknown): { type: 'image'; url: str
 // GET /api/campaigns - Get campaigns with pagination
 export async function GET(request: NextRequest) {
     try {
-        const session = await getServerSession(authOptions);
+        const session = await getSessionFromRequest(request);
 
         if (!session?.user?.id) {
             return NextResponse.json(
@@ -130,7 +129,7 @@ export async function GET(request: NextRequest) {
         console.error('Error fetching campaigns:', error);
         return NextResponse.json(
             { error: 'Failed to fetch campaigns', message: (error as Error).message },
-            { status: 500 }
+            { status: error instanceof AccessError ? error.status : 500 }
         );
     }
 }
@@ -138,7 +137,7 @@ export async function GET(request: NextRequest) {
 // POST /api/campaigns - Create a campaign
 export async function POST(request: NextRequest) {
     try {
-        const session = await getServerSession(authOptions);
+        const session = await getSessionFromRequest(request);
 
         if (!session?.user?.id) {
             return NextResponse.json(
@@ -467,7 +466,7 @@ export async function POST(request: NextRequest) {
 // PUT /api/campaigns - Update a campaign
 export async function PUT(request: NextRequest) {
     try {
-        const session = await getServerSession(authOptions);
+        const session = await getSessionFromRequest(request);
 
         if (!session?.user?.id) {
             return NextResponse.json(
@@ -537,7 +536,7 @@ export async function PUT(request: NextRequest) {
         console.error('Error updating campaign:', error);
         return NextResponse.json(
             { error: 'Failed to update campaign', message: (error as Error).message },
-            { status: 500 }
+            { status: error instanceof AccessError ? error.status : 500 }
         );
     }
 }
@@ -545,7 +544,7 @@ export async function PUT(request: NextRequest) {
 // DELETE /api/campaigns - Delete a campaign
 export async function DELETE(request: NextRequest) {
     try {
-        const session = await getServerSession(authOptions);
+        const session = await getSessionFromRequest(request);
 
         if (!session?.user?.id) {
             return NextResponse.json(
@@ -634,7 +633,7 @@ export async function DELETE(request: NextRequest) {
         console.error('Error deleting campaign:', error);
         return NextResponse.json(
             { error: 'Failed to delete campaign', message: (error as Error).message },
-            { status: 500 }
+            { status: error instanceof AccessError ? error.status : 500 }
         );
     }
 }

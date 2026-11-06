@@ -1,4 +1,5 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { DATABASE_REQUEST_TIMEOUT_MS } from '../database-request';
 import { sendCampaignById } from '../campaign-send';
 import { serializeCampaignMessageSequence } from '../campaign-message-sequence';
 import { getPageTemplates, sendMessage, takeThreadControl } from '../facebook';
@@ -33,6 +34,9 @@ function createSupabaseMock(
         deliveryBusy?: boolean;
         deliveryBatchSize?: number;
         claimError?: { code?: string; message: string };
+        claimStalls?: boolean;
+        progressStallsOnce?: boolean;
+        updateError?: { code?: string; message: string };
     } = {}
 ) {
     const campaignRecord = {
@@ -79,7 +83,7 @@ function createSupabaseMock(
                 campaignUpdateIn(...args);
                 return query;
             }),
-            then: (resolve: (value: { error: null }) => unknown) => Promise.resolve({ error: null }).then(resolve)
+            then: (resolve: (value: { error: { code?: string; message: string } | null }) => unknown) => Promise.resolve({ error: options.updateError || null }).then(resolve)
         };
         return query;
     });
@@ -99,11 +103,13 @@ function createSupabaseMock(
     const fixedRemaining = options.remainingPendingCount || 0;
     const claimRpc = vi.fn();
     const finishBatchRpc = vi.fn();
+    let stallProgress = options.progressStallsOnce;
     const rpc = vi.fn(async (name: string, args: Record<string, any>) => {
         if (name === 'acquire_page_campaign_delivery') return { data: [{ acquired: !options.deliveryBusy, retry_at: options.deliveryBusy ? '2026-10-13T00:01:00Z' : null, batch_size: options.deliveryBatchSize || 10 }], error: null };
         if (name === 'release_page_campaign_delivery') return { data: null, error: null };
         if (name === 'claim_campaign_recipients') {
             claimRpc(args);
+            if (options.claimStalls) return new Promise<never>(() => {});
             if (options.claimError) return { data: null, error: options.claimError };
             const claimed = pendingRecipients.splice(0, args.p_batch_size).map(recipient => ({
                 contact_id: recipient.contact_id,
@@ -126,6 +132,7 @@ function createSupabaseMock(
         }
 
         if (name === 'get_campaign_delivery_progress') {
+            if (stallProgress) { stallProgress = false; return new Promise<never>(() => {}); }
             return {
                 data: [{
                     sent_count: sentCount,
@@ -186,11 +193,14 @@ function createSupabaseMock(
         claimRpc,
         finishBatchRpc,
         releaseBatchUpdate,
-        outboundUpsert
+        outboundUpsert,
+        campaignSingle,
+        userPageSingle
     };
 }
 
 describe('sendCampaignById', () => {
+    afterEach(() => { vi.useRealTimers(); });
     beforeEach(() => {
         vi.clearAllMocks();
         vi.mocked(takeThreadControl).mockResolvedValue(undefined);
@@ -200,6 +210,93 @@ describe('sendCampaignById', () => {
             { name: 'general_msg_v1_media_v1', language: 'en_US', status: 'APPROVED' },
             { name: 'general_notice_v1_media_v1', language: 'en_US', status: 'APPROVED' }
         ]);
+    });
+
+    it('does not mutate or send a campaign if the membership service is unavailable', async () => {
+        const supabase = createSupabaseMock('draft');
+        supabase.userPageSingle.mockResolvedValueOnce({ data: null, error: { code: '08000', message: 'Connection failed' } });
+        const result = await sendCampaignById({ campaignId: 'campaign_1', userId: 'user_1', supabase: supabase as never });
+        expect(result.status).toBe(503);
+        expect(supabase.campaignUpdate).not.toHaveBeenCalled();
+        expect(sendMessage).not.toHaveBeenCalled();
+    });
+
+    it('bounds a stalled campaign lookup without changing a campaign before authorization', async () => {
+        vi.useFakeTimers();
+        const supabase = createSupabaseMock('draft');
+        supabase.campaignSingle.mockImplementationOnce(() => new Promise(() => {}));
+        const pending = sendCampaignById({ campaignId: 'campaign_1', userId: 'user_1', supabase: supabase as never });
+        await vi.advanceTimersByTimeAsync(DATABASE_REQUEST_TIMEOUT_MS);
+        expect((await pending).status).toBe(503);
+        expect(supabase.campaignUpdate).not.toHaveBeenCalled();
+        expect(sendMessage).not.toHaveBeenCalled();
+        expect(vi.getTimerCount()).toBe(0);
+    });
+
+    it('keeps a stalled recipient claim resumable instead of exhausting the function timeout', async () => {
+        vi.useFakeTimers();
+        const supabase = createSupabaseMock('draft', { claimStalls: true });
+        const pending = sendCampaignById({ campaignId: 'campaign_1', supabase: supabase as never });
+        await vi.advanceTimersByTimeAsync(DATABASE_REQUEST_TIMEOUT_MS);
+        const result = await pending;
+        expect(result.status).toBe(503);
+        expect(result.body.retryable).toBe(true);
+        expect(supabase.campaignUpdate).toHaveBeenLastCalledWith(expect.objectContaining({ status: 'sending', background_delivery_enabled: true }));
+        expect(sendMessage).not.toHaveBeenCalled();
+        expect(vi.getTimerCount()).toBe(0);
+    });
+
+    it('does not send if the database rejects the sending-state update', async () => {
+        const supabase = createSupabaseMock('draft', { updateError: { code: '08000', message: 'Connection failed' } });
+        const result = await sendCampaignById({ campaignId: 'campaign_1', supabase: supabase as never });
+        expect(result.status).toBe(503);
+        expect(supabase.claimRpc).not.toHaveBeenCalled();
+        expect(sendMessage).not.toHaveBeenCalled();
+    });
+
+    it('persists accepted sends before a stalled optional audit write', async () => {
+        vi.useFakeTimers();
+        const supabase = createSupabaseMock('draft', { recipients: [{ id: 'recipient', contact_id: 'contact', contacts: { psid: 'psid' } }] });
+        supabase.outboundUpsert.mockImplementationOnce(() => new Promise(() => {}));
+        vi.mocked(sendMessage).mockResolvedValue({ message_id: 'mid_saved' });
+        const pending = sendCampaignById({ campaignId: 'campaign_1', supabase: supabase as never });
+        await vi.advanceTimersByTimeAsync(DATABASE_REQUEST_TIMEOUT_MS + 1000);
+        const result = await pending;
+        expect(result.status).toBe(200);
+        expect(result.sent).toBe(1);
+        expect(sendMessage).toHaveBeenCalledTimes(1);
+        expect(supabase.finishBatchRpc.mock.invocationCallOrder[0]).toBeLessThan(supabase.outboundUpsert.mock.invocationCallOrder[0]);
+        expect(vi.getTimerCount()).toBe(0);
+    });
+
+    it('resumes after a stalled progress read without resending persisted results', async () => {
+        vi.useFakeTimers();
+        const supabase = createSupabaseMock('draft', { progressStallsOnce: true,
+            recipients: [{ id: 'recipient', contact_id: 'contact', contacts: { psid: 'psid' } }] });
+        vi.mocked(sendMessage).mockResolvedValue({ message_id: 'mid_saved' });
+        const pending = sendCampaignById({ campaignId: 'campaign_1', supabase: supabase as never });
+        await vi.advanceTimersByTimeAsync(DATABASE_REQUEST_TIMEOUT_MS);
+        expect((await pending).status).toBe(503);
+        const result = await sendCampaignById({ campaignId: 'campaign_1', supabase: supabase as never });
+        expect(result.status).toBe(200);
+        expect(result.sent).toBe(1);
+        expect(sendMessage).toHaveBeenCalledTimes(1);
+        expect(vi.getTimerCount()).toBe(0);
+    });
+
+    it('drains a large audience through repeated bounded invocations without duplicates', async () => {
+        const recipients = Array.from({ length: 5001 }, (_, index) => ({ id: `recipient_${index}`, contact_id: `contact_${index}`, contacts: { psid: `psid_${index}` } }));
+        const supabase = createSupabaseMock('draft', { recipients });
+        vi.mocked(sendMessage).mockImplementation(async (_page, _token, psid) => ({ message_id: `mid_${psid}` }));
+        let result;
+        for (let run = 0; run < 11; run++) {
+            result = await sendCampaignById({ campaignId: 'campaign_1', supabase: supabase as never, maxRecipientsPerRun: 500 });
+            expect(result.status).toBe(200);
+            expect(result.body.partial).toBe(run < 10 ? true : undefined);
+        }
+        expect(result?.sent).toBe(5001);
+        expect(sendMessage).toHaveBeenCalledTimes(5001);
+        expect(new Set(vi.mocked(sendMessage).mock.calls.map(call => call[2])).size).toBe(5001);
     });
 
     it('blocks scheduled campaigns from the manual send path', async () => {

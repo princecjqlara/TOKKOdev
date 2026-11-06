@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { sendCampaignById } from '@/lib/campaign-send';
 import { getSupabaseAdmin } from '@/lib/supabase';
+import { databaseRequest } from '@/lib/database-request';
 
 export const dynamic = 'force-dynamic';
 
@@ -58,7 +59,7 @@ async function claimCampaign(
         query = query.eq('status', 'scheduled');
     }
 
-    const { data, error } = await query.select('id');
+    const { data, error } = await databaseRequest(query.select('id'));
 
     if (error) {
         throw error;
@@ -72,28 +73,27 @@ async function getDueCampaignLevelCampaigns(
     now: string,
     staleSendingCutoff: string
 ) {
-    const { data: scheduledCampaigns, error: scheduledError } = await supabase
-        .from('campaigns')
-        .select(SCHEDULED_CAMPAIGN_SELECT)
-        .eq('status', 'scheduled')
-        .eq('is_loop', false)
-        .lte('scheduled_at', now)
-        .or(`next_attempt_at.is.null,next_attempt_at.lte.${now}`)
-        .order('scheduled_at', { ascending: true, nullsFirst: true });
+    const [{ data: scheduledCampaigns, error: scheduledError }, { data: staleSendingCampaigns, error: staleSendingError }] = await Promise.all([
+        databaseRequest(supabase
+            .from('campaigns')
+            .select(SCHEDULED_CAMPAIGN_SELECT)
+            .eq('status', 'scheduled')
+            .eq('is_loop', false)
+            .lte('scheduled_at', now)
+            .or(`next_attempt_at.is.null,next_attempt_at.lte.${now}`)
+            .order('scheduled_at', { ascending: true, nullsFirst: true })),
+        databaseRequest(supabase
+            .from('campaigns')
+            .select(SCHEDULED_CAMPAIGN_SELECT)
+            .eq('status', 'sending')
+            .eq('is_loop', false)
+            .lte('scheduled_at', now)
+            .lte('updated_at', staleSendingCutoff)
+            .or(`next_attempt_at.is.null,next_attempt_at.lte.${now}`)
+            .order('scheduled_at', { ascending: true, nullsFirst: true }))
+    ]);
 
-    if (scheduledError) {
-        throw scheduledError;
-    }
-
-    const { data: staleSendingCampaigns, error: staleSendingError } = await supabase
-        .from('campaigns')
-        .select(SCHEDULED_CAMPAIGN_SELECT)
-        .eq('status', 'sending')
-        .eq('is_loop', false)
-        .lte('scheduled_at', now)
-        .lte('updated_at', staleSendingCutoff)
-        .or(`next_attempt_at.is.null,next_attempt_at.lte.${now}`)
-        .order('scheduled_at', { ascending: true, nullsFirst: true });
+    if (scheduledError) throw scheduledError;
 
     if (staleSendingError) {
         throw staleSendingError;
@@ -107,7 +107,7 @@ async function getDueRecipientLevelCampaigns(
     now: string,
     staleSendingCutoff: string
 ) {
-    const { data: dueRecipients, error } = await supabase
+    const { data: dueRecipients, error } = await databaseRequest(supabase
         .from('campaign_recipients')
         .select(`campaign_id, campaigns!inner(${SCHEDULED_CAMPAIGN_SELECT}, is_loop)`)
         .in('status', ['pending', 'processing'])
@@ -115,7 +115,7 @@ async function getDueRecipientLevelCampaigns(
         .eq('campaigns.is_loop', false)
         .in('campaigns.status', ['scheduled', 'sending'])
         .order('scheduled_at', { ascending: true, nullsFirst: true })
-        .limit(MAX_DUE_RECIPIENT_ROWS_TO_SCAN);
+        .limit(MAX_DUE_RECIPIENT_ROWS_TO_SCAN));
 
     if (error) {
         throw error;
@@ -145,7 +145,7 @@ async function getResumableImmediateCampaigns(
     supabase: ReturnType<typeof getSupabaseAdmin>,
     now: string
 ) {
-    const { data, error } = await supabase
+    const { data, error } = await databaseRequest(supabase
         .from('campaigns')
         .select(SCHEDULED_CAMPAIGN_SELECT)
         .eq('status', 'sending')
@@ -156,7 +156,7 @@ async function getResumableImmediateCampaigns(
         .order('updated_at', { ascending: true, nullsFirst: true })
         // Several campaigns on one Page must not occupy the entire discovery
         // window and hide work belonging to other Pages.
-        .limit(MAX_IMMEDIATE_CAMPAIGNS_TO_SCAN);
+        .limit(MAX_IMMEDIATE_CAMPAIGNS_TO_SCAN));
 
     if (error) throw error;
     return (data || []) as ScheduledCampaign[];
@@ -169,9 +169,11 @@ export async function GET(_request: NextRequest) {
         const now = new Date().toISOString();
         const staleSendingCutoff = new Date(Date.now() - STALE_SENDING_AFTER_MS).toISOString();
 
-        const campaignLevelCampaigns = await getDueCampaignLevelCampaigns(supabase, now, staleSendingCutoff);
-        const recipientLevelCampaigns = await getDueRecipientLevelCampaigns(supabase, now, staleSendingCutoff);
-        const immediateCampaigns = await getResumableImmediateCampaigns(supabase, now);
+        const [campaignLevelCampaigns, recipientLevelCampaigns, immediateCampaigns] = await Promise.all([
+            getDueCampaignLevelCampaigns(supabase, now, staleSendingCutoff),
+            getDueRecipientLevelCampaigns(supabase, now, staleSendingCutoff),
+            getResumableImmediateCampaigns(supabase, now)
+        ]);
         const seenPages = new Set<string>();
         const dueCampaigns = Array.from(
             new Map(

@@ -114,15 +114,19 @@ async function readFacebookError(response: Response, endpoint: string, parsedBod
     );
 }
 
-async function fetchFacebookRead(input: string, timeoutMs: number = FACEBOOK_READ_TIMEOUT_MS, signal?: AbortSignal) {
+async function fetchFacebookJson(input: string, init: RequestInit, timeoutMs: number, message: string, signal?: AbortSignal) {
     return requestWithTimeout(async requestSignal => {
-        const response = await fetch(input, { signal: requestSignal });
+        const response = await fetch(input, { ...init, signal: requestSignal });
         const body = await response.json().catch(error => {
             if (response.ok) throw error;
             return {};
         });
         return { response, body };
-    }, timeoutMs, `Facebook read request timed out after ${timeoutMs / 1000} seconds`, signal);
+    }, timeoutMs, message, signal);
+}
+
+async function fetchFacebookRead(input: string, timeoutMs: number = FACEBOOK_READ_TIMEOUT_MS, signal?: AbortSignal) {
+    return fetchFacebookJson(input, {}, timeoutMs, `Facebook read request timed out after ${timeoutMs / 1000} seconds`, signal);
 }
 
 // Get user's Facebook pages (including business pages)
@@ -407,37 +411,21 @@ export async function takeThreadControl(
     metadata: string = 'Tokko campaign delivery'
 ): Promise<void> {
     const endpoint = '/me/take_thread_control';
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), FACEBOOK_SEND_TIMEOUT_MS);
-    let response: Response;
-
-    try {
-        response = await fetch(
-            `${FACEBOOK_GRAPH_URL}${endpoint}?access_token=${pageAccessToken}`,
-            {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    recipient: { id: recipientPsid },
-                    metadata
-                }),
-                signal: controller.signal
-            }
-        );
-    } catch (error) {
-        if (controller.signal.aborted) {
-            throw new Error(`Facebook thread-control request timed out after ${FACEBOOK_SEND_TIMEOUT_MS / 1000} seconds`);
-        }
-        throw error;
-    } finally {
-        clearTimeout(timeoutId);
-    }
+    const { response, body: result } = await fetchFacebookJson(
+        `${FACEBOOK_GRAPH_URL}${endpoint}?access_token=${pageAccessToken}`,
+        {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ recipient: { id: recipientPsid }, metadata })
+        },
+        FACEBOOK_SEND_TIMEOUT_MS,
+        `Facebook thread-control request timed out after ${FACEBOOK_SEND_TIMEOUT_MS / 1000} seconds`
+    );
 
     if (!response.ok) {
-        throw await readFacebookError(response, endpoint);
+        throw await readFacebookError(response, endpoint, result);
     }
 
-    const result = await response.json();
     if (result?.success !== true) {
         throw new Error('Facebook did not confirm thread control');
     }
@@ -585,33 +573,15 @@ export async function sendMessage(
     // Facebook Messenger API endpoint - use /me/messages with page access token.
     // A stalled upstream request must not consume the entire campaign function
     // lifetime and prevent its completed recipient statuses from being saved.
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), FACEBOOK_SEND_TIMEOUT_MS);
-    let response: Response;
-
-    try {
-        response = await fetch(
-            `${FACEBOOK_GRAPH_URL}/me/messages?access_token=${pageAccessToken}`,
-            {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json'
-                },
-                body: JSON.stringify(bodyPayload),
-                signal: controller.signal
-            }
-        );
-    } catch (error) {
-        if (controller.signal.aborted) {
-            throw new Error(`Facebook send timed out after ${FACEBOOK_SEND_TIMEOUT_MS / 1000} seconds`);
-        }
-        throw error;
-    } finally {
-        clearTimeout(timeoutId);
-    }
+    const { response, body: result } = await fetchFacebookJson(
+        `${FACEBOOK_GRAPH_URL}/me/messages?access_token=${pageAccessToken}`,
+        { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(bodyPayload) },
+        FACEBOOK_SEND_TIMEOUT_MS,
+        `Facebook send timed out after ${FACEBOOK_SEND_TIMEOUT_MS / 1000} seconds`
+    );
 
     if (!response.ok) {
-        const facebookError = await readFacebookError(response, '/me/messages');
+        const facebookError = await readFacebookError(response, '/me/messages', result);
         console.error('🔴 Facebook send message error:', {
             pageId,
             recipientPsid,
@@ -623,7 +593,6 @@ export async function sendMessage(
         throw facebookError;
     }
 
-    const result = await response.json();
     console.log('✅ Message sent successfully:', {
         pageId,
         recipientPsid,
@@ -659,32 +628,15 @@ export async function sendMessengerMediaAttachment(
         bodyPayload.messaging_type = 'RESPONSE';
     }
 
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), FACEBOOK_SEND_TIMEOUT_MS);
-    let response: Response;
-    try {
-        response = await fetch(
-            `${FACEBOOK_GRAPH_URL}/me/messages?access_token=${pageAccessToken}`,
-            {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json'
-                },
-                body: JSON.stringify(bodyPayload),
-                signal: controller.signal
-            }
-        );
-    } catch (error) {
-        if (controller.signal.aborted) {
-            throw new Error(`Facebook media send timed out after ${FACEBOOK_SEND_TIMEOUT_MS / 1000} seconds`);
-        }
-        throw error;
-    } finally {
-        clearTimeout(timeoutId);
-    }
+    const { response, body: result } = await fetchFacebookJson(
+        `${FACEBOOK_GRAPH_URL}/me/messages?access_token=${pageAccessToken}`,
+        { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(bodyPayload) },
+        FACEBOOK_SEND_TIMEOUT_MS,
+        `Facebook media send timed out after ${FACEBOOK_SEND_TIMEOUT_MS / 1000} seconds`
+    );
 
     if (!response.ok) {
-        const errorData = await response.json().catch(() => ({ error: { message: 'Unknown error' } }));
+        const errorData = result;
         const errorMessage = errorData.error?.message || `HTTP ${response.status}: ${response.statusText}`;
         console.error('🔴 Facebook send media attachment error:', {
             pageId,
@@ -696,7 +648,7 @@ export async function sendMessengerMediaAttachment(
         throw new Error(errorMessage);
     }
 
-    return await response.json();
+    return result;
 }
 
 // Message type for conversation history
@@ -1063,7 +1015,7 @@ export async function sendUtilityMessage(
         templatePayload.components = components;
     }
 
-    const response = await fetch(
+    const { response, body: result } = await fetchFacebookJson(
         `${FACEBOOK_GRAPH_URL}/${pageId}/messages?access_token=${pageAccessToken}`,
         {
             method: 'POST',
@@ -1077,11 +1029,13 @@ export async function sendUtilityMessage(
                     template: templatePayload
                 }
             })
-        }
+        },
+        FACEBOOK_SEND_TIMEOUT_MS,
+        `Facebook utility send timed out after ${FACEBOOK_SEND_TIMEOUT_MS / 1000} seconds`
     );
 
     if (!response.ok) {
-        const errorData = await response.json().catch(() => ({ error: { message: 'Unknown error' } }));
+        const errorData = result;
         const errorMessage = errorData.error?.message || `HTTP ${response.status}: ${response.statusText}`;
         console.error('🔴 Facebook send utility message error:', {
             pageId,
@@ -1094,7 +1048,6 @@ export async function sendUtilityMessage(
         throw new Error(errorMessage);
     }
 
-    const result = await response.json();
     console.log('✅ Utility message sent successfully:', {
         pageId,
         recipientPsid,

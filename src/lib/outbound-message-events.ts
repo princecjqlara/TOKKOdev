@@ -1,3 +1,5 @@
+import { databaseRequest } from './database-request';
+
 export type OutboundMessageSource = 'manual' | 'campaign' | 'automation' | 'welcome';
 
 type SupabaseLike = {
@@ -50,7 +52,7 @@ export async function recordOutboundMessageEvents(
     if (validEvents.length === 0) return;
 
     try {
-        const { error } = await supabase
+        const { error } = await databaseRequest<{ error: { message?: string } | null }>(supabase
             .from('outbound_message_events')
             .upsert(validEvents.map(event => ({
                 page_id: event.pageId,
@@ -63,7 +65,7 @@ export async function recordOutboundMessageEvents(
                 actor_name: event.actorName || null,
                 message_kind: event.messageKind || null,
                 sent_at: event.sentAt || new Date().toISOString()
-            })), { onConflict: 'message_id' });
+            })), { onConflict: 'message_id' }));
 
         if (error) {
             warnOnce(error.message);

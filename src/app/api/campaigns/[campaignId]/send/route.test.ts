@@ -30,6 +30,14 @@ describe('POST /api/campaigns/[campaignId]/send', () => {
         });
     });
 
+    it('returns a service failure without claiming the signed-in user logged out', async () => {
+        mocks.getServerSession.mockResolvedValueOnce({ user: {}, authenticationError: 'service_unavailable' });
+        const response = await POST(new Request('http://localhost/api/campaigns/campaign_1/send', { method: 'POST' }) as NextRequest,
+            { params: Promise.resolve({ campaignId: 'campaign_1' }) });
+        expect(response.status).toBe(503);
+        expect(mocks.sendCampaignById).not.toHaveBeenCalled();
+    });
+
     it('enforces a bounded resumable send slice regardless of client timing input', async () => {
         const request = new Request('http://localhost/api/campaigns/campaign_1/send', {
             method: 'POST',

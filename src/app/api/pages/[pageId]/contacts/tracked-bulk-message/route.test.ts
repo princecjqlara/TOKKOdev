@@ -275,6 +275,12 @@ function createBestTimeSupabaseMock() {
 }
 
 describe('POST /api/pages/[pageId]/contacts/tracked-bulk-message', () => {
+    it('reports an account-service outage without treating the signed-in user as logged out', async () => {
+        mocks.getServerSession.mockResolvedValueOnce({ user: {}, authenticationError: 'service_unavailable' });
+        const response = await POST(createRequest({ messagePart1: 'Hello' }), { params: Promise.resolve({ pageId: 'page_1' }) });
+        expect(response.status).toBe(503);
+        expect(mocks.getSupabaseAdmin).not.toHaveBeenCalled();
+    });
     beforeEach(() => {
         vi.clearAllMocks();
         vi.useRealTimers();

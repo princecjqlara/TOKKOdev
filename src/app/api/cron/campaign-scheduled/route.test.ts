@@ -1,4 +1,5 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { DATABASE_REQUEST_TIMEOUT_MS } from '@/lib/database-request';
 import type { NextRequest } from 'next/server';
 
 const mocks = vi.hoisted(() => ({
@@ -89,11 +90,11 @@ function createSupabaseMock(options: {
 
     let campaignSelectCount = 0;
     const campaignsSelect = vi.fn(() => {
-        campaignSelectCount += 1;
+        const selection = ++campaignSelectCount;
         return createThenableQuery(async () => ({
-            data: campaignSelectCount === 1
+            data: selection === 1
                 ? campaignLevelCampaigns
-                : campaignSelectCount === 2
+                : selection === 2
                     ? staleSendingCampaigns
                     : immediateCampaigns,
             error: null
@@ -181,8 +182,25 @@ async function loadRoute() {
 }
 
 describe('GET /api/cron/campaign-scheduled', () => {
+    afterEach(() => { vi.useRealTimers(); });
     beforeEach(() => {
         vi.clearAllMocks();
+    });
+
+    it('bounds a stalled discovery read and starts the other discovery queries independently', async () => {
+        const { GET } = await loadRoute();
+        vi.useFakeTimers();
+        const supabase = createSupabaseMock();
+        supabase.campaignsSelect.mockImplementationOnce(() => createThenableQuery(() => new Promise(() => {})));
+        mocks.getSupabaseAdmin.mockReturnValue(supabase);
+        const pending = GET(createRequest());
+        await vi.advanceTimersByTimeAsync(0);
+        expect(supabase.campaignsSelect).toHaveBeenCalledTimes(3);
+        expect(supabase.campaignRecipientsSelect).toHaveBeenCalledTimes(1);
+        await vi.advanceTimersByTimeAsync(DATABASE_REQUEST_TIMEOUT_MS);
+        expect((await pending).status).toBe(500);
+        expect(mocks.sendCampaignById).not.toHaveBeenCalled();
+        expect(vi.getTimerCount()).toBe(0);
     });
 
     it('materializes dynamic recipients and dispatches due campaign-level schedules', async () => {

@@ -1,9 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getServerSession } from 'next-auth';
+import { getSessionFromRequest } from '@/lib/get-session';
 import { assertReadableTagIds } from '@/lib/tag-access';
 import { assertContactsOnPage } from '@/lib/page-access';
 import { AccessError } from '@/lib/account-security';
-import { authOptions } from '@/lib/auth';
 import { serializeCampaignMessageSequence } from '@/lib/campaign-message-sequence';
 import { chunkArray } from '@/lib/chunking';
 import { getPageTemplates } from '@/lib/facebook';
@@ -444,7 +443,7 @@ export async function POST(
     { params }: { params: Promise<{ pageId: string }> }
 ) {
     try {
-        const session = await getServerSession(authOptions);
+        const session = await getSessionFromRequest(request);
 
         if (!session?.user?.id) {
             return NextResponse.json(
@@ -955,7 +954,7 @@ export async function GET(
     { params }: { params: Promise<{ pageId: string }> }
 ) {
     try {
-        const session = await getServerSession(authOptions);
+        const session = await getSessionFromRequest(request);
 
         if (!session?.user?.id) {
             return NextResponse.json(
@@ -995,7 +994,7 @@ export async function GET(
         console.error('Error fetching tracked bulk message status:', error);
         return NextResponse.json(
             { error: 'Failed to fetch tracked bulk message status', message: (error as Error).message },
-            { status: 500 }
+            { status: error instanceof AccessError ? error.status : 500 }
         );
     }
 }

@@ -32,6 +32,24 @@ describe('runContactSyncToCompletion', () => {
         await expect(runContactSyncToCompletion('page_1')).rejects.toThrow('without a continuation');
     });
 
+    it('retains one run across 100,001 simulated contacts without truncating cursor continuations', async () => {
+        let requests = 0;
+        const transport = vi.fn(async () => {
+            requests++;
+            return Response.json(requests <= 1000
+                ? { success: true, partial: true, synced: 100, nextCursor: `cursor_${requests}` }
+                : { success: true, partial: false, synced: 1 });
+        });
+        vi.stubGlobal('fetch', transport);
+        const result = await runContactSyncToCompletion('page_1');
+        expect(result.completed).toBe(true);
+        expect(result.totalSynced).toBe(100001);
+        expect(transport).toHaveBeenCalledTimes(1001);
+        const calls = transport.mock.calls as unknown as Array<[string, RequestInit]>;
+        expect(new Set(calls.map(call => JSON.parse(String(call[1].body)).syncRunId)).size).toBe(1);
+        expect(JSON.parse(String(calls[1000][1].body))).toMatchObject({ cursor: 'cursor_1000' });
+    });
+
     it('continues partial contact sync responses until complete', async () => {
         const fetchMock = vi.fn()
             .mockResolvedValueOnce(new Response(JSON.stringify({
