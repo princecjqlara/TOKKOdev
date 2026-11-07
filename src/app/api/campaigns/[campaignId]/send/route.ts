@@ -56,7 +56,7 @@ export async function POST(
         maxRecipientsPerRun: MAX_RECIPIENTS_PER_INVOCATION,
         delayBetweenBatchesMs,
         maxProcessingTimeMs: MAX_PROCESSING_TIME_MS,
-        sendRetryAttempts: 1,
+        sendRetryAttempts: 2,
         templateMediaHeader,
         templateMediaHeaders
     };

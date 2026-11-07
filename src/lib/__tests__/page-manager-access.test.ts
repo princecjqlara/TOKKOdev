@@ -57,12 +57,16 @@ describe('verified Facebook manager authority', () => {
         expect((await verifiedFacebookPages(session)).map(page => page.id)).toEqual(['manager']);
     });
 
-    it('does not turn an automatic messaging membership into team administration', async () => {
+    it('includes every connected Page in a verified parent account, including messaging connections', async () => {
         const db = database([{ id: 'a', fb_page_id: 'fb-a', grant_source: 'facebook_messaging' },
             { id: 'b', fb_page_id: 'fb-b', grant_source: 'facebook' }]); mocks.db.mockReturnValue(db);
-        expect((await teamAdministrationPages(session)).map(page => page.id)).toEqual(['b']);
-        await expect(requireTeamPageAdministrator(session, ['a'])).rejects.toMatchObject({ status: 403 });
-        expect(db.upsert).not.toHaveBeenCalled();
+        expect((await teamAdministrationPages(session)).map(page => page.id)).toEqual(['a', 'b']);
+        await requireTeamPageAdministrator(session, ['a', 'b']);
+        expect(db.upsert).toHaveBeenCalledWith([
+            expect.objectContaining({ user_id: 'manager', page_id: 'a', authority_source: 'original' }),
+            expect.objectContaining({ user_id: 'manager', page_id: 'b', authority_source: 'original' })
+        ], { onConflict: 'user_id,page_id' });
+        expect(mocks.facebook).not.toHaveBeenCalled();
     });
 
     it('returns a refresh-permissions response only when Facebook authorization has expired', async () => {
@@ -95,14 +99,14 @@ describe('verified Facebook manager authority', () => {
         await requireFacebookPageManager(session, ['a']);
         expect(db.upsert).toHaveBeenCalledWith([expect.objectContaining({ user_id: 'manager', page_id: 'a', facebook_subject: 'fb-user' })], expect.anything());
     });
-    it.each(['legacy', 'facebook', 'delegated'])('lets original Facebook app users administer their existing %s assignments', async grant_source => {
+    it.each(['legacy', 'facebook', 'delegated', 'facebook_messaging'])('lets original Facebook app users administer their existing %s assignments', async grant_source => {
         const db = database([{ id: 'a', fb_page_id: 'fb-a', grant_source }]); mocks.db.mockReturnValue(db); mocks.token.mockResolvedValue(null);
         await requireTeamPageAdministrator(session, ['a']);
         expect(mocks.facebook).not.toHaveBeenCalled();
         expect(db.upsert).toHaveBeenCalledWith([expect.objectContaining({ page_id: 'a', authority_source: 'original' })], expect.anything());
     });
-    it('never promotes a team-created subaccount through a Facebook login', async () => {
-        const db = database([{ id: 'a', fb_page_id: 'fb-a', grant_source: 'delegated' }], false); mocks.db.mockReturnValue(db);
+    it.each(['delegated', 'facebook_messaging'])('never promotes a team-created subaccount with a %s grant through a Facebook login', async grant_source => {
+        const db = database([{ id: 'a', fb_page_id: 'fb-a', grant_source }], false); mocks.db.mockReturnValue(db);
         mocks.facebook.mockResolvedValue([{ id: 'fb-a', tasks: ['MESSAGING'] }]);
         await expect(teamAdministrationPages(session)).rejects.toMatchObject({ status: 403 });
         await expect(requireTeamPageAdministrator(session, ['a'])).rejects.toMatchObject({ status: 403 });

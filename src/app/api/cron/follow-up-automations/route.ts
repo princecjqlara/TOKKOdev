@@ -3,6 +3,7 @@ import { getSupabaseAdmin } from '@/lib/supabase';
 import { processDueFollowUpAutomationSteps } from '@/lib/workflow-automations';
 import { processOneMessagingAutoTagPage } from '@/lib/messaging-auto-tag-worker';
 import { processContactImport } from '@/lib/contact-import';
+import { processCampaignQueue } from '@/lib/campaign-worker';
 
 export const dynamic = 'force-dynamic';
 
@@ -30,41 +31,26 @@ export async function GET(_request: NextRequest) {
     const contactImportTask = processContactImport().catch(() => ({ success: false, retryable: true,
         message: 'Contact import is pending; its database checkpoint is retained.' }));
 
+    // Start continuation independently of follow-ups. Use the shared worker in
+    // this authenticated invocation so a second HTTP request and its timeout
+    // cannot interrupt the handoff after the browser stops sending.
+    const campaignTask = (async (): Promise<Record<string, unknown>> => {
+        try {
+            const result = await processCampaignQueue();
+            return { ok: true, ...result };
+        } catch (campaignError) {
+            console.warn('Campaign continuation from follow-up cron failed:', campaignError);
+            return {
+                ok: false,
+                retryable: true,
+                message: campaignError instanceof Error ? campaignError.message : String(campaignError)
+            };
+        }
+    })();
+
     try {
-        // Follow-ups are this route's primary job. Run them before the nested
-        // campaign worker, which can consume almost the entire external cron
-        // request timeout when campaign delivery is slow.
         const result = await followUpTask;
-
-        // Reuse the already-configured minute job on cron-jobs.org to advance
-        // durable immediate campaigns. Atomic recipient claims make this safe
-        // even when a separate campaign-scheduled job also exists.
-        const campaignTask = async (): Promise<Record<string, unknown>> => {
-            try {
-                const campaignUrl = new URL('/api/cron/campaign-scheduled', _request.url);
-                const campaignResponse = await fetch(campaignUrl, {
-                    method: 'GET',
-                    headers: { Authorization: `Bearer ${process.env.CRON_SECRET}` },
-                    cache: 'no-store',
-                    signal: AbortSignal.timeout(25_000)
-                });
-                const campaignBody = await campaignResponse.json().catch(() => ({}));
-                return {
-                    ok: campaignResponse.ok,
-                    status: campaignResponse.status,
-                    ...campaignBody
-                };
-            } catch (campaignError) {
-                console.warn('Campaign continuation from follow-up cron failed:', campaignError);
-                return {
-                    ok: false,
-                    retryable: true,
-                    message: campaignError instanceof Error ? campaignError.message : String(campaignError)
-                };
-            }
-        };
-
-        const [campaignWorker, messagingAutoTag, contactImport] = await Promise.all([campaignTask(), messagingAutoTagTask, contactImportTask]);
+        const [campaignWorker, messagingAutoTag, contactImport] = await Promise.all([campaignTask, messagingAutoTagTask, contactImportTask]);
 
         return NextResponse.json({
             success: true,
@@ -76,11 +62,12 @@ export async function GET(_request: NextRequest) {
         });
     } catch (error) {
         console.error('Follow-up automation cron failed:', error);
-        const [messagingAutoTag, contactImport] = await Promise.all([messagingAutoTagTask, contactImportTask]);
+        const [campaignWorker, messagingAutoTag, contactImport] = await Promise.all([campaignTask, messagingAutoTagTask, contactImportTask]);
         return NextResponse.json(
             {
                 error: 'Follow-up automation cron failed',
                 message: (error as Error).message,
+                campaignWorker,
                 messagingAutoTag,
                 contactImport,
                 duration: Date.now() - startTime

@@ -88,14 +88,20 @@ export async function finishCampaignRecipientBatch({
     let lastError: unknown;
 
     for (let attempt = 0; attempt < 3; attempt++) {
-        const { data, error } = await databaseRequest(supabase.rpc('finish_campaign_recipient_batch', {
-            p_campaign_id: campaignId,
-            p_claim_token: claimToken,
-            p_results: results
-        }));
+        try {
+            const { data, error } = await databaseRequest(supabase.rpc('finish_campaign_recipient_batch', {
+                p_campaign_id: campaignId,
+                p_claim_token: claimToken,
+                p_results: results
+            }));
 
-        if (!error && Number(data) === results.length) return;
-        lastError = error || new Error('Not every recipient claim was completed');
+            if (!error && Number(data) === results.length) return;
+            lastError = error || new Error('Not every recipient claim was completed');
+        } catch (error) {
+            // Transport failures and database deadlines throw instead of
+            // returning an error row. Retry saving the same claimed results.
+            lastError = error;
+        }
         if (attempt < 2) {
             await new Promise(resolve => setTimeout(resolve, 250 * (attempt + 1)));
         }

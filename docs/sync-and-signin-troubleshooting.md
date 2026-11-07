@@ -7,6 +7,34 @@ deployment has no worker secret. Check job execution history and whether the
 scheduler disabled a failing job. Never remove worker authentication to restore
 sync. The existing follow-up job also advances Messenger tag scans and campaigns.
 
+Campaign continuation runs independently of follow-ups in that authenticated
+invocation. It calls the same worker as `/api/cron/campaign-scheduled` directly,
+so a follow-up failure or nested HTTP timeout cannot prevent queued campaigns
+from resuming. A failed scheduled or best-time lookup does not block a healthy
+immediate campaign; partial discovery failures appear in `discoveryErrors`.
+Recipient claims and durable delivery counts preserve progress across requests.
+Completed recipients are skipped, expired claims can be recovered, and Meta
+rate-limit cooldowns remain in effect. Manually stopped campaigns stay stopped
+until **Continue Unsent** is selected. Deploy the updated application to activate
+this recovery change; it requires no additional database migration or cron job.
+
+Temporary worker failures, timeouts, expired recipient claims, and unrecognized
+infrastructure interruptions keep campaigns queued for automatic retry after
+one minute. Facebook rate limits keep their shared Page cooldown instead.
+The sender saves continuation before slow Facebook/template checks, so a killed
+request can be recovered after its claims expire. Permanent connection,
+template, permission, and database-schema errors keep recipients saved while
+waiting for repair. Conditional state updates prevent recovery from undoing a
+manual Stop, including when Stop overlaps a failing worker.
+
+Each send allows two immediate retries for temporary errors when the slice has
+time left, followed by further background attempts while the campaign remains
+queued. Slow timeouts defer to another invocation, and rate limits wait for
+their Page cooldown. Saving an accepted batch retries up to three times for
+returned database errors, transport exceptions, or request deadlines. Those save
+retries reuse the same claim and results without issuing another Facebook send.
+Manual Stop is rechecked before an immediate send retry begins.
+
 Use the deployment that actually serves the live domain when inspecting settings.
 A local `.vercel/project.json` can point to a different project, and `.env.local`
 can contain an older secret. Updating an environment variable requires a new

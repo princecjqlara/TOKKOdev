@@ -67,7 +67,8 @@ Apply migrations in this order, in transactions:
 6. `database/migration_parent_subaccounts.sql`.
 7. `database/migration_subaccount_cleanup_schedule.sql`.
 8. `database/migration_subaccount_first_login_profile.sql`.
-9. `database/migration_facebook_messaging_access.sql` (keeps messaging access separate from team administration).
+9. `database/migration_facebook_messaging_access.sql` (records the historical messaging-access rule).
+10. `database/migration_parent_connected_page_assignment.sql` (allows original parents to assign every connected Page, including messaging connections).
 
 The scheduler migration installs `tokko-expired-subaccounts` in `pg_cron` when that extension is available. Otherwise configure an authenticated `GET /api/cron/subaccounts` every minute with `Authorization: Bearer <CRON_SECRET>`. This worker is independent of account email delivery. Inspect its `deleted` and `failed` counts and private access-audit records if cleanup fails.
 
@@ -105,12 +106,13 @@ only after verifying it is among the user's assignments. A Facebook login is a
 separate identity from a team email account; Tokko never merges them by matching
 email alone. Assign the intended existing account in Team Access if necessary.
 
-Connecting a new Page or explicitly reconnecting the shared Facebook token still
-requires a Facebook-verified manager. The check recognizes `MANAGE`,
+Explicitly refreshing the shared Facebook token still requires a
+Facebook-verified manager. The check recognizes `MANAGE`,
 `PROFILE_PLUS_MANAGE`, and `PROFILE_PLUS_FULL_CONTROL`, including the New Pages
 Experience task names in [Meta's Page SDK](https://github.com/facebook/facebook-python-business-sdk/blob/main/facebook_business/adobjects/page.py).
-Messaging-only access does not grant connection administration. Users with that
-access can ask their Tokko administrator to assign the existing Page instead.
+Messaging-only access does not grant connection administration. Original Tokko
+parents can assign any of their connected Pages to subaccounts, including Pages
+connected through messaging access. Subaccounts cannot administer assignments.
 
 A Facebook app tester/developer invitation is separate from a Page invitation
 or a Tokko assignment. For a Facebook Page invitation, accept it in Facebook and
@@ -147,11 +149,15 @@ templates automatically. Page/token consent failures show permission-refresh
 actions. Existing assigned Pages remain visible during discovery failures.
 
 Management grants use `grant_source='facebook'`. Messaging grants use
-`facebook_messaging`, which both the application and `tokko_assert_manager`
-exclude from team administration, even if an old manager proof exists. Existing
-legacy and delegated grants retain their authorization rules. Refreshing a
-shared token still requires Facebook management; a verified manager can use
-Reconnect to update their messaging membership to a management grant. These
-memberships follow Tokko's existing assignment lifecycle and are not temporary
+`facebook_messaging`. Original Facebook parents can assign either kind of
+connected Page through Team Subaccounts. The application and database require
+an active parent identity, an existing membership on every selected Page, and
+a fresh identity-bound authority record. Team-created accounts remain
+subaccounts even if they have a messaging connection. Apply
+`database/migration_parent_connected_page_assignment.sql` after the messaging
+access migration and deploy the app together; updating only the choices leaves
+the old database rule rejecting assignments. Existing memberships and shared
+tokens are preserved. Refreshing a shared token still requires Facebook
+management. These memberships follow Tokko's existing assignment lifecycle and are not temporary
 Facebook permission leases. Removing Page access in Tokko revokes workspace
 access through the existing membership checks.

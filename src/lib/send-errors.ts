@@ -13,7 +13,9 @@ export type SendErrorCategory =
     | 'transient'
     | 'other';
 
-type StructuredSendError = Error & {
+type StructuredSendError = {
+    name?: string;
+    message?: string;
     status?: number;
     code?: number;
     subcode?: number;
@@ -21,11 +23,12 @@ type StructuredSendError = Error & {
 };
 
 function getStructuredSendError(error: unknown): StructuredSendError | null {
-    return error instanceof Error ? error as StructuredSendError : null;
+    return error && typeof error === 'object' ? error as StructuredSendError : null;
 }
 
 function getSendErrorMessage(error: unknown): string {
-    return error instanceof Error ? error.message : String(error || '');
+    const structured = getStructuredSendError(error);
+    return typeof structured?.message === 'string' ? structured.message : String(error || '');
 }
 
 export function categorizeSendError(error: unknown): SendErrorCategory {
@@ -114,8 +117,12 @@ export function categorizeSendError(error: unknown): SendErrorCategory {
     }
 
     if (
+        structured?.status === 408 ||
         (typeof structured?.status === 'number' && structured.status >= 500) ||
+        ['AbortError', 'TimeoutError'].includes(structured?.name || '') ||
         [1, 2].includes(structured?.code || 0) ||
+        normalized.includes('bad gateway') ||
+        normalized.includes('service unavailable') ||
         normalized.includes('fetch failed') ||
         normalized.includes('network') ||
         normalized.includes('timed out') ||

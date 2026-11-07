@@ -61,7 +61,7 @@ describe('POST /api/campaigns/[campaignId]/send', () => {
             delayBetweenBatchesMs: 50,
             maxRecipientsPerRun: 500,
             maxProcessingTimeMs: 45_000,
-            sendRetryAttempts: 1
+            sendRetryAttempts: 2
         }));
     });
 

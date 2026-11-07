@@ -20,7 +20,7 @@ import {
 import type { TemplateMediaType } from './facebook-templates';
 import { recordOutboundMessageEvents, type OutboundMessageEventInput } from './outbound-message-events';
 import { acquirePageDelivery, releasePageDelivery, waitForPageDeliveryBatch } from './page-delivery';
-import { databaseRequest } from './database-request';
+import { databaseRequest, DATABASE_REQUEST_TIMEOUT_MS } from './database-request';
 
 type SupabaseLike = ReturnType<typeof getSupabaseAdmin>;
 
@@ -29,6 +29,7 @@ type SendCampaignByIdOptions = {
     supabase?: SupabaseLike;
     userId?: string;
     allowScheduled?: boolean;
+    backgroundOnly?: boolean;
     dueAt?: string;
     includeUnscheduledRecipients?: boolean;
     sendBatchSize?: number;
@@ -50,44 +51,41 @@ type SendCampaignByIdResult = {
 };
 
 const SENDABLE_TEMPLATE_STATUSES = new Set(['APPROVED', 'ACTIVE']);
+const TRANSIENT_RETRY_DELAY_MS = 60_000;
+const RATE_LIMIT_RETRY_DELAY_MS = 5 * 60_000;
 
 async function updateCampaignState(supabase: SupabaseLike, campaignId: string,
     changes: Record<string, unknown>, expectedStatus?: string | string[]) {
     const query = supabase.from('campaigns').update(changes).eq('id', campaignId);
     const filtered = Array.isArray(expectedStatus) ? query.in('status', expectedStatus)
         : expectedStatus ? query.eq('status', expectedStatus) : query;
-    const { error } = await databaseRequest(filtered);
+    const { data, error } = await databaseRequest(filtered.select('id'));
     if (error) throw error;
+    return Boolean(data?.length);
 }
 
 function isRetryableInfrastructureError(error: unknown): boolean {
-    if (isRetryableSendError(error)) return true;
-
     const record = error && typeof error === 'object'
         ? error as { code?: string | number; status?: number; message?: string }
         : {};
     const code = String(record.code || '').toUpperCase();
-    const message = String(record.message || error || '').toLowerCase();
+    const category = categorizeSendError(error);
+    // Pause for errors requiring a repair. Unexpected infrastructure failures
+    // otherwise remain queued, including expired claims and empty gateway errors.
+    if (['authentication_required', 'utility_permission_missing', 'utility_template_missing', 'invalid_utility_parameter'].includes(category)) return false;
+    if (['PGRST202', 'PGRST204'].includes(code) || /^(22|23|42)/.test(code)) return false;
+    if (isRetryableSendError(error)) return true;
+    return !(typeof record.status === 'number' && record.status >= 400 && record.status < 500
+        && ![408, 409, 429].includes(record.status));
+}
 
-    return (
-        ['40001', '40P01', '53300', '57014', '57P01', '57P02', '57P03'].includes(code) ||
-        // Supabase returns PostgREST connection failures as plain objects,
-        // without an HTTP status. PGRST002 can occur while rebuilding the
-        // schema cache; it must leave the campaign eligible for a later retry.
-        ['PGRST000', 'PGRST001', 'PGRST002', 'PGRST003'].includes(code) ||
-        code.startsWith('08') ||
-        record.status === 408 ||
-        record.status === 429 ||
-        (typeof record.status === 'number' && record.status >= 500) ||
-        message.includes('statement timeout') ||
-        message.includes('could not query the database for the schema cache') ||
-        message.includes('connection') ||
-        message.includes('fetch failed') ||
-        message.includes('network') ||
-        message.includes('temporarily unavailable') ||
-        message.includes('socket hang up') ||
-        message.includes('econnreset')
-    );
+async function updateCampaignIfUnchanged(supabase: SupabaseLike, campaignId: string,
+    changes: Record<string, unknown>, expected: { status: string; updatedAt?: string }) {
+    const query = supabase.from('campaigns').update(changes).eq('id', campaignId).eq('status', expected.status);
+    if (expected.updatedAt) query.eq('updated_at', expected.updatedAt);
+    const { data, error } = await databaseRequest(query.select('id,updated_at'));
+    if (error) throw error;
+    return data?.[0] || null;
 }
 
 function normalizeStoredMediaHeader(value: unknown): { type: TemplateMediaType; url: string } | undefined {
@@ -119,6 +117,7 @@ export async function sendCampaignById({
     supabase = getSupabaseAdmin(),
     userId,
     allowScheduled = false,
+    backgroundOnly = false,
     dueAt,
     includeUnscheduledRecipients = false,
     sendBatchSize = 25,
@@ -134,6 +133,10 @@ export async function sendCampaignById({
     let pageLease: { pageId: string; owner: string; batchSize: number } | null = null;
     let pageRateLimited = false;
     let campaignAuthorized = false;
+    let recoveryStatus: string | undefined;
+    let isLoopCampaign = false;
+    let continuationSaved = false;
+    let stoppedResult: SendCampaignByIdResult | undefined;
     try {
         const { data: campaign, error: campaignError } = await databaseRequest(supabase
             .from('campaigns')
@@ -167,6 +170,8 @@ export async function sendCampaignById({
         }
 
         campaignAuthorized = true;
+        const expectedState = { status: campaign.status, updatedAt: campaign.updated_at };
+        isLoopCampaign = Boolean(campaign.is_loop);
         const allowedStatuses = new Set(allowScheduled ? ['draft', 'scheduled', 'sending'] : ['draft', 'sending']);
         if (!allowedStatuses.has(campaign.status)) {
             return {
@@ -177,6 +182,16 @@ export async function sendCampaignById({
                 }
             };
         }
+
+        stoppedResult = { status: 200, body: {
+            success: true, paused: true, retryable: false, queued: false,
+            sent: Number(campaign.sent_count || 0), failed: Number(campaign.failed_count || 0),
+            remaining: Math.max(0, Number(campaign.total_recipients || 0) - Number(campaign.sent_count || 0) - Number(campaign.failed_count || 0)),
+            message: 'Campaign stopped or changed. Unsent recipients remain saved; use Continue Unsent to resume.'
+        } };
+        if (backgroundOnly && (campaign.status === 'draft' || (!dueAt && !campaign.background_delivery_enabled))) return stoppedResult;
+        recoveryStatus = campaign.status;
+        continuationSaved = campaign.status === 'scheduled' || campaign.status === 'sending' && campaign.background_delivery_enabled;
 
         if (campaign.next_attempt_at && new Date(campaign.next_attempt_at).getTime() > Date.now()) {
             const sent = Number(campaign.sent_count || 0);
@@ -227,10 +242,12 @@ export async function sendCampaignById({
             }
 
             const materializedAt = new Date().toISOString();
-            await updateCampaignState(supabase, campaignId, {
+            const materialized = await updateCampaignIfUnchanged(supabase, campaignId, {
                 audience_materialized_at: materializedAt,
                 updated_at: materializedAt
-            });
+            }, expectedState);
+            if (!materialized) return stoppedResult;
+            expectedState.updatedAt = materialized.updated_at;
             campaign.audience_materialized_at = materializedAt;
         }
 
@@ -252,12 +269,15 @@ export async function sendCampaignById({
             // A first send can encounter a busy Page while still a draft.
             // Persist the handoff before asking the browser to stop; otherwise
             // no background worker can discover and resume this campaign.
-            await updateCampaignState(supabase, campaignId, {
+            const activated = await updateCampaignIfUnchanged(supabase, campaignId, {
                 status: dueAt ? 'scheduled' : 'sending',
                 background_delivery_enabled: !dueAt && !campaign.is_loop,
                 next_attempt_at: delivery.retryAt,
                 updated_at: new Date().toISOString()
-            }, campaign.status);
+            }, expectedState);
+            if (!activated) return stoppedResult;
+            continuationSaved = true;
+            recoveryStatus = dueAt ? 'scheduled' : 'sending';
             return { status: 200, body: {
                 success: true, partial: true, queued: true, retryable: true,
                 processed: 0,
@@ -268,6 +288,17 @@ export async function sendCampaignById({
             } };
         }
         pageLease = { pageId: campaign.page_id, owner: delivery.owner, batchSize: delivery.batchSize };
+
+        // Save the durable handoff before slow Facebook/template checks. Even a
+        // terminated invocation remains discoverable after its leases expire.
+        const activated = await updateCampaignIfUnchanged(supabase, campaignId, {
+            status: 'sending',
+            background_delivery_enabled: !dueAt && !campaign.is_loop,
+            next_attempt_at: null, last_error: null, updated_at: new Date().toISOString()
+        }, expectedState);
+        if (!activated) return stoppedResult;
+        continuationSaved = true;
+        recoveryStatus = 'sending';
 
         const effectiveTemplateMediaHeader =
             templateMediaHeader || normalizeStoredMediaHeader(campaign.template_media_header);
@@ -295,7 +326,8 @@ export async function sendCampaignById({
         if (invalidTemplateParameter) {
             const validationError = getUtilityTemplateParameterValidationError(invalidTemplateParameter.text);
             const pausedStatus = 'draft';
-            await updateCampaignState(supabase, campaignId, { status: pausedStatus, updated_at: new Date().toISOString() });
+            await updateCampaignState(supabase, campaignId, { status: pausedStatus, background_delivery_enabled: false,
+                next_attempt_at: null, last_error: validationError, updated_at: new Date().toISOString() }, 'sending');
 
             return {
                 status: 409,
@@ -333,7 +365,8 @@ export async function sendCampaignById({
 
             if (missingTemplate) {
                 const pausedStatus = 'draft';
-                await updateCampaignState(supabase, campaignId, { status: pausedStatus, updated_at: new Date().toISOString() });
+                await updateCampaignState(supabase, campaignId, { status: pausedStatus, background_delivery_enabled: false,
+                    next_attempt_at: null, last_error: `Template '${missingTemplate.name}' is not approved on this Page.`, updated_at: new Date().toISOString() }, 'sending');
 
                 return {
                     status: 409,
@@ -374,7 +407,8 @@ export async function sendCampaignById({
 
             if (missingMediaValue) {
                 const pausedStatus = 'draft';
-                await updateCampaignState(supabase, campaignId, { status: pausedStatus, updated_at: new Date().toISOString() });
+                await updateCampaignState(supabase, campaignId, { status: pausedStatus, background_delivery_enabled: false,
+                    next_attempt_at: null, last_error: `Template '${missingMediaValue.name}' requires a media header.`, updated_at: new Date().toISOString() }, 'sending');
 
                 return {
                     status: 409,
@@ -395,13 +429,6 @@ export async function sendCampaignById({
             }
         }
 
-        await updateCampaignState(supabase, campaignId, {
-            status: 'sending',
-            background_delivery_enabled: !dueAt && !campaign.is_loop,
-            next_attempt_at: null,
-            last_error: null,
-            updated_at: new Date().toISOString()
-        });
         let sentThisRun = 0;
         let failedThisRun = 0;
         let processedThisRun = 0;
@@ -554,6 +581,7 @@ export async function sendCampaignById({
 
                         let retryAttempt = 0;
                         while (true) {
+                            const attemptStartedAt = Date.now();
                             try {
                                 const sendArgs: Parameters<typeof sendMessage> = [
                                     page.fb_page_id,
@@ -632,10 +660,27 @@ export async function sendCampaignById({
 
                                 retryAttempt += 1;
                                 const retryDelay = SEND_RETRY_DELAY * retryAttempt;
+                                // Leave time to persist the batch. Repeated slow
+                                // timeouts continue in later durable invocations.
+                                if (Date.now() - startTime + retryDelay + (Date.now() - attemptStartedAt)
+                                    + DATABASE_REQUEST_TIMEOUT_MS >= MAX_PROCESSING_TIME) throw sendError;
                                 console.warn(`Retrying send to ${recipient.contact_psid} after transient error (${retryAttempt}/${SEND_RETRY_ATTEMPTS}): ${errorMessage}`);
                                 if (retryDelay > 0) {
                                     await new Promise(resolve => setTimeout(resolve, retryDelay));
                                 }
+                                const { data: current, error: stateError } = await databaseRequest(supabase
+                                    .from('campaigns').select('status').eq('id', campaignId).single());
+                                if (stateError) return {
+                                    success: false, contactId: recipient.contact_id,
+                                    error: stateError.message || 'Campaign status could not be verified.',
+                                    pauseCampaign: true, retryable: isRetryableInfrastructureError(stateError)
+                                };
+                                if (current?.status !== 'sending') return {
+                                    success: false, contactId: recipient.contact_id,
+                                    error: 'Campaign stopped. Unsent recipients remain saved.',
+                                    pauseCampaign: true, retryable: false
+                                };
+                                if (Date.now() - startTime + DATABASE_REQUEST_TIMEOUT_MS >= MAX_PROCESSING_TIME) throw sendError;
                             }
                         }
                     }
@@ -738,14 +783,14 @@ export async function sendCampaignById({
                     ? (allowScheduled ? 'scheduled' : 'sending')
                     : 'draft';
                 let nextAttemptAt = shouldRetryAutomatically
-                    ? new Date(Date.now() + 5 * 60 * 1000).toISOString()
+                    ? new Date(Date.now() + (pageRateLimited ? RATE_LIMIT_RETRY_DELAY_MS : TRANSIENT_RETRY_DELAY_MS)).toISOString()
                     : null;
                 if (pageRateLimited && pageLease) {
                     const recovery = await releasePageDelivery(supabase, pageLease.pageId, pageLease.owner, true);
                     pageLease = null;
                     if (recovery) nextAttemptAt = recovery;
                 }
-                await updateCampaignState(supabase, campaignId, {
+                const updated = await updateCampaignState(supabase, campaignId, {
                     status: pausedStatus,
                     background_delivery_enabled: shouldRetryAutomatically
                         ? !dueAt && !campaign.is_loop
@@ -754,6 +799,7 @@ export async function sendCampaignById({
                     last_error: pausedResults[0].error,
                     updated_at: new Date().toISOString()
                 }, 'sending');
+                if (!updated) return stoppedResult;
 
                 const reason = pausedResults[0].error;
                 return {
@@ -793,11 +839,12 @@ export async function sendCampaignById({
         const progress = await getCampaignDeliveryProgress(supabase, campaignId);
 
         if (finalStatus?.status === 'sending') {
-            await updateCampaignState(supabase, campaignId, {
+            const updated = await updateCampaignState(supabase, campaignId, {
                 status: progress.remaining > 0 ? (dueAt ? 'scheduled' : 'sending') : 'completed',
                 completed_at: progress.remaining > 0 ? null : new Date().toISOString(),
                 updated_at: new Date().toISOString()
-            });
+            }, 'sending');
+            if (!updated) return stoppedResult;
 
             if (progress.remaining > 0) {
                 return {
@@ -853,34 +900,30 @@ export async function sendCampaignById({
     } catch (error) {
         if (categorizeSendError(error) === 'rate_limited') pageRateLimited = true;
         console.error('Error sending campaign:', error);
-        const databaseError = error as { code?: string; message?: string };
-        const isStatementTimeout =
-            databaseError.code === '57014' ||
-            databaseError.message?.toLowerCase().includes('statement timeout');
+        const databaseError = error && typeof error === 'object' ? error as { code?: string; message?: string } : {};
         const shouldRetryAutomatically = isRetryableInfrastructureError(error);
+        const retryAt = shouldRetryAutomatically
+            ? new Date(Date.now() + (pageRateLimited ? RATE_LIMIT_RETRY_DELAY_MS : TRANSIENT_RETRY_DELAY_MS)).toISOString()
+            : null;
+        let queued = shouldRetryAutomatically && continuationSaved;
 
         // Claims expire automatically. Re-arm the campaign so a later request
         // can safely resume without resetting or duplicating completed rows.
-        if (campaignAuthorized) {
+        if (campaignAuthorized && recoveryStatus) {
             try {
-                const retryAt = shouldRetryAutomatically
-                    ? new Date(Date.now() + (isStatementTimeout ? 2 : 5) * 60 * 1000).toISOString()
-                    : null;
-                await updateCampaignState(supabase, campaignId, {
+                const updated = await updateCampaignState(supabase, campaignId, {
                     status: shouldRetryAutomatically
                         ? (allowScheduled ? 'scheduled' : 'sending')
                         : 'draft',
                     background_delivery_enabled: shouldRetryAutomatically
-                        ? !dueAt
+                        ? !dueAt && !isLoopCampaign
                         : false,
                     next_attempt_at: retryAt,
                     last_error: databaseError.message || String(error),
                     updated_at: new Date().toISOString()
-                },
-                    allowScheduled
-                        ? ['draft', 'scheduled', 'sending']
-                        : ['draft', 'sending']
-                );
+                }, recoveryStatus);
+                if (!updated && stoppedResult) return stoppedResult;
+                queued = shouldRetryAutomatically;
                 console.log(`Campaign ${campaignId} re-armed after sender error`);
             } catch (resetError) {
                 console.error(`❌ Failed to reset campaign ${campaignId} status:`, resetError);
@@ -891,10 +934,14 @@ export async function sendCampaignById({
             status: shouldRetryAutomatically ? 503 : 500,
             body: {
                 error: shouldRetryAutomatically ? 'Delivery temporarily unavailable' : 'Failed to send campaign',
-                message: shouldRetryAutomatically
+                message: queued
                     ? 'Delivery is temporarily unavailable. The campaign remains queued and the background worker will retry automatically.'
-                    : (error as Error).message,
-                retryable: shouldRetryAutomatically
+                    : shouldRetryAutomatically ? 'Delivery is temporarily unavailable. Retry to start or resume the campaign.'
+                    : databaseError.message || 'Campaign delivery needs attention.',
+                retryable: shouldRetryAutomatically,
+                queued,
+                paused: queued,
+                nextAttemptAt: queued ? retryAt : null
             }
         };
     } finally {

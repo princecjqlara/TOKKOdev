@@ -21,7 +21,8 @@ async function verifyFacebookIdentity(session: Session) {
     if (row?.user_id !== session.user.id) throw new AccessError(403, 'Your Facebook account identity could not be verified. Sign in again.');
 }
 
-/** Facebook app users are parents; team-created identities remain subaccounts. */
+/** Verified parents can assign all of their connected Pages, regardless of the
+ * Facebook task used to connect them. Team-created identities stay subaccounts. */
 export async function teamAdministrationPages(session: Session) {
     await verifyFacebookIdentity(session);
     const { data: isParent, error: parentError } = await getSupabaseAdmin().rpc('tokko_is_parent_user', {
@@ -33,8 +34,6 @@ export async function teamAdministrationPages(session: Session) {
         .select('grant_source,pages(id,fb_page_id,name)').eq('user_id', session.user.id!);
     if (error) throw error;
     return (data || []).flatMap(row => {
-        // Facebook messaging access grants workspace use, not team administration.
-        if (row.grant_source === 'facebook_messaging') return [];
         const page = Array.isArray(row.pages) ? row.pages[0] : row.pages;
         return page ? [{ ...page, authoritySource: 'original' as const }] : [];
     });

@@ -38,7 +38,7 @@ describe('automatic Page recovery for direct Facebook sign-in', () => {
         const f = fixture();
         expect(await restoreFacebookPageMemberships(session, f.db)).toBe(1);
     });
-    it.each(['MESSAGING', 'PROFILE_PLUS_MESSAGING', 'PAGES_MESSAGING'])('automatically grants shared Page use for %s without team administration', async task => {
+    it.each(['MESSAGING', 'PROFILE_PLUS_MESSAGING', 'PAGES_MESSAGING'])('records the messaging connection source for %s access', async task => {
         mocks.verified.mockResolvedValue([{ id: 'page_1', access_token: 'token', tasks: [task] }]);
         const f = fixture();
         expect(await restoreFacebookPageMemberships(session, f.db)).toBe(1);

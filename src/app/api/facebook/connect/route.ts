@@ -78,8 +78,8 @@ export async function POST(request: NextRequest) {
         }
 
         // Messaging staff can join an existing shared Page without replacing its
-        // connection or starting another import. Their role does not grant team
-        // administration. New Page creation also preserves concurrent connects.
+        // connection or starting another import. Tokko parent identity controls
+        // team administration. New Page creation preserves concurrent connects.
         if (!canManage) {
             const findSharedPage = () => supabase.from('pages').select('id,last_synced_at')
                 .eq('fb_page_id', fbPageId).maybeSingle();

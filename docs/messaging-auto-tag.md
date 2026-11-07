@@ -29,7 +29,9 @@ auto-tag polling alongside follow-ups; no additional scheduler job or request
 to `/api/cron/messaging-auto-tag` is needed. Follow-up failures cannot skip the
 tag worker, and individual Page failures do not stop other Pages. The response
 includes `messagingAutoTag.pages`, `conversations`, `tagged`, and `errors` for
-checking progress. Campaign continuation still starts after follow-ups.
+checking progress. Campaign continuation starts alongside follow-ups through
+the shared campaign worker. Slow or failed follow-ups cannot skip campaign
+recovery, and no nested HTTP request is needed to resume saved recipients.
 
 The scheduler claims each enabled Page at most once a minute and skips
 Pages with no eligible contacts. Each slice reads at most ten recently updated

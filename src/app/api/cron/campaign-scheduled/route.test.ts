@@ -223,6 +223,7 @@ describe('GET /api/cron/campaign-scheduled', () => {
         expect(mocks.sendCampaignById).toHaveBeenCalledWith({
             campaignId: 'campaign_1',
             supabase,
+            backgroundOnly: true,
             allowScheduled: true,
             dueAt: expect.any(String),
             sendBatchSize: 25,
@@ -231,6 +232,31 @@ describe('GET /api/cron/campaign-scheduled', () => {
             maxProcessingTimeMs: 15000,
             includeUnscheduledRecipients: true
         });
+    });
+
+    it('continues an immediate campaign when scheduled discovery times out', async () => {
+        const { GET } = await loadRoute();
+        vi.useFakeTimers();
+        const immediate = createCampaign({
+            id: 'saved_campaign', status: 'sending', audience_mode: 'specific', scheduled_at: null
+        });
+        const supabase = createSupabaseMock({ campaignLevelCampaigns: [], immediateCampaigns: [immediate] });
+        const select = supabase.campaignsSelect.getMockImplementation()!;
+        supabase.campaignsSelect.mockImplementationOnce(() => {
+            select(); // Preserve which discovery query receives each fixture.
+            return createThenableQuery(() => new Promise(() => {}));
+        });
+        mocks.getSupabaseAdmin.mockReturnValue(supabase);
+        mocks.sendCampaignById.mockResolvedValue({ success: true, body: { partial: true, sent: 4000, remaining: 7000 } });
+
+        const pending = GET(createRequest());
+        await vi.advanceTimersByTimeAsync(DATABASE_REQUEST_TIMEOUT_MS);
+        const response = await pending;
+
+        expect(response.status).toBe(200);
+        expect(mocks.sendCampaignById).toHaveBeenCalledWith(expect.objectContaining({ campaignId: 'saved_campaign' }));
+        expect(await response.json()).toMatchObject({ processed: 1, retryable: true, discoveryErrors: [expect.any(String)] });
+        expect(vi.getTimerCount()).toBe(0);
     });
 
     it('dispatches recipient-level scheduled campaigns such as best-time sends', async () => {
@@ -259,6 +285,7 @@ describe('GET /api/cron/campaign-scheduled', () => {
         expect(mocks.sendCampaignById).toHaveBeenCalledWith({
             campaignId: 'campaign_best_time',
             supabase,
+            backgroundOnly: true,
             allowScheduled: true,
             dueAt: expect.any(String),
             sendBatchSize: 25,
@@ -296,6 +323,7 @@ describe('GET /api/cron/campaign-scheduled', () => {
         expect(mocks.sendCampaignById).toHaveBeenCalledWith({
             campaignId: 'campaign_million',
             supabase,
+            backgroundOnly: true,
             allowScheduled: false,
             dueAt: undefined,
             sendBatchSize: 25,

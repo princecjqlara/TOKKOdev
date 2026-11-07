@@ -22,33 +22,38 @@ vi.mock('../page-delivery', async importOriginal => ({
 }));
 
 function createSupabaseMock(
-    campaignStatus: 'draft' | 'scheduled' = 'scheduled',
+    campaignStatus: 'draft' | 'scheduled' | 'sending' = 'scheduled',
     options: {
         messageText?: string;
         recipients?: { id: string; contact_id: string; contacts: { psid: string; name?: string } }[];
         remainingPendingCount?: number;
         incompleteAudience?: boolean;
+        legacyAudience?: boolean;
+        serverUpdatedAt?: string;
         templateMediaHeader?: { type: 'image'; url: string };
         stopAfterFirstBatch?: boolean;
         nextAttemptAt?: string;
         deliveryBusy?: boolean;
         deliveryBatchSize?: number;
-        claimError?: { code?: string; message: string };
+        claimError?: unknown;
         claimStalls?: boolean;
         progressStallsOnce?: boolean;
         updateError?: { code?: string; message: string };
+        backgroundDeliveryEnabled?: boolean;
     } = {}
 ) {
     const campaignRecord = {
         id: 'campaign_1',
         page_id: 'page_1',
         status: campaignStatus,
+        background_delivery_enabled: options.backgroundDeliveryEnabled ?? true,
+        updated_at: '2026-11-08T00:00:00.000Z',
         message_text: options.messageText || 'Hello there',
         use_ai_message: false,
         is_loop: false,
         recurrence: 'none',
         audience_mode: 'specific',
-        audience_materialized_at: options.incompleteAudience ? null : '2026-08-12T00:00:00.000Z',
+        audience_materialized_at: options.incompleteAudience || options.legacyAudience ? null : '2026-08-12T00:00:00.000Z',
         template_media_header: options.templateMediaHeader || null,
         ai_prompt: null,
         next_attempt_at: options.nextAttemptAt || null,
@@ -63,27 +68,37 @@ function createSupabaseMock(
         }
     };
 
-    const campaignSingle = vi.fn().mockResolvedValue({
-        data: campaignRecord,
+    const campaignSingle = vi.fn().mockImplementation(async () => ({
+        data: { ...campaignRecord },
         error: null
-    });
+    }));
     const campaignEqId = vi.fn().mockReturnValue({ single: campaignSingle });
     const campaignSelect = vi.fn().mockReturnValue({ eq: campaignEqId });
 
     const campaignUpdateEq = vi.fn();
     const campaignUpdateIn = vi.fn();
     const campaignUpdate = vi.fn().mockImplementation((updates: Record<string, unknown>) => {
-        if (typeof updates.status === 'string') campaignRecord.status = updates.status as typeof campaignRecord.status;
+        const matches: Array<() => boolean> = [];
         const query: any = {
-            eq: vi.fn((...args: unknown[]) => {
+            eq: vi.fn((key: keyof typeof campaignRecord, value: unknown) => {
+                const args = [key, value];
                 campaignUpdateEq(...args);
+                matches.push(() => campaignRecord[key] === value);
                 return query;
             }),
-            in: vi.fn((...args: unknown[]) => {
+            in: vi.fn((key: keyof typeof campaignRecord, values: unknown[]) => {
+                const args = [key, values];
                 campaignUpdateIn(...args);
+                matches.push(() => values.includes(campaignRecord[key]));
                 return query;
             }),
-            then: (resolve: (value: { error: { code?: string; message: string } | null }) => unknown) => Promise.resolve({ error: options.updateError || null }).then(resolve)
+            select: vi.fn(() => query),
+            then: (resolve: (value: unknown) => unknown) => {
+                const matched = matches.every(match => match());
+                if (matched && !options.updateError) Object.assign(campaignRecord, updates);
+                if (matched && !options.updateError && options.serverUpdatedAt) campaignRecord.updated_at = options.serverUpdatedAt;
+                return Promise.resolve({ data: matched ? [{ id: campaignRecord.id, updated_at: campaignRecord.updated_at }] : [], error: options.updateError || null }).then(resolve);
+            }
         };
         return query;
     });
@@ -98,8 +113,8 @@ function createSupabaseMock(
 
     let sentCount = 0;
     let failedCount = 0;
-    let releasedCount = 0;
     const pendingRecipients = [...(options.recipients || [])];
+    const claimedRecipients = new Map<string, typeof pendingRecipients[number]>();
     const fixedRemaining = options.remainingPendingCount || 0;
     const claimRpc = vi.fn();
     const finishBatchRpc = vi.fn();
@@ -111,7 +126,9 @@ function createSupabaseMock(
             claimRpc(args);
             if (options.claimStalls) return new Promise<never>(() => {});
             if (options.claimError) return { data: null, error: options.claimError };
-            const claimed = pendingRecipients.splice(0, args.p_batch_size).map(recipient => ({
+            const recipients = pendingRecipients.splice(0, args.p_batch_size);
+            for (const recipient of recipients) claimedRecipients.set(recipient.contact_id, recipient);
+            const claimed = recipients.map(recipient => ({
                 contact_id: recipient.contact_id,
                 contact_psid: recipient.contacts.psid,
                 contact_name: recipient.contacts.name || null,
@@ -124,6 +141,7 @@ function createSupabaseMock(
         if (name === 'finish_campaign_recipient_batch') {
             finishBatchRpc(args);
             for (const result of args.p_results) {
+                claimedRecipients.delete(result.contact_id);
                 if (result.success) sentCount += 1;
                 else failedCount += 1;
             }
@@ -137,7 +155,7 @@ function createSupabaseMock(
                 data: [{
                     sent_count: sentCount,
                     failed_count: failedCount,
-                    remaining_count: pendingRecipients.length + fixedRemaining + releasedCount
+                    remaining_count: pendingRecipients.length + fixedRemaining + claimedRecipients.size
                 }],
                 error: null
             };
@@ -151,7 +169,11 @@ function createSupabaseMock(
         const query: any = {
             eq: vi.fn(() => query),
             in: vi.fn((_column: string, contactIds: string[]) => {
-                releasedCount += contactIds.length;
+                for (const id of contactIds) {
+                    const recipient = claimedRecipients.get(id);
+                    if (recipient) pendingRecipients.push(recipient);
+                    claimedRecipients.delete(id);
+                }
                 releaseBatchUpdate(contactIds);
                 return Promise.resolve({ error: null });
             })
@@ -195,6 +217,7 @@ function createSupabaseMock(
         releaseBatchUpdate,
         outboundUpsert,
         campaignSingle,
+        campaignRecord,
         userPageSingle
     };
 }
@@ -277,6 +300,7 @@ describe('sendCampaignById', () => {
         const pending = sendCampaignById({ campaignId: 'campaign_1', supabase: supabase as never });
         await vi.advanceTimersByTimeAsync(DATABASE_REQUEST_TIMEOUT_MS);
         expect((await pending).status).toBe(503);
+        await vi.advanceTimersByTimeAsync(60_000);
         const result = await sendCampaignById({ campaignId: 'campaign_1', supabase: supabase as never });
         expect(result.status).toBe(200);
         expect(result.sent).toBe(1);
@@ -680,6 +704,155 @@ describe('sendCampaignById', () => {
         }));
     });
 
+    it('keeps retrying across repeated failed runs and sends completed recipients only once', async () => {
+        vi.useFakeTimers();
+        const supabase = createSupabaseMock('draft', { recipients: [
+            { id: 'done', contact_id: 'done', contacts: { psid: 'done' } },
+            { id: 'retry', contact_id: 'retry', contacts: { psid: 'retry' } }
+        ] });
+        let attempts = 0;
+        vi.mocked(sendMessage).mockImplementation(async (_page, _token, psid) => {
+            if (psid === 'retry' && ++attempts < 9) throw new Error('fetch failed');
+            return { message_id: `accepted-${psid}` };
+        });
+        const options = { campaignId: 'campaign_1', supabase: supabase as never, sendRetryDelayMs: 0 };
+        for (let run = 0; run < 2; run++) {
+            const result = await sendCampaignById({ ...options, backgroundOnly: run > 0 });
+            expect(result.body).toMatchObject({ retryable: true, sent: 1, failed: 0, remaining: 1 });
+            expect(supabase.campaignRecord).toMatchObject({ status: 'sending', background_delivery_enabled: true });
+            await vi.advanceTimersByTimeAsync(60_000);
+        }
+        const result = await sendCampaignById({ ...options, backgroundOnly: true });
+        expect(result.body).toMatchObject({ success: true, sent: 2, failed: 0 });
+        expect(attempts).toBe(9);
+        expect(vi.mocked(sendMessage).mock.calls.filter(call => call[2] === 'done')).toHaveLength(1);
+        expect(supabase.campaignRecord.status).toBe('completed');
+    });
+
+    it('continues after repeated rate-limit cooldowns without immediate rate-limit retries', async () => {
+        vi.useFakeTimers();
+        const supabase = createSupabaseMock('draft', { recipients: [
+            { id: 'retry', contact_id: 'retry', contacts: { psid: 'retry' } }
+        ] });
+        vi.mocked(sendMessage).mockRejectedValueOnce(new Error('(#613) Rate limit'))
+            .mockRejectedValueOnce(new Error('(#613) Rate limit'))
+            .mockResolvedValue({ message_id: 'accepted' });
+        const options = { campaignId: 'campaign_1', supabase: supabase as never, sendRetryDelayMs: 0 };
+        for (let run = 0; run < 2; run++) {
+            const result = await sendCampaignById({ ...options, backgroundOnly: run > 0 });
+            expect(result.body).toMatchObject({ retryable: true, remaining: 1, failed: 0 });
+            expect(sendMessage).toHaveBeenCalledTimes(run + 1);
+            const held = await sendCampaignById({ ...options, backgroundOnly: true });
+            expect(held.body.nextAttemptAt).toBe(result.body.nextAttemptAt);
+            expect(sendMessage).toHaveBeenCalledTimes(run + 1);
+            await vi.advanceTimersByTimeAsync(Date.parse(String(result.body.nextAttemptAt)) - Date.now());
+        }
+        const result = await sendCampaignById({ ...options, backgroundOnly: true });
+        expect(result.body).toMatchObject({ success: true, sent: 1, failed: 0 });
+        expect(sendMessage).toHaveBeenCalledTimes(3);
+    });
+
+    it('honors Stop during the retry delay and resumes only when explicitly continued', async () => {
+        vi.useFakeTimers();
+        const supabase = createSupabaseMock('draft', { recipients: [
+            { id: 'retry', contact_id: 'retry', contacts: { psid: 'retry' } }
+        ] });
+        vi.mocked(sendMessage).mockRejectedValueOnce(new Error('fetch failed')).mockResolvedValue({ message_id: 'accepted' });
+        const options = { campaignId: 'campaign_1', supabase: supabase as never, sendRetryDelayMs: 500 };
+        const pending = sendCampaignById(options);
+        await vi.advanceTimersByTimeAsync(0);
+        expect(sendMessage).toHaveBeenCalledTimes(1);
+        supabase.campaignRecord.status = 'draft';
+        supabase.campaignRecord.background_delivery_enabled = false;
+        await vi.advanceTimersByTimeAsync(500);
+        expect((await pending).body).toMatchObject({ paused: true, retryable: false });
+        expect(sendMessage).toHaveBeenCalledTimes(1);
+        expect(supabase.finishBatchRpc).not.toHaveBeenCalled();
+        const continued = await sendCampaignById(options);
+        expect(continued.body).toMatchObject({ success: true, sent: 1, failed: 0 });
+        expect(sendMessage).toHaveBeenCalledTimes(2);
+    });
+
+    it('retries saving an accepted delivery three times without sending the message again', async () => {
+        vi.useFakeTimers();
+        const supabase = createSupabaseMock('draft', { recipients: [
+            { id: 'r', contact_id: 'c', contacts: { psid: 'psid' } }
+        ] });
+        const rpc = supabase.rpc.getMockImplementation()!;
+        let saves = 0;
+        supabase.rpc.mockImplementation(async (name, args) => {
+            if (name === 'finish_campaign_recipient_batch' && ++saves < 3) throw new Error('fetch failed');
+            return rpc(name, args);
+        });
+        vi.mocked(sendMessage).mockResolvedValue({ message_id: 'accepted' });
+        const pending = sendCampaignById({ campaignId: 'campaign_1', supabase: supabase as never });
+        await vi.advanceTimersByTimeAsync(750);
+        expect((await pending).body).toMatchObject({ success: true, sent: 1, failed: 0 });
+        expect(saves).toBe(3);
+        expect(sendMessage).toHaveBeenCalledTimes(1);
+    });
+
+    it('defers slow timeouts to a later run instead of spending the slice on immediate retries', async () => {
+        vi.useFakeTimers();
+        const supabase = createSupabaseMock('draft', { recipients: [
+            { id: 'r', contact_id: 'c', contacts: { psid: 'psid' } }
+        ] });
+        vi.mocked(sendMessage).mockImplementationOnce(() => new Promise((_resolve, reject) => {
+            setTimeout(() => reject(new Error('Facebook send timed out')), 20_000);
+        })).mockResolvedValue({ message_id: 'accepted' });
+        const pending = sendCampaignById({ campaignId: 'campaign_1', supabase: supabase as never, maxProcessingTimeMs: 15_000 });
+        await vi.advanceTimersByTimeAsync(21_000);
+        expect((await pending).body).toMatchObject({ retryable: true, remaining: 1, failed: 0 });
+        expect(sendMessage).toHaveBeenCalledTimes(1);
+        expect(supabase.finishBatchRpc).not.toHaveBeenCalled();
+    });
+
+    it('keeps a recipient pending when the campaign status check fails before a retry', async () => {
+        const supabase = createSupabaseMock('draft', { recipients: [
+            { id: 'r', contact_id: 'c', contacts: { psid: 'psid' } }
+        ] });
+        const read = supabase.campaignSingle.getMockImplementation()!;
+        let reads = 0;
+        supabase.campaignSingle.mockImplementation(async () => ++reads === 3
+            ? { data: null, error: { code: '08006', message: 'Connection failed' } } as any
+            : read());
+        vi.mocked(sendMessage).mockRejectedValueOnce(new Error('fetch failed')).mockResolvedValue({ message_id: 'accepted' });
+        const result = await sendCampaignById({ campaignId: 'campaign_1', supabase: supabase as never, sendRetryDelayMs: 0 });
+        expect(result.body).toMatchObject({ retryable: true, failed: 0, remaining: 1 });
+        expect(sendMessage).toHaveBeenCalledTimes(1);
+        expect(supabase.finishBatchRpc).not.toHaveBeenCalled();
+    });
+
+    it('recovers a lost save response without resending a delivery already committed to the database', async () => {
+        vi.useFakeTimers();
+        const supabase = createSupabaseMock('draft', { recipients: [
+            { id: 'r', contact_id: 'c', contacts: { psid: 'psid' } }
+        ] });
+        const rpc = supabase.rpc.getMockImplementation()!;
+        let saves = 0;
+        supabase.rpc.mockImplementation(async (name, args) => {
+            if (name === 'finish_campaign_recipient_batch') {
+                if (++saves === 1) {
+                    await rpc(name, args); // Commit succeeded, but its response was lost.
+                    throw new Error('fetch failed');
+                }
+                return { data: null, error: { code: 'P0001', message: 'Recipient claim already completed' } };
+            }
+            return rpc(name, args);
+        });
+        vi.mocked(sendMessage).mockResolvedValue({ message_id: 'accepted' });
+        const options = { campaignId: 'campaign_1', supabase: supabase as never };
+        const pending = sendCampaignById(options);
+        await vi.advanceTimersByTimeAsync(750);
+        expect((await pending).body.retryable).toBe(true);
+        expect(saves).toBe(3);
+        await vi.advanceTimersByTimeAsync(60_000);
+        const resumed = await sendCampaignById({ ...options, backgroundOnly: true });
+        expect(resumed.body).toMatchObject({ success: true, sent: 1, failed: 0 });
+        expect(supabase.campaignRecord.status).toBe('completed');
+        expect(sendMessage).toHaveBeenCalledTimes(1);
+    });
+
     it('pauses on a missing template without consuming the remaining audience', async () => {
         const recipients = Array.from({ length: 3 }, (_, index) => ({
             id: `recipient_${index + 1}`,
@@ -960,10 +1133,7 @@ describe('sendCampaignById', () => {
             status: 'sending',
             next_attempt_at: expect.any(String)
         }));
-        expect(supabase.campaignUpdateIn).toHaveBeenCalledWith(
-            'status',
-            ['draft', 'sending']
-        );
+        expect(supabase.campaignRecord.status).toBe('sending');
     });
 
     it.each([
@@ -1008,6 +1178,116 @@ describe('sendCampaignById', () => {
             status: 'draft', background_delivery_enabled: false, next_attempt_at: null
         }));
         expect(sendMessage).not.toHaveBeenCalled();
+    });
+
+    it.each([
+        new Error('Recipient claim expired before completion'),
+        new Error('Not every recipient claim was completed'),
+        { message: 'upstream request aborted', name: 'AbortError' },
+        { status: 502, message: 'Bad Gateway' },
+        new Error('Unexpected worker interruption')
+    ])('automatically recovers a worker interruption instead of leaving a draft: %j', async claimError => {
+        const supabase = createSupabaseMock('draft', { claimError, remainingPendingCount: 275 });
+        const before = Date.now();
+        const result = await sendCampaignById({ campaignId: 'campaign_1', supabase: supabase as never });
+        expect(result.status).toBe(503);
+        expect(result.body).toMatchObject({ retryable: true, queued: true, paused: true });
+        expect(supabase.campaignRecord).toMatchObject({ status: 'sending', background_delivery_enabled: true });
+        expect(Date.parse(String(result.body.nextAttemptAt)) - before).toBeLessThanOrEqual(61_000);
+        expect(sendMessage).not.toHaveBeenCalled();
+    });
+
+    it('persists automatic continuation before template verification can be interrupted', async () => {
+        const supabase = createSupabaseMock('draft', {
+            messageText: serializeCampaignMessageSequence([{ text: 'Hello', templateName: 'general_msg_v1' }])
+        });
+        let finishCheck!: (templates: unknown[]) => void;
+        let started!: () => void;
+        const checking = new Promise<void>(resolve => { started = resolve; });
+        vi.mocked(getPageTemplates).mockImplementationOnce(() => {
+            started();
+            return new Promise(resolve => { finishCheck = resolve; });
+        });
+        const pending = sendCampaignById({ campaignId: 'campaign_1', supabase: supabase as never });
+        await checking;
+        const saved = { ...supabase.campaignRecord };
+        finishCheck([]);
+        await pending;
+        expect(saved).toMatchObject({ status: 'sending', background_delivery_enabled: true });
+        expect(sendMessage).not.toHaveBeenCalled();
+    });
+
+    it('does not let an automatic worker restart a manually stopped campaign', async () => {
+        const supabase = createSupabaseMock('draft', { backgroundDeliveryEnabled: false });
+        const result = await sendCampaignById({ campaignId: 'campaign_1', supabase: supabase as never, backgroundOnly: true });
+        expect(result.body.paused).toBe(true);
+        expect(supabase.campaignUpdate).not.toHaveBeenCalled();
+        expect(sendMessage).not.toHaveBeenCalled();
+    });
+
+    it('preserves a manual Stop that happens while a worker error is being recovered', async () => {
+        const supabase = createSupabaseMock('sending');
+        const rpc = supabase.rpc.getMockImplementation()!;
+        supabase.rpc.mockImplementation(async (name, args) => {
+            if (name === 'claim_campaign_recipients') {
+                supabase.campaignRecord.status = 'draft';
+                supabase.campaignRecord.background_delivery_enabled = false;
+                throw new Error('Network timeout');
+            }
+            return rpc(name, args);
+        });
+        await sendCampaignById({ campaignId: 'campaign_1', supabase: supabase as never });
+        expect(supabase.campaignRecord).toMatchObject({ status: 'draft', background_delivery_enabled: false });
+        expect(sendMessage).not.toHaveBeenCalled();
+    });
+
+    it.each([
+        { status: 502, message: 'Bad Gateway' },
+        { name: 'AbortError', message: 'The operation was aborted' },
+        Object.assign(new Error('Request Timeout'), { status: 408 })
+    ])('retains recipients and automatically resumes after a temporary send failure: %j', async failure => {
+        vi.useFakeTimers();
+        const supabase = createSupabaseMock('draft', {
+            recipients: [{ id: 'r', contact_id: 'c', contacts: { psid: 'psid' } }]
+        });
+        vi.mocked(sendMessage).mockRejectedValueOnce(failure).mockResolvedValue({ message_id: 'accepted' });
+        const options = { campaignId: 'campaign_1', supabase: supabase as never, sendRetryAttempts: 0 };
+        const deferred = await sendCampaignById(options);
+        expect(deferred.body).toMatchObject({ retryable: true, remaining: 1, sent: 0, failed: 0 });
+        expect(supabase.finishBatchRpc).not.toHaveBeenCalled();
+        await vi.advanceTimersByTimeAsync(60_000);
+        const resumed = await sendCampaignById({ ...options, backgroundOnly: true });
+        expect(resumed.body).toMatchObject({ success: true, sent: 1, failed: 0 });
+        expect(supabase.campaignRecord.status).toBe('completed');
+    });
+
+    it('honors a manual Stop made while the Page lease is being acquired', async () => {
+        const supabase = createSupabaseMock('sending');
+        const rpc = supabase.rpc.getMockImplementation()!;
+        supabase.rpc.mockImplementation(async (name, args) => {
+            const result = await rpc(name, args);
+            if (name === 'acquire_page_campaign_delivery') {
+                supabase.campaignRecord.status = 'draft';
+                supabase.campaignRecord.background_delivery_enabled = false;
+            }
+            return result;
+        });
+        const result = await sendCampaignById({ campaignId: 'campaign_1', supabase: supabase as never, backgroundOnly: true });
+        expect(result.body.paused).toBe(true);
+        expect(supabase.campaignRecord.status).toBe('draft');
+        expect(supabase.claimRpc).not.toHaveBeenCalled();
+        expect(sendMessage).not.toHaveBeenCalled();
+    });
+
+    it('resumes an older complete audience when the database supplies its update timestamp', async () => {
+        const supabase = createSupabaseMock('draft', {
+            legacyAudience: true, serverUpdatedAt: '2026-11-08T00:00:00.123456+00:00',
+            recipients: [{ id: 'r', contact_id: 'c', contacts: { psid: 'psid' } }]
+        });
+        vi.mocked(sendMessage).mockResolvedValue({ message_id: 'accepted' });
+        const result = await sendCampaignById({ campaignId: 'campaign_1', supabase: supabase as never });
+        expect(result.body).toMatchObject({ success: true, sent: 1 });
+        expect(supabase.campaignRecord.status).toBe('completed');
     });
 
     it('claims every pending recipient in bounded atomic batches without a per-run cap', async () => {
@@ -1065,6 +1345,30 @@ describe('sendCampaignById', () => {
         expect(sendMessage).toHaveBeenCalledTimes(10);
         expect(supabase.claimRpc).toHaveBeenCalledTimes(2);
         expect(supabase.claimRpc).toHaveBeenLastCalledWith(expect.objectContaining({ p_batch_size: 5 }));
+    });
+
+    it('resumes a 10,005-recipient queue after the browser stops at 3,500 without resending completed contacts', async () => {
+        const recipients = Array.from({ length: 10005 }, (_, index) => ({
+            id: `recipient_${index}`, contact_id: `contact_${index}`,
+            contacts: { psid: `psid_${index}`, name: `Contact ${index}` }
+        }));
+        const supabase = createSupabaseMock('draft', { recipients });
+        vi.mocked(sendMessage).mockResolvedValue({ message_id: 'accepted' });
+        const slice = { campaignId: 'campaign_1', supabase: supabase as never, maxRecipientsPerRun: 500 };
+        let result = await sendCampaignById({ ...slice, userId: 'member' });
+        for (let run = 1; run < 7; run++) {
+            result = await sendCampaignById({ ...slice, userId: 'member' });
+        }
+        expect(result.body).toMatchObject({ partial: true, sent: 3500, remaining: 6505 });
+
+        // Later background invocations use the same persisted recipient queue.
+        for (let run = 0; run < 14; run++) result = await sendCampaignById(slice);
+
+        expect(result.body).toMatchObject({ success: true, sent: 10005, failed: 0 });
+        expect(result.body.partial).not.toBe(true);
+        expect(sendMessage).toHaveBeenCalledTimes(10005);
+        expect(new Set(vi.mocked(sendMessage).mock.calls.map(args => args[2])).size).toBe(10005);
+        expect(supabase.campaignUpdate).toHaveBeenLastCalledWith(expect.objectContaining({ status: 'completed' }));
     });
 
     it('cron sends only due recipients and keeps campaign scheduled while future recipients remain', async () => {

@@ -255,13 +255,25 @@ try {
     await db.query("INSERT INTO users(id,email) VALUES($1,'old-no-pages@example.test')",[noPageOriginal]);
     assert.equal((await db.query(`SELECT * FROM ${schema}.tokko_resolve_facebook_user('old-no-pages','old-no-pages@example.test','Tester',NULL,NULL)`)).rows[0].user_id,noPageOriginal); checks++;
     await db.query("INSERT INTO tokko_page_managers(user_id,page_id,facebook_subject,authority_source) VALUES($1,$2,'app-tester-subject','original'),($1,$3,'app-tester-subject','original')",[oldOriginal,pageA,pageB]);
-    // Even a stale/forged manager proof cannot promote a messaging-only grant.
+    // Reproduce the old exclusion, then verify the parent-assignment repair.
     await db.query("UPDATE user_pages SET grant_source='facebook_messaging' WHERE user_id=$1 AND page_id=$2",[oldOriginal,pageA]);
     await denied(`SELECT ${schema}.tokko_assert_manager($1,$2)`,[oldOriginal,[pageA]]);
     await denied(`SELECT ${schema}.tokko_assert_manager($1,$2)`,[oldOriginal,[pageA,pageB]]);
+    await db.query(migration('database/migration_parent_connected_page_assignment.sql'));
+    await db.query(`SELECT ${schema}.tokko_assert_manager($1,$2)`,[oldOriginal,[pageA,pageB]]); checks++;
+    await denied(`SELECT ${schema}.tokko_assert_manager($1,$2)`,[oldOriginal,[pageA,foreign]]);
+    await db.query("UPDATE tokko_page_managers SET verified_at=now()-interval '2 minutes' WHERE user_id=$1 AND page_id=$2",[oldOriginal,pageA]);
+    await denied(`SELECT ${schema}.tokko_assert_manager($1,$2)`,[oldOriginal,[pageA]]);
+    await db.query("UPDATE tokko_page_managers SET verified_at=now(),facebook_subject='wrong-subject' WHERE user_id=$1 AND page_id=$2",[oldOriginal,pageA]);
+    await denied(`SELECT ${schema}.tokko_assert_manager($1,$2)`,[oldOriginal,[pageA]]);
+    await db.query("UPDATE tokko_page_managers SET facebook_subject='app-tester-subject' WHERE user_id=$1 AND page_id=$2",[oldOriginal,pageA]);
+    await db.query('UPDATE users SET is_active=FALSE WHERE id=$1',[oldOriginal]);
+    await denied(`SELECT ${schema}.tokko_assert_manager($1,$2)`,[oldOriginal,[pageA]]);
+    await db.query("UPDATE users SET is_active=TRUE,expires_at=now()-interval '1 second' WHERE id=$1",[oldOriginal]);
+    await denied(`SELECT ${schema}.tokko_assert_manager($1,$2)`,[oldOriginal,[pageA]]);
+    await db.query('UPDATE users SET expires_at=NULL WHERE id=$1',[oldOriginal]);
     await db.query(`SELECT ${schema}.tokko_assert_manager($1,$2)`,[oldOriginal,[pageB]]); checks++;
     assert.equal(await scalar('SELECT count(*)::int value FROM user_pages WHERE user_id=$1',[oldOriginal]),2); checks++;
-    await db.query("UPDATE user_pages SET grant_source='legacy' WHERE user_id=$1 AND page_id=$2",[oldOriginal,pageA]);
     const saveSql = `SELECT ${schema}.tokko_save_subaccount($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14) value`;
     const temporaryArgs = [oldOriginal,[pageA,pageB],'temporary-team@example.test','Team Member',randomUUID(),'temporary-request','password','temporary-hash','','scrypt-v1$temporary',false,null,2,true];
     const temporary = await scalar(saveSql,temporaryArgs);
@@ -270,6 +282,7 @@ try {
     assert.deepEqual(firstDeadline,await scalar("SELECT now()+interval '2 days' value")); checks++;
     assert.equal(await scalar('SELECT delete_after_expiry value FROM users WHERE id=$1',[temporary.userId]),true); checks++;
     const permanent = await scalar(saveSql,[oldOriginal,[pageA,pageB],'permanent-team@example.test','Team Member',randomUUID(),'permanent-request','password','permanent-hash','','scrypt-v1$permanent',false,null,null,null]);
+    assert.equal(await scalar('SELECT grant_source value FROM user_pages WHERE user_id=$1 AND page_id=$2',[oldOriginal,pageA]),'facebook_messaging'); checks++;
     assert.equal(await scalar('SELECT count(*)::int value FROM user_pages WHERE user_id=ANY($1)',[[temporary.userId,permanent.userId]]),4); checks++;
     assert.equal(await scalar('SELECT expires_at value FROM users WHERE id=$1',[permanent.userId]),null); checks++;
     assert.equal(await scalar(`SELECT ${schema}.tokko_set_subaccount_lifetime($1,$2,$3,FALSE,NULL,5,TRUE) value`,[oldOriginal,[pageA],temporary.userId]),true); checks++;
@@ -277,6 +290,9 @@ try {
     assert.deepEqual(await scalar('SELECT expires_at value FROM users WHERE id=$1',[temporary.userId]),await scalar("SELECT now()+interval '5 days' value")); checks++;
     assert.equal(await scalar(`SELECT ${schema}.tokko_set_subaccount_lifetime($1,$2,$3,FALSE,NULL,7,TRUE) value`,[manager,[pageA],temporary.userId]),false); checks++;
     assert.equal(await scalar(`SELECT ${schema}.tokko_set_subaccount_lifetime($1,$2,$1,TRUE,NULL,NULL,FALSE) value`,[oldOriginal,[pageA]]),false); checks++;
+    await denied(`SELECT ${schema}.tokko_assert_manager($1,$2)`,[temporary.userId,[pageA]]);
+    await db.query("UPDATE user_pages SET grant_source='facebook_messaging' WHERE user_id=$1 AND page_id=$2",[temporary.userId,pageA]);
+    await db.query("INSERT INTO tokko_page_managers(user_id,page_id,facebook_subject,authority_source) VALUES($1,$2,'app-tester-subject','original')",[temporary.userId,pageA]);
     await denied(`SELECT ${schema}.tokko_assert_manager($1,$2)`,[temporary.userId,[pageA]]);
     await denied("INSERT INTO tokko_auth_identities(provider,subject,user_id) VALUES('facebook','child-cannot-be-parent',$1)",[temporary.userId]);
     const protectedChildHash = await scalar('SELECT password_hash value FROM users WHERE id=$1',[permanent.userId]);
