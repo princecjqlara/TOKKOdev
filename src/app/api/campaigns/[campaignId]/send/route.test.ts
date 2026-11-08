@@ -59,10 +59,10 @@ describe('POST /api/campaigns/[campaignId]/send', () => {
             userId: 'user_1',
             sendBatchSize: 20,
             delayBetweenBatchesMs: 50,
-            maxRecipientsPerRun: 500,
             maxProcessingTimeMs: 45_000,
             sendRetryAttempts: 2
         }));
+        expect(mocks.sendCampaignById.mock.calls[0][0]).not.toHaveProperty('maxRecipientsPerRun');
     });
 
     it('retries one database-busy response using the durable recipient queue', async () => {

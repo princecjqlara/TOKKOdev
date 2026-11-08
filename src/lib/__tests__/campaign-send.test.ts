@@ -226,6 +226,7 @@ describe('sendCampaignById', () => {
     afterEach(() => { vi.useRealTimers(); });
     beforeEach(() => {
         vi.clearAllMocks();
+        vi.mocked(waitForPageDeliveryBatch).mockResolvedValue(undefined);
         vi.mocked(takeThreadControl).mockResolvedValue(undefined);
         vi.mocked(getPageTemplates).mockResolvedValue([
             { name: 'general_msg_v1', language: 'en_US', status: 'APPROVED' },
@@ -440,6 +441,75 @@ describe('sendCampaignById', () => {
         expect(result.sent).toBe(2);
         expect(supabase.claimRpc).toHaveBeenCalledWith(expect.objectContaining({ p_batch_size: 1 }));
         expect(waitForPageDeliveryBatch).toHaveBeenCalledWith(4000);
+    });
+
+    it('ramps a healthy Page within its shared budget without artificial waits', async () => {
+        const supabase = createSupabaseMock('draft', { deliveryBatchSize: 25, recipients:
+            Array.from({ length: 1000 }, (_, i) => ({ id: `r${i}`, contact_id: `c${i}`, contacts: { psid: `p${i}` } }))
+        });
+        vi.mocked(sendMessage).mockImplementation(async (_page, _token, psid) => ({ message_id: `mid_${psid}` }));
+        const result = await sendCampaignById({ campaignId: 'campaign_1', supabase: supabase as never });
+        expect(result.sent).toBe(1000);
+        expect(supabase.claimRpc.mock.calls.slice(0, 4).map(([args]) => args.p_batch_size)).toEqual([10, 15, 20, 25]);
+        expect(supabase.claimRpc.mock.calls.every(([args]) => args.p_batch_size <= 25)).toBe(true);
+        expect(waitForPageDeliveryBatch).not.toHaveBeenCalled();
+        expect(supabase.outboundUpsert).toHaveBeenCalledTimes(4);
+        expect(supabase.outboundUpsert.mock.calls.flatMap(([events]) => events)).toHaveLength(1000);
+        expect(new Set(vi.mocked(sendMessage).mock.calls.map(call => call[2])).size).toBe(1000);
+    });
+
+    it('stops growing immediately when Meta throttles an aggressive Page', async () => {
+        const supabase = createSupabaseMock('draft', { deliveryBatchSize: 25, recipients:
+            Array.from({ length: 100 }, (_, i) => ({ id: `r${i}`, contact_id: `c${i}`, contacts: { psid: `p${i}` } }))
+        });
+        vi.mocked(sendMessage).mockImplementation(async (_page, _token, psid) => {
+            if (psid === 'p10') throw new Error('(#613) Rate limit reached');
+            return { message_id: `mid_${psid}` };
+        });
+        const result = await sendCampaignById({ campaignId: 'campaign_1', supabase: supabase as never });
+        expect(result.body).toMatchObject({ retryable: true, remaining: 76, sent: 24, failed: 0 });
+        expect(supabase.claimRpc.mock.calls.map(([args]) => args.p_batch_size)).toEqual([10, 15]);
+        expect(supabase.outboundUpsert.mock.calls.flatMap(([events]) => events)).toHaveLength(24);
+        expect(supabase.campaignRecord.background_delivery_enabled).toBe(true);
+    });
+
+    it('benchmarks prior pacing against aggressive delivery with simulated network latency', async () => {
+        vi.useFakeTimers();
+        const metrics: Array<{ mode: string; elapsedMs: number; auditWrites: number; maxInFlight: number }> = [];
+        for (const settings of [
+            { mode: 'prior pacing', pageSize: 5, delay: 1000 },
+            { mode: 'optimized existing Page budget', pageSize: 5, delay: 0 },
+            { mode: 'aggressive Page budget', pageSize: 25, delay: 0 }
+        ]) {
+            vi.setSystemTime(new Date('2026-11-08T00:00:00Z'));
+            const wait = (ms: number) => new Promise<void>(resolve => setTimeout(resolve, ms));
+            const supabase = createSupabaseMock('draft', { deliveryBatchSize: settings.pageSize, recipients:
+                Array.from({ length: 1000 }, (_, i) => ({ id: `r${i}`, contact_id: `c${i}`, contacts: { psid: `p${i}` } }))
+            });
+            const rpc = supabase.rpc.getMockImplementation()!;
+            supabase.rpc.mockImplementation(async (name, args) => { await wait(20); return rpc(name, args); });
+            const read = supabase.campaignSingle.getMockImplementation()!;
+            supabase.campaignSingle.mockImplementation(async () => { await wait(20); return read(); });
+            supabase.outboundUpsert.mockImplementation(async () => { await wait(20); return { error: null }; });
+            let inFlight = 0, maxInFlight = 0;
+            vi.mocked(sendMessage).mockImplementation(async (_page, _token, psid) => {
+                maxInFlight = Math.max(maxInFlight, ++inFlight);
+                await wait(200); inFlight--;
+                return { message_id: `mid_${psid}` };
+            });
+            vi.mocked(waitForPageDeliveryBatch).mockImplementation(wait);
+            const started = Date.now();
+            const pending = sendCampaignById({ campaignId: 'campaign_1', supabase: supabase as never,
+                maxProcessingTimeMs: 270_000, maxRecipientsPerRun: 1000, delayBetweenBatchesMs: settings.delay });
+            await vi.runAllTimersAsync();
+            expect((await pending).sent).toBe(1000);
+            expect(maxInFlight).toBeLessThanOrEqual(settings.pageSize);
+            metrics.push({ mode: settings.mode, elapsedMs: Date.now() - started,
+                auditWrites: supabase.outboundUpsert.mock.calls.length, maxInFlight });
+        }
+        expect(metrics[1].elapsedMs).toBeLessThan(metrics[0].elapsedMs / 3);
+        expect(metrics[2].elapsedMs).toBeLessThan(metrics[0].elapsedMs / 10);
+        console.info('Synthetic sender benchmark (200ms Meta latency, 20ms database latency; no real sends):', JSON.stringify(metrics));
     });
 
     it('blocks an incompletely materialized campaign before any recipient is sent', async () => {

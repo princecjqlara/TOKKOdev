@@ -12,7 +12,7 @@ export async function acquirePageDelivery(supabase: ReturnType<typeof getSupabas
     if (error) throw error;
     const row = Array.isArray(data) ? data[0] : data;
     if (!row || typeof row.acquired !== 'boolean') throw new Error('Page delivery coordination returned an invalid response');
-    return { owner, acquired: row.acquired, retryAt: row.retry_at as string | null, batchSize: Math.max(1, Math.min(10, Number(row.batch_size) || 1)) };
+    return { owner, acquired: row.acquired, retryAt: row.retry_at as string | null, batchSize: Math.max(1, Math.min(25, Number(row.batch_size) || 1)) };
 }
 
 export async function releasePageDelivery(supabase: ReturnType<typeof getSupabaseAdmin>, pageId: string, owner: string, rateLimited: boolean) {

@@ -16,7 +16,12 @@ Recipient claims and durable delivery counts preserve progress across requests.
 Completed recipients are skipped, expired claims can be recovered, and Meta
 rate-limit cooldowns remain in effect. Manually stopped campaigns stay stopped
 until **Continue Unsent** is selected. Deploy the updated application to activate
-this recovery change; it requires no additional database migration or cron job.
+this recovery change. The faster delivery upgrade also uses
+`database/migration_campaign_delivery_throughput.sql`; the existing minute
+campaign job stays in place. On Vercel its HTTP response acknowledges that a
+background run was accepted, while actual progress is recorded on the campaign.
+Check campaign counts and `last_error` as well as scheduler history: a successful
+acknowledgment alone does not establish that every recipient was delivered.
 
 Temporary worker failures, timeouts, expired recipient claims, and unrecognized
 infrastructure interruptions keep campaigns queued for automatic retry after

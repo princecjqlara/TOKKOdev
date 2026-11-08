@@ -8,9 +8,8 @@ import type { TemplateMediaType } from '@/lib/facebook-templates';
 export const maxDuration = 300;
 
 // Keep every browser-driven invocation comfortably below the deployment
-// timeout. The client continues while `partial` is true, and recipient status
-// makes every subsequent invocation resume from pending recipients only.
-const MAX_RECIPIENTS_PER_INVOCATION = 500;
+// timeout. Process as many batches as fit in the time slice, then resume from
+// pending recipients only. Audience size does not cap progress per request.
 const MAX_PROCESSING_TIME_MS = 45_000;
 const DATABASE_BUSY_RETRY_DELAY_MS = 750;
 
@@ -55,7 +54,6 @@ export async function POST(
         backgroundOnly: body.backgroundOnly === true,
         expectedUpdatedAt: typeof body.expectedUpdatedAt === 'string' ? body.expectedUpdatedAt : undefined,
         sendBatchSize: typeof body.sendBatchSize === 'number' ? body.sendBatchSize : undefined,
-        maxRecipientsPerRun: MAX_RECIPIENTS_PER_INVOCATION,
         delayBetweenBatchesMs,
         maxProcessingTimeMs: MAX_PROCESSING_TIME_MS,
         sendRetryAttempts: 2,

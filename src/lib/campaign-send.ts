@@ -54,6 +54,7 @@ type SendCampaignByIdResult = {
 const SENDABLE_TEMPLATE_STATUSES = new Set(['APPROVED', 'ACTIVE']);
 const TRANSIENT_RETRY_DELAY_MS = 60_000;
 const RATE_LIMIT_RETRY_DELAY_MS = 5 * 60_000;
+const OUTBOUND_AUDIT_BATCH_SIZE = 250;
 
 async function updateCampaignState(supabase: SupabaseLike, campaignId: string,
     changes: Record<string, unknown>, expectedStatus?: string | string[]) {
@@ -139,6 +140,12 @@ export async function sendCampaignById({
     let isLoopCampaign = false;
     let continuationSaved = false;
     let stoppedResult: SendCampaignByIdResult | undefined;
+    const pendingOutboundEvents: OutboundMessageEventInput[] = [];
+    const flushOutboundEvents = async (includePartial = false) => {
+        while (pendingOutboundEvents.length >= OUTBOUND_AUDIT_BATCH_SIZE || includePartial && pendingOutboundEvents.length) {
+            await recordOutboundMessageEvents(supabase, pendingOutboundEvents.splice(0, OUTBOUND_AUDIT_BATCH_SIZE));
+        }
+    };
     try {
         const { data: campaign, error: campaignError } = await databaseRequest(supabase
             .from('campaigns')
@@ -443,13 +450,14 @@ export async function sendCampaignById({
         let sentThisRun = 0;
         let failedThisRun = 0;
         let processedThisRun = 0;
-        const SEND_BATCH_SIZE = Number.isFinite(sendBatchSize)
+        const MAX_SEND_BATCH_SIZE = Number.isFinite(sendBatchSize)
             ? Math.max(1, Math.min(Math.floor(sendBatchSize), pageLease.batchSize))
             : pageLease.batchSize;
+        let sendBatchSizeThisRun = Math.min(10, MAX_SEND_BATCH_SIZE);
         // Keep a recovery Page slow across every caller, even when the browser
         // requests zero delay. Multi-part campaigns consume multiple API calls.
         const DELAY_BETWEEN_BATCHES = Math.max(
-            (pageLease.batchSize < 5 ? 2000 : 1000) * Math.max(1, campaignMessageParts.length),
+            (pageLease.batchSize < 5 ? 2000 : 0) * Math.max(1, campaignMessageParts.length),
             delayBetweenBatchesMs || 0
         );
         const MAX_PROCESSING_TIME = Math.max(10000, Math.min(maxProcessingTimeMs || 240000, 270000));
@@ -464,7 +472,7 @@ export async function sendCampaignById({
         // claiming more recipients near the invocation's deadline.
         let lastBatchDurationMs = 0;
 
-        console.log(`Starting campaign ${campaignId} with atomic batches of ${SEND_BATCH_SIZE}`);
+        console.log(`Starting campaign ${campaignId} with atomic batches up to ${MAX_SEND_BATCH_SIZE}`);
 
         while (processedThisRun < MAX_RECIPIENTS &&
             Date.now() - startTime + lastBatchDurationMs + DATABASE_REQUEST_TIMEOUT_MS < MAX_PROCESSING_TIME) {
@@ -502,7 +510,7 @@ export async function sendCampaignById({
             const batch = await claimCampaignRecipients({
                 supabase,
                 campaignId,
-                batchSize: Math.min(SEND_BATCH_SIZE, MAX_RECIPIENTS - processedThisRun),
+                batchSize: Math.min(sendBatchSizeThisRun, MAX_RECIPIENTS - processedThisRun),
                 dueAt,
                 includeUnscheduledRecipients
             });
@@ -625,7 +633,8 @@ export async function sendCampaignById({
                                     sourceId: campaign.id,
                                     sourceName: campaign.name,
                                     actorUserId: campaign.created_by || null,
-                                    messageKind: messagingType
+                                    messageKind: messagingType,
+                                    sentAt: new Date().toISOString()
                                 });
                                 break;
                             } catch (sendError) {
@@ -777,7 +786,8 @@ export async function sendCampaignById({
 
             // Persist delivery results before optional attribution. An unavailable
             // audit table must not leave accepted sends eligible for replay.
-            await recordOutboundMessageEvents(supabase, outboundEvents);
+            pendingOutboundEvents.push(...outboundEvents);
+            if (pendingOutboundEvents.length >= OUTBOUND_AUDIT_BATCH_SIZE) await flushOutboundEvents();
 
             for (const result of batchResults) {
                 if (result.status === 'fulfilled') {
@@ -841,20 +851,23 @@ export async function sendCampaignById({
                 };
             }
 
+            // A clean batch proves this Page is accepting work. Grow only
+            // within the shared Page budget; a throttle still ends the slice.
+            sendBatchSizeThisRun = Math.min(MAX_SEND_BATCH_SIZE, sendBatchSizeThisRun + 5);
+
             if (processedThisRun < MAX_RECIPIENTS && DELAY_BETWEEN_BATCHES > 0 &&
                 Date.now() - startTime + DELAY_BETWEEN_BATCHES + lastBatchDurationMs + DATABASE_REQUEST_TIMEOUT_MS < MAX_PROCESSING_TIME) {
                 await waitForPageDeliveryBatch(DELAY_BETWEEN_BATCHES);
             }
         }
 
-        const { data: finalStatus, error: finalStatusError } = await databaseRequest(supabase
+        const [finalState, progress] = await Promise.all([databaseRequest(supabase
             .from('campaigns')
             .select('status')
             .eq('id', campaignId)
-            .single());
+            .single()), getCampaignDeliveryProgress(supabase, campaignId)]);
+        const { data: finalStatus, error: finalStatusError } = finalState;
         if (finalStatusError) throw finalStatusError;
-
-        const progress = await getCampaignDeliveryProgress(supabase, campaignId);
 
         if (finalStatus?.status === 'sending') {
             const updated = await updateCampaignState(supabase, campaignId, {
@@ -963,6 +976,8 @@ export async function sendCampaignById({
             }
         };
     } finally {
+        try { await flushOutboundEvents(true); }
+        catch (auditError) { console.error('Optional campaign attribution could not be flushed:', auditError); }
         if (pageLease) {
             try { await releasePageDelivery(supabase, pageLease.pageId, pageLease.owner, pageRateLimited); }
             catch (releaseError) { console.error('Page delivery lease release failed; the lease will expire:', releaseError); }

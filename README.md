@@ -81,6 +81,7 @@ For large campaigns, deploy the compact delivery queue in this exact order:
 3. Confirm the new deployment is healthy, then run `database/migration_compact_campaign_delivery_finalize.sql` once. The finalizer preserves campaign totals and failures, removes completed one-time queue rows, and replaces the random recipient UUID with the `(campaign_id, contact_id)` primary key.
 4. Run `database/migration_campaign_delivery_timeout_fix.sql` to make immediate claims and progress checks constant-time for fully materialized one-time campaigns.
 5. Run `database/migration_campaign_delivery_recovery.sql` to pace delivery after Meta throttling and convert historical manual holds into resumable drafts.
+6. Run `database/migration_campaign_delivery_throughput.sql` with the faster sender to raise healthy Page capacity to 25 parallel recipients. Pages recovering from throttles retain their smaller shared budgets and cooldowns.
 
 Do not run the finalizer before step 2. Older senders calculate progress from terminal queue rows that the finalizer intentionally removes.
 
@@ -187,6 +188,16 @@ results. Stop still pauses delivery; Page authorization and template errors
 remain visible when they require a repair. The minute campaign scheduler is
 required to continue sending after the browser closes.
 
+The faster sender increases parallel batches from 10 to 25 on healthy Pages,
+uses no artificial delay between healthy batches, and groups optional audit
+writes into 250-message chunks after saving delivery results. Browser requests
+process as many recipients as fit in their 45-second slice instead of stopping
+at 500. On Vercel, the campaign cron acknowledges the scheduler immediately and
+keeps its delivery work alive for up to 210 seconds using `waitUntil`, within
+the configured five-minute function lifetime. Other hosts keep the short
+synchronous worker response. Recipient claims, manual Stop, and shared Meta
+recovery windows still apply. A later scheduler tick resumes any remaining work.
+
 Campaigns opens across all assigned Pages. Bulk send status and History link
 directly to the saved campaign, bypassing Page, date, and pagination filters.
 A failed status lookup displays a retry message instead of an empty list.
@@ -197,6 +208,7 @@ install the optional local test tool and run the SQL stress check:
 ```powershell
 npm install --prefix outputs/campaign-scale-tools --no-save --package-lock=false --ignore-scripts @electric-sql/pglite
 node scripts/verify-campaign-scale.mjs
+node scripts/verify-campaign-throughput.mjs
 ```
 
 The default fixture contains 2,000,005 contacts. It verifies bounded claims,
@@ -204,6 +216,10 @@ worker restart, expired claim recovery, recipient failures, exact counters, and
 complete draining without duplicate completed recipients. It removes its local
 database afterward. This checks queue correctness, not Facebook throughput or
 delivery permission for every recipient.
+The throughput check executes the new Page budget migration locally and checks
+lease exclusivity, shared cooldowns, strike-based reduction, expired worker
+recovery, and administrative function permissions. The sender tests also include
+a synthetic latency benchmark for old pacing versus the faster batch path.
 
 **Note:** The `vercel.json` file is configured with extended function timeouts (5 minutes) for sync operations, but does not define Vercel Cron schedules.
 

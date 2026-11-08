@@ -13,6 +13,9 @@ const MAX_IMMEDIATE_CAMPAIGNS_TO_SCAN = 100;
 // cron-jobs.org can stop waiting around the 30-second mark. Leave enough
 // headroom for campaign discovery and the JSON response.
 const MAX_CRON_SEND_MS = 15000;
+// The scheduler receives its response immediately on Vercel. Keep delivering
+// between minute ticks and leave ample time to save receipts and release leases.
+const MAX_BACKGROUND_SEND_MS = 210_000;
 const WORKER_RETRY_DELAY_MS = 60_000;
 
 type ScheduledCampaign = {
@@ -160,7 +163,7 @@ async function getResumableImmediateCampaigns(
     return (data || []) as ScheduledCampaign[];
 }
 
-export async function processCampaignQueue() {
+export async function processCampaignQueue({ extendedRun = false }: { extendedRun?: boolean } = {}) {
     const supabase = getSupabaseAdmin();
     const now = new Date().toISOString();
     const staleSendingCutoff = new Date(Date.now() - STALE_SENDING_AFTER_MS).toISOString();
@@ -237,10 +240,10 @@ export async function processCampaignQueue() {
                 dueAt: isImmediateResume ? undefined : now,
                 sendBatchSize: 25,
                 delayBetweenBatchesMs: 0,
-                maxRecipientsPerRun: isImmediateResume
+                maxRecipientsPerRun: extendedRun ? undefined : isImmediateResume
                     ? MAX_IMMEDIATE_RECIPIENTS_PER_CAMPAIGN_RUN
                     : MAX_RECIPIENTS_PER_CAMPAIGN_RUN,
-                maxProcessingTimeMs: MAX_CRON_SEND_MS,
+                maxProcessingTimeMs: extendedRun ? MAX_BACKGROUND_SEND_MS : MAX_CRON_SEND_MS,
                 includeUnscheduledRecipients: !isImmediateResume &&
                     Boolean(campaign.scheduled_at) &&
                     new Date(campaign.scheduled_at as string).getTime() <= new Date(now).getTime()

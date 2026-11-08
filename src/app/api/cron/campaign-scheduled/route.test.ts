@@ -4,8 +4,10 @@ import type { NextRequest } from 'next/server';
 
 const mocks = vi.hoisted(() => ({
     getSupabaseAdmin: vi.fn(),
-    sendCampaignById: vi.fn()
+    sendCampaignById: vi.fn(),
+    waitUntil: vi.fn()
 }));
+vi.mock('@vercel/functions', () => ({ waitUntil: mocks.waitUntil }));
 
 vi.mock('@/lib/supabase', () => ({
     getSupabaseAdmin: mocks.getSupabaseAdmin
@@ -182,9 +184,10 @@ async function loadRoute() {
 }
 
 describe('GET /api/cron/campaign-scheduled', () => {
-    afterEach(() => { vi.useRealTimers(); });
+    afterEach(() => { vi.useRealTimers(); vi.unstubAllEnvs(); });
     beforeEach(() => {
         vi.clearAllMocks();
+        vi.stubEnv('VERCEL', '0');
     });
 
     it('bounds a stalled discovery read and starts the other discovery queries independently', async () => {
@@ -232,6 +235,27 @@ describe('GET /api/cron/campaign-scheduled', () => {
             maxProcessingTimeMs: 15000,
             includeUnscheduledRecipients: true
         });
+    });
+
+    it('acknowledges the scheduler immediately and keeps a long delivery slice alive on Vercel', async () => {
+        const { GET } = await loadRoute();
+        vi.stubEnv('VERCEL', '1');
+        const supabase = createSupabaseMock({ campaignLevelCampaigns: [], immediateCampaigns: [
+            createCampaign({ status: 'sending', audience_mode: 'specific', scheduled_at: null })
+        ] });
+        mocks.getSupabaseAdmin.mockReturnValue(supabase);
+        let finish!: (result: unknown) => void;
+        mocks.sendCampaignById.mockImplementationOnce(() => new Promise(resolve => { finish = resolve; }));
+        const response = await GET(createRequest());
+        expect(await response.json()).toMatchObject({ success: true, background: true });
+        expect(mocks.waitUntil).toHaveBeenCalledTimes(1);
+        // Discovery and delivery continue after the HTTP response is ready.
+        await vi.waitFor(() => expect(mocks.sendCampaignById).toHaveBeenCalled());
+        expect(mocks.sendCampaignById).toHaveBeenCalledWith(expect.objectContaining({
+            maxProcessingTimeMs: 210_000, maxRecipientsPerRun: undefined, backgroundOnly: true
+        }));
+        finish({ success: true, body: {} });
+        await mocks.waitUntil.mock.calls[0][0];
     });
 
     it('continues an immediate campaign when scheduled discovery times out', async () => {
