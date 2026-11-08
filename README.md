@@ -179,6 +179,32 @@ that header return `401`; missing server configuration returns `503`. Check each
 job's execution history after changing deployment settings. A failed or disabled
 scheduler stops background sync, campaign continuation, and follow-ups.
 
+Bulk sends save their background continuation before returning the prepared
+campaign. Both sending screens retry temporary network failures, gateway
+timeouts, and service errors automatically, and wait for Meta cooldowns before
+continuing. They resume the same campaign and retain completed recipient
+results. Stop still pauses delivery; Page authorization and template errors
+remain visible when they require a repair. The minute campaign scheduler is
+required to continue sending after the browser closes.
+
+Campaigns opens across all assigned Pages. Bulk send status and History link
+directly to the saved campaign, bypassing Page, date, and pagination filters.
+A failed status lookup displays a retry message instead of an empty list.
+
+To verify a large queue without contacting Facebook or modifying production,
+install the optional local test tool and run the SQL stress check:
+
+```powershell
+npm install --prefix outputs/campaign-scale-tools --no-save --package-lock=false --ignore-scripts @electric-sql/pglite
+node scripts/verify-campaign-scale.mjs
+```
+
+The default fixture contains 2,000,005 contacts. It verifies bounded claims,
+worker restart, expired claim recovery, recipient failures, exact counters, and
+complete draining without duplicate completed recipients. It removes its local
+database afterward. This checks queue correctness, not Facebook throughput or
+delivery permission for every recipient.
+
 **Note:** The `vercel.json` file is configured with extended function timeouts (5 minutes) for sync operations, but does not define Vercel Cron schedules.
 
 ## License

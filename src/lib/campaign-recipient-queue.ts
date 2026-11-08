@@ -44,7 +44,11 @@ export async function claimCampaignRecipients({
     }));
 
     if (error) throw error;
-    return (data || []) as ClaimedCampaignRecipient[];
+    if (!Array.isArray(data) || data.length > batchSize || data.some(row =>
+        typeof row?.contact_id !== 'string' || !row.contact_id || typeof row?.claim_token !== 'string' || !row.claim_token)) {
+        throw new Error('Database did not return a valid campaign recipient batch.');
+    }
+    return data as ClaimedCampaignRecipient[];
 }
 
 export async function finishCampaignRecipient({
@@ -151,11 +155,19 @@ export async function getCampaignDeliveryProgress(
 
     if (error) throw error;
     const row = Array.isArray(data) ? data[0] : data;
+    const counts = [row?.sent_count, row?.failed_count, row?.remaining_count];
+    if (!row || counts.some(value =>
+        (typeof value !== 'number' && typeof value !== 'string') || value === '' ||
+        !Number.isSafeInteger(Number(value)) || Number(value) < 0)) {
+        // Missing progress is an infrastructure failure, never proof that a
+        // million-recipient campaign has completed with nothing remaining.
+        throw new Error('Database did not return valid campaign delivery progress.');
+    }
 
     return {
-        sent: Number(row?.sent_count || 0),
-        failed: Number(row?.failed_count || 0),
-        remaining: Number(row?.remaining_count || 0)
+        sent: Number(row.sent_count),
+        failed: Number(row.failed_count),
+        remaining: Number(row.remaining_count)
     };
 }
 

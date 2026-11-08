@@ -67,8 +67,9 @@ function createSupabaseMock() {
     });
     const campaignSelect = vi.fn().mockReturnValue({ single: campaignSingle });
     const campaignsInsert = vi.fn().mockReturnValue({ select: campaignSelect });
-    const campaignsUpdateEq = vi.fn().mockResolvedValue({ error: null });
-    const campaignsUpdate = vi.fn().mockReturnValue({ eq: campaignsUpdateEq });
+    const updateQuery: any = { then: (resolve: (value: unknown) => unknown) => Promise.resolve({ error: null }).then(resolve) };
+    updateQuery.eq = vi.fn(() => updateQuery);
+    const campaignsUpdate = vi.fn().mockReturnValue(updateQuery);
 
     const campaignRecipientsInsert = vi.fn().mockResolvedValue({ error: null });
     const rpc = vi.fn().mockResolvedValue({
@@ -408,10 +409,16 @@ describe('POST /api/pages/[pageId]/contacts/tracked-bulk-message', () => {
         expect(response.status).toBe(200);
         expect(body.campaign).toEqual(expect.objectContaining({
             id: 'campaign_atomic_1',
+            status: 'sending',
+            background_delivery_enabled: true,
             total_recipients: 161522,
             audience_materialized_at: '2026-08-12T15:30:00.000Z'
         }));
         expect(body.recipients).toBe(161522);
+        expect(body.send).toMatchObject({ queued: true, partial: true, remaining: 161522 });
+        expect(supabase.campaignsUpdate).toHaveBeenCalledWith(expect.objectContaining({
+            status: 'sending', background_delivery_enabled: true
+        }));
         expect(supabase.rpc).toHaveBeenCalledWith(
             'create_filtered_tracked_bulk_campaign',
             expect.objectContaining({
@@ -424,6 +431,32 @@ describe('POST /api/pages/[pageId]/contacts/tracked-bulk-message', () => {
         expect(supabase.contactsIn).not.toHaveBeenCalled();
         expect(supabase.campaignsInsert).not.toHaveBeenCalled();
         expect(supabase.campaignRecipientsInsert).not.toHaveBeenCalled();
+    });
+
+    it('returns the real saved campaign when queue activation fails after creation', async () => {
+        const supabase = createSupabaseMock();
+        const query: any = { then: (resolve: (value: unknown) => unknown) => Promise.resolve({ error: { message: 'Connection failed' } }).then(resolve) };
+        query.eq = () => query;
+        supabase.campaignsUpdate.mockReturnValueOnce(query);
+        mocks.getSupabaseAdmin.mockReturnValue(supabase);
+        const response = await POST(createRequest({ messagePart1: 'Fixture', envelopeWrapper: 'none', selection: { mode: 'all' } }),
+            { params: Promise.resolve({ pageId: 'page_1' }) });
+        expect(response.status).toBe(500);
+        expect(await response.json()).toMatchObject({ campaignId: 'campaign_atomic_1', campaignReady: true,
+            recoveryUrl: '/dashboard/campaigns?campaignId=campaign_atomic_1&pageId=page_1' });
+        expect(supabase.rpc).toHaveBeenCalledTimes(1);
+    });
+
+    it('does not invent a campaign recovery link when creation never succeeded', async () => {
+        const supabase = createSupabaseMock();
+        supabase.rpc.mockResolvedValueOnce({ data: null, error: { message: 'Connection failed' } } as never);
+        mocks.getSupabaseAdmin.mockReturnValue(supabase);
+        const response = await POST(createRequest({ messagePart1: 'Fixture', envelopeWrapper: 'none', selection: { mode: 'all' } }),
+            { params: Promise.resolve({ pageId: 'page_1' }) });
+        const body = await response.json();
+        expect(response.status).toBe(500);
+        expect(body).not.toHaveProperty('campaignId');
+        expect(body).not.toHaveProperty('recoveryUrl');
     });
 
     afterEach(() => {
@@ -476,12 +509,14 @@ describe('POST /api/pages/[pageId]/contacts/tracked-bulk-message', () => {
         ]);
         expect(body.send).toEqual(expect.objectContaining({
             partial: true,
+            queued: true,
             sent: 0,
             failed: 0,
             remaining: 5
         }));
         expect(supabase.campaignsUpdate).toHaveBeenCalledWith(expect.objectContaining({
-            audience_materialized_at: expect.any(String)
+            audience_materialized_at: expect.any(String),
+            status: 'sending', background_delivery_enabled: true
         }));
         expect(mocks.sendCampaignById).not.toHaveBeenCalled();
     });

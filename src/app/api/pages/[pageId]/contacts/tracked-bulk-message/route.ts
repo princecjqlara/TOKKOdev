@@ -10,6 +10,8 @@ import { getPhilippinesScheduledAtIso, getTomorrowPhilippinesDateParts } from '@
 import { getSupabaseAdmin } from '@/lib/supabase';
 import { fetchAllSupabaseRows, SUPABASE_IN_FILTER_BATCH_SIZE } from '@/lib/supabase-pagination';
 import { getUtilityTemplateParameterValidationError } from '@/lib/send-errors';
+import { databaseRequest } from '@/lib/database-request';
+import { getCampaignRecoveryUrl } from '@/lib/campaign-recovery';
 
 export const maxDuration = 300;
 
@@ -94,15 +96,17 @@ async function materializeCampaignRecipients(
 async function markAudienceMaterialized(
     supabase: ReturnType<typeof getSupabaseAdmin>,
     campaignId: string,
-    materializedAt: string
+    materializedAt: string,
+    queueDelivery = false
 ): Promise<void> {
-    const { error } = await supabase
+    const { error } = await databaseRequest(supabase
         .from('campaigns')
         .update({
             audience_materialized_at: materializedAt,
-            updated_at: materializedAt
+            updated_at: materializedAt,
+            ...(queueDelivery ? { status: 'sending', background_delivery_enabled: true } : {})
         })
-        .eq('id', campaignId);
+        .eq('id', campaignId));
 
     if (error) throw error;
 }
@@ -442,6 +446,9 @@ export async function POST(
     request: NextRequest,
     { params }: { params: Promise<{ pageId: string }> }
 ) {
+    let savedCampaignId: string | null = null;
+    let savedPageId: string | null = null;
+    let savedAudienceReady = false;
     try {
         const session = await getSessionFromRequest(request);
 
@@ -453,6 +460,7 @@ export async function POST(
         }
 
         const { pageId } = await params;
+        savedPageId = pageId;
         const body = await request.json();
         const deliveryMode = normalizeDeliveryMode(body.deliveryMode);
         const messagePart1 = typeof body.messagePart1 === 'string' ? body.messagePart1.trim() : '';
@@ -659,15 +667,19 @@ export async function POST(
             if (!atomicCampaign?.campaign_id) {
                 throw new Error('Database did not return the prepared campaign.');
             }
+            savedCampaignId = atomicCampaign.campaign_id;
+            savedAudienceReady = true;
 
-            if (templateMediaHeader) {
-                const { error: mediaPersistenceError } = await supabase
-                    .from('campaigns')
-                    .update({ template_media_header: templateMediaHeader })
-                    .eq('id', atomicCampaign.campaign_id);
-
-                if (mediaPersistenceError) throw mediaPersistenceError;
-            }
+            const { error: queueError } = await databaseRequest(supabase
+                .from('campaigns')
+                .update({
+                    ...(templateMediaHeader ? { template_media_header: templateMediaHeader } : {}),
+                    status: 'sending', background_delivery_enabled: true,
+                    updated_at: new Date().toISOString()
+                })
+                .eq('id', atomicCampaign.campaign_id)
+                .eq('status', 'draft'));
+            if (queueError) throw queueError;
 
             const recipientCount = Number(atomicCampaign.recipient_count || 0);
             const totalMatched = Number(atomicCampaign.total_matched || 0);
@@ -688,7 +700,8 @@ export async function POST(
                     page_id: pageId,
                     name: campaignName,
                     message_text: serializeCampaignMessageSequence([messageText]),
-                    status: 'draft',
+                    status: 'sending',
+                    background_delivery_enabled: true,
                     total_recipients: recipientCount,
                     sent_count: 0,
                     failed_count: 0,
@@ -702,6 +715,7 @@ export async function POST(
                 send: {
                     success: true,
                     partial: true,
+                    queued: true,
                     sent: 0,
                     failed: 0,
                     processed: 0,
@@ -901,6 +915,7 @@ export async function POST(
         if (campaignError) {
             throw campaignError;
         }
+        savedCampaignId = campaign.id;
 
         await materializeCampaignRecipients(
             supabase,
@@ -912,24 +927,26 @@ export async function POST(
         );
 
         const audienceMaterializedAt = new Date().toISOString();
-        await markAudienceMaterialized(supabase, campaign.id, audienceMaterializedAt);
+        savedAudienceReady = true;
+        await markAudienceMaterialized(supabase, campaign.id, audienceMaterializedAt, true);
 
         return NextResponse.json({
             success: true,
             campaign: {
                 ...campaign,
+                status: 'sending',
+                background_delivery_enabled: true,
                 audience_materialized_at: audienceMaterializedAt
             },
             recipients: contactIds.length,
             totalMatched,
             selectedRange,
-            // Delivery is deliberately continued by the browser through the
-            // bounded campaign send endpoint. This keeps campaign creation and
-            // recipient materialization from sharing one deployment timeout
-            // with the actual Facebook sends.
+            // Save automatic continuation before returning, so closing the
+            // browser before its first send request cannot strand this queue.
             send: {
                 success: true,
                 partial: true,
+                queued: true,
                 sent: 0,
                 failed: 0,
                 processed: 0,
@@ -939,11 +956,12 @@ export async function POST(
             }
         });
     } catch (error) {
-        if (error instanceof AccessError) return NextResponse.json({ message: error.message }, { status: error.status });
         console.error('Error creating tracked bulk message:', error);
         return NextResponse.json(
-            { error: 'Failed to create tracked bulk message', message: (error as Error).message },
-            { status: 500 }
+            { error: 'Failed to create tracked bulk message', message: (error as Error).message,
+                ...(savedCampaignId ? { campaignId: savedCampaignId, campaignReady: savedAudienceReady,
+                    recoveryUrl: getCampaignRecoveryUrl(savedCampaignId, savedPageId) } : {}) },
+            { status: error instanceof AccessError ? error.status : 500 }
         );
     }
 }

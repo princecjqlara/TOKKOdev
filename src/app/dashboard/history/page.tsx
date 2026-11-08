@@ -20,6 +20,7 @@ import {
 } from 'lucide-react';
 import Pagination from '@/components/Pagination';
 import type { Page } from '@/types';
+import { getCampaignRecoveryUrl } from '@/lib/campaign-recovery';
 
 type ActivityActor = {
     id: string;
@@ -398,6 +399,7 @@ function ActivityRows({ item, expanded, onToggle, errors, errorTotal, errorsLoad
                         <span className="flex items-center gap-2 font-bold"><ActivityIcon kind={item.kind} />{item.title}</span>
                         <span className="block mt-1 font-mono text-[10px] uppercase text-gray-500">{humanize(item.actionType)} · ID {item.sourceId}</span>
                     </button>
+                    {item.source === 'campaign' && <a className="block mt-2 text-xs font-bold underline" href={getCampaignRecoveryUrl(item.sourceId, item.pageId)}>View campaign</a>}
                 </td>
                 <td>
                     <div className="flex items-center gap-2">

@@ -59,7 +59,7 @@ describe('GET /api/campaigns Page isolation', () => {
         const query: ListingQuery = {
             select: vi.fn(() => query),
             in: vi.fn((_column: string, ids: string[]) => { records = records.filter(row => ids.includes(row.page_id)); return query; }),
-            eq: vi.fn((_column: string, id: string) => { records = records.filter(row => row.page_id === id); return query; }),
+            eq: vi.fn((column: string, id: string) => { records = records.filter(row => row[column as 'page_id' | 'id'] === id); return query; }),
             order: vi.fn(() => query),
             range: vi.fn(async (start: number, end: number) => ({ data: records.slice(start, end + 1), count: records.length, error: null }))
         };
@@ -100,6 +100,20 @@ describe('GET /api/campaigns Page isolation', () => {
         expect(response.status).toBe(200);
         expect(await response.json()).toMatchObject({ items: [], total: 0 });
         expect(from).not.toHaveBeenCalledWith('campaigns');
+    });
+
+    it('finds a saved campaign across Page, date and pagination filters', async () => {
+        listingDatabase();
+        const response = await GET(new NextRequest('http://localhost/api/campaigns?campaignId=campaign_2&pageId=page_1&page=99&dateFrom=2099-01-01&dateTo=2099-01-02'));
+        expect(response.status).toBe(200);
+        expect(await response.json()).toMatchObject({ page: 1, items: [{ id: 'campaign_2', page_id: 'page_2' }], total: 1 });
+    });
+
+    it('does not reveal an unassigned Page campaign through direct recovery', async () => {
+        listingDatabase(['page_1']);
+        const response = await GET(new NextRequest('http://localhost/api/campaigns?campaignId=campaign_3'));
+        expect(response.status).toBe(200);
+        expect(await response.json()).toMatchObject({ items: [], total: 0 });
     });
 });
 

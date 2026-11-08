@@ -30,6 +30,7 @@ type SendCampaignByIdOptions = {
     userId?: string;
     allowScheduled?: boolean;
     backgroundOnly?: boolean;
+    expectedUpdatedAt?: string;
     dueAt?: string;
     includeUnscheduledRecipients?: boolean;
     sendBatchSize?: number;
@@ -118,6 +119,7 @@ export async function sendCampaignById({
     userId,
     allowScheduled = false,
     backgroundOnly = false,
+    expectedUpdatedAt,
     dueAt,
     includeUnscheduledRecipients = false,
     sendBatchSize = 25,
@@ -173,7 +175,11 @@ export async function sendCampaignById({
         const expectedState = { status: campaign.status, updatedAt: campaign.updated_at };
         isLoopCampaign = Boolean(campaign.is_loop);
         const allowedStatuses = new Set(allowScheduled ? ['draft', 'scheduled', 'sending'] : ['draft', 'sending']);
-        if (!allowedStatuses.has(campaign.status)) {
+        if ((backgroundOnly || expectedUpdatedAt) && campaign.status === 'completed') return {
+            status: 200, body: { success: true, sent: Number(campaign.sent_count || 0),
+                failed: Number(campaign.failed_count || 0), remaining: 0 }
+        };
+        if (!allowedStatuses.has(campaign.status) && !((backgroundOnly || expectedUpdatedAt) && campaign.status === 'cancelled')) {
             return {
                 status: 400,
                 body: {
@@ -189,7 +195,12 @@ export async function sendCampaignById({
             remaining: Math.max(0, Number(campaign.total_recipients || 0) - Number(campaign.sent_count || 0) - Number(campaign.failed_count || 0)),
             message: 'Campaign stopped or changed. Unsent recipients remain saved; use Continue Unsent to resume.'
         } };
+        if (campaign.status === 'cancelled') return stoppedResult;
         if (backgroundOnly && (campaign.status === 'draft' || (!dueAt && !campaign.background_delivery_enabled))) return stoppedResult;
+        // Retrying a lost first response may start the original draft, but
+        // cannot restart a draft that someone has since stopped or edited.
+        if (campaign.status === 'draft' && expectedUpdatedAt &&
+            Date.parse(campaign.updated_at) !== Date.parse(expectedUpdatedAt)) return stoppedResult;
         recoveryStatus = campaign.status;
         continuationSaved = campaign.status === 'scheduled' || campaign.status === 'sending' && campaign.background_delivery_enabled;
 
@@ -449,10 +460,15 @@ export async function sendCampaignById({
                 ? Math.max(1, Math.floor(maxRecipientsPerRun))
                 : Number.MAX_SAFE_INTEGER;
         const useAiMessages = campaign.use_ai_message || campaign.is_loop;
+        // Account for the observed cost of sending and saving a batch before
+        // claiming more recipients near the invocation's deadline.
+        let lastBatchDurationMs = 0;
 
         console.log(`Starting campaign ${campaignId} with atomic batches of ${SEND_BATCH_SIZE}`);
 
-        while (processedThisRun < MAX_RECIPIENTS && Date.now() - startTime <= MAX_PROCESSING_TIME) {
+        while (processedThisRun < MAX_RECIPIENTS &&
+            Date.now() - startTime + lastBatchDurationMs + DATABASE_REQUEST_TIMEOUT_MS < MAX_PROCESSING_TIME) {
+            const batchStartedAt = Date.now();
             const { data: currentCampaign, error: currentCampaignError } = await databaseRequest(supabase
                 .from('campaigns')
                 .select('status')
@@ -775,6 +791,7 @@ export async function sendCampaignById({
                 }
             }
             processedThisRun += completionResults.length;
+            lastBatchDurationMs = Date.now() - batchStartedAt;
 
             if (pausedResults.length > 0) {
                 const progress = await getCampaignDeliveryProgress(supabase, campaignId);
@@ -824,7 +841,8 @@ export async function sendCampaignById({
                 };
             }
 
-            if (processedThisRun < MAX_RECIPIENTS && DELAY_BETWEEN_BATCHES > 0) {
+            if (processedThisRun < MAX_RECIPIENTS && DELAY_BETWEEN_BATCHES > 0 &&
+                Date.now() - startTime + DELAY_BETWEEN_BATCHES + lastBatchDurationMs + DATABASE_REQUEST_TIMEOUT_MS < MAX_PROCESSING_TIME) {
                 await waitForPageDeliveryBatch(DELAY_BETWEEN_BATCHES);
             }
         }

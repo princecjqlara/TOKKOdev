@@ -235,6 +235,42 @@ describe('sendCampaignById', () => {
         ]);
     });
 
+    it('does not restart a stopped draft when a lost first response is retried', async () => {
+        const supabase = createSupabaseMock('draft');
+        const result = await sendCampaignById({ campaignId: 'campaign_1', supabase: supabase as never,
+            expectedUpdatedAt: '2026-11-07T00:00:00.000Z' });
+        expect(result.body).toMatchObject({ paused: true, retryable: false });
+        expect(supabase.campaignUpdate).not.toHaveBeenCalled();
+        expect(sendMessage).not.toHaveBeenCalled();
+    });
+
+    it('returns completion when a background worker finishes before the browser retry', async () => {
+        const supabase = createSupabaseMock('sending');
+        Object.assign(supabase.campaignRecord, { status: 'completed', sent_count: 3, failed_count: 1 });
+        const result = await sendCampaignById({ campaignId: 'campaign_1', supabase: supabase as never, backgroundOnly: true });
+        expect(result.body).toMatchObject({ success: true, sent: 3, failed: 1, remaining: 0 });
+        expect(supabase.campaignUpdate).not.toHaveBeenCalled();
+        expect(sendMessage).not.toHaveBeenCalled();
+    });
+
+    it('leaves persistence time before starting another slow batch and resumes the rest later', async () => {
+        vi.useFakeTimers();
+        const supabase = createSupabaseMock('draft', { recipients: [
+            { id: 'one', contact_id: 'one', contacts: { psid: 'one' } },
+            { id: 'two', contact_id: 'two', contacts: { psid: 'two' } }
+        ] });
+        vi.mocked(sendMessage).mockImplementationOnce(() => new Promise(resolve => {
+            setTimeout(() => resolve({ message_id: 'accepted-one' }), 25_000);
+        })).mockResolvedValue({ message_id: 'accepted-two' });
+        const options = { campaignId: 'campaign_1', supabase: supabase as never, sendBatchSize: 1, maxProcessingTimeMs: 45_000 };
+        const pending = sendCampaignById(options);
+        await vi.advanceTimersByTimeAsync(25_000);
+        expect((await pending).body).toMatchObject({ partial: true, sent: 1, remaining: 1 });
+        expect(sendMessage).toHaveBeenCalledTimes(1);
+        expect((await sendCampaignById({ ...options, backgroundOnly: true })).body).toMatchObject({ sent: 2, failed: 0 });
+        expect(vi.mocked(sendMessage).mock.calls.map(call => call[2])).toEqual(['one', 'two']);
+    });
+
     it('does not mutate or send a campaign if the membership service is unavailable', async () => {
         const supabase = createSupabaseMock('draft');
         supabase.userPageSingle.mockResolvedValueOnce({ data: null, error: { code: '08000', message: 'Connection failed' } });

@@ -125,4 +125,13 @@ describe('POST /api/campaigns/[campaignId]/send', () => {
         expect(response.status).toBe(503);
         expect(mocks.sendCampaignById).toHaveBeenCalledTimes(1);
     });
+
+    it('keeps automatic continuation from restarting a manually stopped draft', async () => {
+        await POST(new Request('http://localhost/api/campaigns/campaign_1/send', {
+            method: 'POST', body: JSON.stringify({ backgroundOnly: true, expectedUpdatedAt: '2026-11-08T00:00:00Z' })
+        }) as NextRequest, { params: Promise.resolve({ campaignId: 'campaign_1' }) });
+        expect(mocks.sendCampaignById).toHaveBeenCalledWith(expect.objectContaining({
+            userId: 'user_1', backgroundOnly: true, expectedUpdatedAt: '2026-11-08T00:00:00Z'
+        }));
+    });
 });

@@ -8,7 +8,10 @@ import Pagination from '@/components/Pagination';
 import Modal from '@/components/Modal';
 import { Campaign, Page, Contact, PaginatedResponse } from '@/types';
 import { getCampaignMessagePreview } from '@/lib/campaign-message-sequence';
-import { getCampaignDeliveryState, shouldContinueCampaignDelivery } from '@/lib/campaign-delivery-state';
+import { getCampaignDeliveryState } from '@/lib/campaign-delivery-state';
+import { runCampaignDelivery } from '@/lib/campaign-delivery-client';
+import { getCampaignRecoveryUrl } from '@/lib/campaign-recovery';
+import { requestWithTimeout } from '@/lib/request-timeout';
 import { createRequestGate } from '@/lib/request-gate';
 import {
     UTILITY_TEMPLATES,
@@ -197,6 +200,8 @@ export default function CampaignsPage() {
     const [selectedPageId, setSelectedPageId] = useState<string | null>(null);
     const [campaigns, setCampaigns] = useState<Campaign[]>([]);
     const campaignRequests = useRef(createRequestGate());
+    const deliveryController = useRef<AbortController | null>(null);
+    const automaticRecoveries = useRef(new Set<string>());
     const [contacts, setContacts] = useState<Contact[]>([]);
     const [loading, setLoading] = useState(true);
 
@@ -204,6 +209,9 @@ export default function CampaignsPage() {
     const [page, setPage] = useState(1);
     const [pageSize, setPageSize] = useState(25);
     const [total, setTotal] = useState(0);
+    const [focusedCampaignId, setFocusedCampaignId] = useState('');
+    const [campaignLookup, setCampaignLookup] = useState('');
+    const [campaignFetchError, setCampaignFetchError] = useState<string | null>(null);
 
     // Modals
     const [showCreateModal, setShowCreateModal] = useState(false);
@@ -217,6 +225,7 @@ export default function CampaignsPage() {
     const [editingCampaign, setEditingCampaign] = useState<Campaign | null>(null);
     const [actionLoading, setActionLoading] = useState(false);
     const [sendingCampaignId, setSendingCampaignId] = useState<string | null>(null);
+    const [sendingProgress, setSendingProgress] = useState('');
     const [cancellingCampaignId, setCancellingCampaignId] = useState<string | null>(null);
 
     // Loop campaign state
@@ -278,7 +287,7 @@ export default function CampaignsPage() {
     const [dateTo, setDateTo] = useState('');
 
     const fetchCampaigns = useCallback(async (quiet = false) => {
-        if (!selectedPageId) return;
+        if (selectedPageId === null) return;
         const token = campaignRequests.current.next();
         if (!quiet) setLoading(true);
         try {
@@ -287,21 +296,32 @@ export default function CampaignsPage() {
             });
             if (dateFrom) params.set('dateFrom', dateFrom);
             if (dateTo) params.set('dateTo', dateTo);
-            const res = await fetch(`/api/campaigns?${params}`);
-            if (!res.ok) throw new Error(`Failed to refresh campaigns (HTTP ${res.status})`);
-            const data: PaginatedResponse<Campaign> = await res.json();
+            if (focusedCampaignId) params.set('campaignId', focusedCampaignId);
+            const data = await requestWithTimeout(async signal => {
+                const res = await fetch(`/api/campaigns?${params}`, { signal });
+                if (!res.ok) throw new Error(`Failed to refresh campaigns (HTTP ${res.status})`);
+                return await res.json() as PaginatedResponse<Campaign>;
+            }, 30_000, 'Campaign status lookup timed out.');
             if (!campaignRequests.current.isLatest(token)) return;
+            setCampaignFetchError(null);
+            if (!focusedCampaignId && page > 1 && (data.total || 0) <= (page - 1) * pageSize) {
+                setPage(1);
+                return;
+            }
             setCampaigns(data.items || []);
             setTotal(data.total || 0);
+            if (focusedCampaignId && data.items?.[0]) setSelectedPageId(data.items[0].page_id);
         } catch (error) {
             console.error('Error fetching campaigns:', error);
+            if (campaignRequests.current.isLatest(token)) setCampaignFetchError('Campaigns could not be loaded. Your saved sends may still be running. Retry loading their status.');
         } finally {
             if (campaignRequests.current.isLatest(token)) setLoading(false);
         }
-    }, [selectedPageId, page, pageSize, dateFrom, dateTo]);
+    }, [selectedPageId, page, pageSize, dateFrom, dateTo, focusedCampaignId]);
 
     useEffect(() => {
         fetchPages();
+        return () => deliveryController.current?.abort();
     }, []);
 
     useEffect(() => {
@@ -313,7 +333,7 @@ export default function CampaignsPage() {
     const hasActiveCampaigns = campaigns.some(campaign =>
         campaign.status === 'sending' || campaign.status === 'scheduled');
     useEffect(() => {
-        if (!selectedPageId || !hasActiveCampaigns) return;
+        if (selectedPageId === null || (!hasActiveCampaigns && !sendingCampaignId && !campaignFetchError)) return;
         let refreshing = false;
         const timer = window.setInterval(async () => {
             if (refreshing || document.hidden) return;
@@ -322,7 +342,7 @@ export default function CampaignsPage() {
             finally { refreshing = false; }
         }, 5000);
         return () => window.clearInterval(timer);
-    }, [selectedPageId, hasActiveCampaigns, fetchCampaigns]);
+    }, [selectedPageId, hasActiveCampaigns, sendingCampaignId, campaignFetchError, fetchCampaigns]);
 
     useEffect(() => {
         if (!showErrorsModal || !errorsCampaignId) return;
@@ -347,14 +367,26 @@ export default function CampaignsPage() {
 
     const fetchPages = async () => {
         try {
-            const res = await fetch('/api/pages');
-            const data = await res.json();
+            const data = await requestWithTimeout(async signal => {
+                const res = await fetch('/api/pages', { signal });
+                if (!res.ok) throw new Error(`Failed to load Pages (HTTP ${res.status})`);
+                return res.json();
+            }, 30_000, 'Page lookup timed out.');
             setPages(data.pages || []);
+            const params = new URLSearchParams(window.location.search);
+            const requestedCampaign = params.get('campaignId') || '';
+            setFocusedCampaignId(requestedCampaign);
+            setCampaignLookup(requestedCampaign);
             if (data.pages?.length > 0) {
-                setSelectedPageId(data.pages[0].id);
+                const requestedPage = params.get('pageId');
+                setSelectedPageId(data.pages.some((item: Page) => item.id === requestedPage) ? requestedPage : '');
+            } else {
+                setSelectedPageId('');
             }
         } catch (error) {
             console.error('Error fetching pages:', error);
+            setCampaignFetchError('Your Pages could not be loaded. Saved campaigns have not been deleted. Retry loading their status.');
+            setLoading(false);
         }
     };
 
@@ -955,9 +987,13 @@ export default function CampaignsPage() {
         }
     };
 
-    const handleSend = async (campaign: Campaign) => {
+    const handleSend = useCallback(async (campaign: Campaign, automatic = false) => {
         const campaignId = campaign.id;
+        deliveryController.current?.abort();
+        const controller = new AbortController();
+        deliveryController.current = controller;
         setSendingCampaignId(campaignId);
+        setSendingProgress('Starting delivery...');
         try {
             let storedMedia = readStoredCampaignMedia(campaignId);
             if (storedMedia) {
@@ -987,78 +1023,49 @@ export default function CampaignsPage() {
                 templateMediaHeader: fallbackMediaHeader,
                 templateMediaHeaders: messageMediaHeaders
             };
-            let response = await fetch(`/api/campaigns/${campaignId}/send`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(sendPayload)
+            const data = await runCampaignDelivery(campaignId, {
+                payload: sendPayload,
+                signal: controller.signal,
+                initial: campaign.status === 'sending' ? {
+                    queued: true, sent: campaign.sent_count, failed: campaign.failed_count,
+                    remaining: Math.max(0, campaign.total_recipients - campaign.sent_count - campaign.failed_count)
+                } : undefined,
+                expectedUpdatedAt: campaign.updated_at,
+                onProgress: progress => setSendingProgress(
+                    `${progress.sent ?? 0} sent, ${progress.failed ?? 0} failed, ${progress.remaining ?? 0} pending.` +
+                    (progress.retryable ? ' Waiting to retry automatically.' : '')
+                )
             });
-
-            let data = await response.json().catch(() => ({} as Record<string, unknown>));
-
-            let remaining = Number((data as any).remaining || 0);
-            let deliveryQueuedForRetry = (data as any).retryable === true || (data as any).queued === true;
-
-            if (!response.ok && !deliveryQueuedForRetry) {
-                const errorMessage = (data as any).message || `Failed to send campaign (HTTP ${response.status})`;
-                console.error('Error sending campaign:', errorMessage, data);
-                alert(`Failed to send campaign: ${errorMessage}`);
-            } else {
-                while (shouldContinueCampaignDelivery({ ...data, remaining })) {
-                    response = await fetch(`/api/campaigns/${campaignId}/send`, {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify(sendPayload)
-                    });
-
-                    data = await response.json().catch(() => ({} as Record<string, unknown>));
-                    deliveryQueuedForRetry = (data as any).retryable === true || (data as any).queued === true;
-                    if (!response.ok) {
-                        if ((data as any).retryable === true) {
-                            remaining = Number((data as any).remaining || remaining);
-                            deliveryQueuedForRetry = true;
-                            break;
-                        }
-                        const errorMessage = (data as any).message || `Failed to continue campaign send (HTTP ${response.status})`;
-                        console.error('Error continuing campaign send:', errorMessage, data);
-                        alert(`Failed to continue campaign send: ${errorMessage}`);
-                        return;
-                    }
-
-                    remaining = Number((data as any).remaining || 0);
-                    if ((data as any).processed === 0) break;
-                }
-
-                const sent = (data as any).sent ?? 0;
-                const failed = (data as any).failed ?? 0;
-                if ((data as any).paused && !deliveryQueuedForRetry || (data as any).cancelled) {
-                    alert((data as any).message || 'Campaign stopped. Unsent recipients remain saved.');
-                } else if (deliveryQueuedForRetry) {
-                    alert(
-                        `Campaign is safely queued for automatic retry.\n\n` +
-                        `Sent: ${sent}\nFailed: ${failed}\nRemaining: ${remaining}\n\n` +
-                        'Facebook or the delivery service requested a temporary pause. Completed recipients will not be resent.'
-                    );
-                } else if ((data as any).partial && remaining > 0) {
-                    alert(
-                        `Campaign started in the durable background queue.\n\n` +
-                        `Sent: ${sent}\nFailed: ${failed}\nRemaining: ${remaining}\n\n` +
-                        'The campaign worker will continue it even if this browser closes.'
-                    );
-                } else if (failed > 0) {
-                    alert(`Campaign sent with issues.\n\n✅ Sent: ${sent}\n❌ Failed: ${failed}`);
-                } else if (sent > 0) {
-                    alert(`✅ Campaign sent successfully! ${sent} messages delivered.`);
-                }
+            const sent = data.sent ?? 0;
+            const failed = data.failed ?? 0;
+            if (!automatic && (data.paused || data.cancelled)) {
+                alert(data.message || 'Campaign stopped. Unsent recipients remain saved.');
+            } else if (!automatic) {
+                alert(`Campaign delivery finished.\n\nSent: ${sent}\nFailed: ${failed}`);
             }
 
             await fetchCampaigns();
         } catch (error) {
+            if (controller.signal.aborted) return;
             console.error('Error sending campaign:', error);
-            alert(`Error sending campaign: ${(error as Error).message}`);
+            if (!automatic) alert(`Error sending campaign: ${(error as Error).message}`);
+            await fetchCampaigns(true);
         } finally {
-            setSendingCampaignId(null);
+            if (deliveryController.current === controller) {
+                deliveryController.current = null;
+                setSendingCampaignId(null);
+                setSendingProgress('');
+            }
         }
-    };
+    }, [fetchCampaigns]);
+
+    useEffect(() => {
+        if (!focusedCampaignId || sendingCampaignId || automaticRecoveries.current.has(focusedCampaignId)) return;
+        const campaign = campaigns.find(item => item.id === focusedCampaignId);
+        if (!campaign || campaign.status !== 'sending' || campaign.is_loop || !campaign.background_delivery_enabled) return;
+        automaticRecoveries.current.add(campaign.id);
+        void handleSend(campaign, true);
+    }, [campaigns, focusedCampaignId, sendingCampaignId, handleSend]);
 
     const handleOpenErrorsModal = (campaignId: string) => {
         setErrorsCampaignId(campaignId);
@@ -1082,6 +1089,7 @@ export default function CampaignsPage() {
                 console.error('Error stopping campaign:', errorMessage, data);
                 alert(`Failed to stop campaign: ${errorMessage}`);
             } else {
+                if (sendingCampaignId === campaignId) deliveryController.current?.abort();
                 const remainingRecipients = Number((data as any).remainingRecipients || 0);
                 alert(
                     `Campaign stopped.\n\n` +
@@ -1228,10 +1236,13 @@ export default function CampaignsPage() {
                             value={selectedPageId || ''}
                             onChange={(e) => {
                                 setSelectedPageId(e.target.value);
+                                setFocusedCampaignId('');
+                                setCampaignLookup('');
                                 setPage(1);
                             }}
                             className="input-wireframe h-10 w-full"
                         >
+                            <option value="">All Pages</option>
                             {pages.map((p) => (
                                 <option key={p.id} value={p.id}>
                                     {p.name}
@@ -1242,6 +1253,7 @@ export default function CampaignsPage() {
 
                     <button
                         onClick={handleOpenCreateModal}
+                        disabled={!selectedPageId}
                         className="btn-wireframe"
                     >
                         <Plus className="w-4 h-4 mr-2" />
@@ -1268,6 +1280,28 @@ export default function CampaignsPage() {
                     </button>
                 </div>
             </div>
+
+            <form className="flex flex-wrap items-center gap-2 mb-4" onSubmit={event => {
+                event.preventDefault();
+                const id = campaignLookup.trim();
+                setFocusedCampaignId(id);
+                setPage(1);
+                if (id) window.history.replaceState(null, '', getCampaignRecoveryUrl(id, selectedPageId));
+            }}>
+                <input aria-label="Find campaign by ID" placeholder="Find campaign by ID" className="input-wireframe h-9 text-sm flex-1 max-w-md"
+                    value={campaignLookup} onChange={event => setCampaignLookup(event.target.value)} />
+                <button className="btn-wireframe h-9 text-xs" type="submit">Find campaign</button>
+                {(focusedCampaignId || selectedPageId || dateFrom || dateTo) && <button className="btn-wireframe h-9 text-xs" type="button" onClick={() => {
+                    setFocusedCampaignId(''); setCampaignLookup(''); setSelectedPageId('');
+                    setDateFrom(''); setDateTo(''); setPage(1);
+                    window.history.replaceState(null, '', '/dashboard/campaigns');
+                }}>Show all campaigns</button>}
+            </form>
+            {focusedCampaignId && <p role="status" className="text-sm mb-4">Showing saved campaign {focusedCampaignId} across your assigned Pages.</p>}
+            {campaignFetchError && <div role="alert" className="border border-amber-500 bg-amber-50 p-3 text-sm mb-4">
+                <p>{campaignFetchError}</p>
+                <button className="font-bold underline mt-1" onClick={() => void (selectedPageId === null ? fetchPages() : fetchCampaigns())}>Retry loading campaigns</button>
+            </div>}
 
             {/* Date Filter */}
             <div className="flex flex-wrap items-center gap-3 mb-6">
@@ -1307,15 +1341,18 @@ export default function CampaignsPage() {
                 <div className="flex items-center justify-center h-64 border border-black wireframe-card">
                     <div className="animate-spin w-8 h-8 border-2 border-black border-t-transparent rounded-full" />
                 </div>
-            ) : campaigns.length === 0 ? (
+            ) : campaigns.length === 0 && campaignFetchError ? null : campaigns.length === 0 ? (
                 <div className="wireframe-card text-center py-20">
                     <MessageSquare className="w-16 h-16 text-gray-300 mx-auto mb-4" />
-                    <h3 className="text-xl font-bold uppercase mb-2">No campaigns yet</h3>
+                    <h3 className="text-xl font-bold uppercase mb-2">{focusedCampaignId ? 'Campaign unavailable' : 'No matching campaigns'}</h3>
                     <p className="font-mono text-sm text-gray-500 mb-6">
-                        Create your first campaign to start messaging your audience.
+                        {focusedCampaignId
+                            ? 'This campaign was deleted or your account no longer has access to its Page. Show all campaigns to check your other saved sends.'
+                            : 'Try another Page or clear the filters to find your saved sends.'}
                     </p>
                     <button
                         onClick={handleOpenCreateModal}
+                        disabled={!selectedPageId}
                         className="btn-wireframe"
                     >
                         <Plus className="w-4 h-4 mr-2" />
@@ -1333,6 +1370,7 @@ export default function CampaignsPage() {
                                         {getStatusBadge(campaign)}
                                         {getLoopBadge(campaign)}
                                     </div>
+                                    <a className="block text-xs font-mono underline" href={getCampaignRecoveryUrl(campaign.id, campaign.page_id)}>Campaign ID: {campaign.id}</a>
                                     <p className="text-sm font-mono text-gray-600 line-clamp-2 border-l-2 border-gray-200 pl-3">
                                         {campaign.is_loop
                                             ? `AI Prompt: "${campaign.ai_prompt}"`
@@ -1385,6 +1423,9 @@ export default function CampaignsPage() {
                                             {' | '}
                                             Exclude tags: {campaign.audience_exclude_tag_ids?.length || 0}
                                         </p>
+                                    )}
+                                    {sendingCampaignId === campaign.id && sendingProgress && (
+                                        <p className="text-xs font-mono text-blue-700" role="status">{sendingProgress}</p>
                                     )}
                                     {(campaign.status === 'draft' || campaign.status === 'sending' || campaign.status === 'scheduled') && campaign.last_error && (
                                         <p className="text-xs font-mono text-amber-700 border-l-2 border-amber-400 pl-3">

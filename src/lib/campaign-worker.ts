@@ -213,10 +213,10 @@ export async function processCampaignQueue() {
             }
 
             if (campaign.audience_mode === 'dynamic' && !campaign.audience_materialized_at) {
-                const { data: materializedRows, error: materializationError } = await supabase.rpc(
+                const { data: materializedRows, error: materializationError } = await databaseRequest(supabase.rpc(
                     'materialize_dynamic_campaign_audience',
                     { p_campaign_id: campaign.id }
-                );
+                ));
 
                 if (materializationError) throw materializationError;
                 const materialized = Array.isArray(materializedRows)
@@ -290,16 +290,23 @@ export async function processCampaignQueue() {
                 : String((campaignError as { message?: string })?.message || campaignError);
             const retryAt = new Date(Date.now() + WORKER_RETRY_DELAY_MS).toISOString();
 
-            await supabase
-                .from('campaigns')
-                .update({
-                    status: isImmediateResume ? 'sending' : 'scheduled',
-                    next_attempt_at: retryAt,
-                    last_error: message,
-                    updated_at: new Date().toISOString()
-                })
-                .eq('id', campaign.id)
-                .eq('status', 'sending');
+            try {
+                const { error: recoveryError } = await databaseRequest(supabase
+                    .from('campaigns')
+                    .update({
+                        status: isImmediateResume ? 'sending' : 'scheduled',
+                        next_attempt_at: retryAt,
+                        last_error: message,
+                        updated_at: new Date().toISOString()
+                    })
+                    .eq('id', campaign.id)
+                    .eq('status', 'sending'));
+                if (recoveryError) throw recoveryError;
+            } catch (recoveryError) {
+                // The saved campaign and expiring claims remain discoverable.
+                // A stalled recovery write must not block the whole cron run.
+                console.error('Campaign worker could not save retry state:', recoveryError);
+            }
 
             return {
                 campaignId: campaign.id,

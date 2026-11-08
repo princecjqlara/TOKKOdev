@@ -9,6 +9,7 @@ import { getSupabaseAdmin } from '@/lib/supabase';
 import { SUPABASE_IN_FILTER_BATCH_SIZE } from '@/lib/supabase-pagination';
 import { PaginatedResponse, Campaign } from '@/types';
 import { recordPageActivity } from '@/lib/activity-history';
+import { databaseRequest } from '@/lib/database-request';
 
 function normalizeStringArray(value: unknown): string[] {
     if (!Array.isArray(value)) {
@@ -56,8 +57,9 @@ export async function GET(request: NextRequest) {
         }
 
         const searchParams = request.nextUrl.searchParams;
-        const page = parseInt(searchParams.get('page') || '1');
-        const pageSize = parseInt(searchParams.get('pageSize') || '25');
+        const campaignId = searchParams.get('campaignId')?.trim() || '';
+        const page = campaignId ? 1 : Math.max(1, parseInt(searchParams.get('page') || '1') || 1);
+        const pageSize = Math.max(1, Math.min(100, parseInt(searchParams.get('pageSize') || '25') || 25));
         const pageId = searchParams.get('pageId') || '';
         const dateFrom = searchParams.get('dateFrom') || '';
         const dateTo = searchParams.get('dateTo') || '';
@@ -65,15 +67,15 @@ export async function GET(request: NextRequest) {
         const supabase = getSupabaseAdmin();
 
         // Get user's accessible pages
-        const { data: userPages, error: accessError } = await supabase
+        const { data: userPages, error: accessError } = await databaseRequest(supabase
             .from('user_pages')
             .select('page_id')
-            .eq('user_id', session.user.id);
+            .eq('user_id', session.user.id));
 
         if (accessError) throw accessError;
         const accessiblePageIds = userPages?.map(up => up.page_id) || [];
 
-        if (pageId && !accessiblePageIds.includes(pageId)) {
+        if (!campaignId && pageId && !accessiblePageIds.includes(pageId)) {
             return NextResponse.json(
                 { error: 'Forbidden', message: 'You do not have access to this page' },
                 { status: 403 }
@@ -95,15 +97,19 @@ export async function GET(request: NextRequest) {
             .in('page_id', accessiblePageIds)
             .order('created_at', { ascending: false });
 
-        if (pageId) {
+        // Direct recovery links search the user's assigned Pages regardless
+        // of the current Page, date filters, or historical pagination.
+        if (campaignId) {
+            query = query.eq('id', campaignId);
+        } else if (pageId) {
             query = query.eq('page_id', pageId);
         }
 
         // Date range filter
-        if (dateFrom) {
+        if (!campaignId && dateFrom) {
             query = query.gte('created_at', new Date(dateFrom).toISOString());
         }
-        if (dateTo) {
+        if (!campaignId && dateTo) {
             // Add one day to include the entire end date
             const endDate = new Date(dateTo);
             endDate.setDate(endDate.getDate() + 1);
@@ -115,7 +121,7 @@ export async function GET(request: NextRequest) {
         const to = from + pageSize - 1;
         query = query.range(from, to);
 
-        const { data: campaigns, error, count } = await query;
+        const { data: campaigns, error, count } = await databaseRequest(query);
 
         if (error) throw error;
 

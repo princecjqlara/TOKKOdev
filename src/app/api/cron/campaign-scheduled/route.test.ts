@@ -382,6 +382,41 @@ describe('GET /api/cron/campaign-scheduled', () => {
         }));
     });
 
+    it('bounds stalled audience setup and keeps the campaign queued for the next run', async () => {
+        const { GET } = await loadRoute();
+        vi.useFakeTimers();
+        const supabase = createSupabaseMock();
+        supabase.materializeAudienceRpc.mockImplementationOnce(() => new Promise(() => {}));
+        mocks.getSupabaseAdmin.mockReturnValue(supabase);
+        const pending = GET(createRequest());
+        await vi.advanceTimersByTimeAsync(DATABASE_REQUEST_TIMEOUT_MS);
+        expect((await pending).status).toBe(200);
+        expect(supabase.campaignsUpdate).toHaveBeenCalledWith(expect.objectContaining({
+            status: 'scheduled', next_attempt_at: expect.any(String)
+        }));
+        expect(mocks.sendCampaignById).not.toHaveBeenCalled();
+        expect(vi.getTimerCount()).toBe(0);
+    });
+
+    it('returns resumable results even if saving worker recovery stalls', async () => {
+        const { GET } = await loadRoute();
+        vi.useFakeTimers();
+        const supabase = createSupabaseMock({ campaignLevelCampaigns: [], immediateCampaigns: [
+            createCampaign({ status: 'sending', scheduled_at: null, audience_mode: 'specific' })
+        ] });
+        supabase.campaignsUpdate.mockImplementationOnce(() => {
+            const query: any = { then: () => new Promise(() => {}) };
+            query.eq = () => query;
+            return query;
+        });
+        mocks.getSupabaseAdmin.mockReturnValue(supabase);
+        mocks.sendCampaignById.mockRejectedValueOnce(new Error('Worker disconnected'));
+        const pending = GET(createRequest());
+        await vi.advanceTimersByTimeAsync(DATABASE_REQUEST_TIMEOUT_MS);
+        expect(await (await pending).json()).toMatchObject({ processed: 1, results: [{ retryable: true }] });
+        expect(vi.getTimerCount()).toBe(0);
+    });
+
     it('skips campaigns that another cron invocation already claimed', async () => {
         const { GET } = await loadRoute();
         const supabase = createSupabaseMock({ claimSucceeds: false });

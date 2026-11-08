@@ -30,7 +30,8 @@ import {
     summarizeSendErrors
 } from '@/lib/send-errors';
 import { createRequestGate } from '@/lib/request-gate';
-import { shouldContinueCampaignDelivery } from '@/lib/campaign-delivery-state';
+import { runCampaignDelivery } from '@/lib/campaign-delivery-client';
+import { getCampaignRecoveryUrl, getLastBulkCampaignKey } from '@/lib/campaign-recovery';
 import { UTILITY_TEMPLATES, getBaseTemplateName, getMediaTemplateName } from '@/lib/facebook-templates';
 import type { TemplateMediaType } from '@/lib/facebook-templates';
 import { runContactSyncToCompletion } from '@/lib/contact-sync-client';
@@ -363,6 +364,11 @@ export default function ContactsPage() {
     const [envelopeWrapper, setEnvelopeWrapper] = useState<string>('msg');
     const [actionLoading, setActionLoading] = useState(false);
     const [bulkSendProgress, setBulkSendProgress] = useState<string | null>(null);
+    const [lastBulkCampaignId, setLastBulkCampaignId] = useState<string | null>(null);
+    useEffect(() => {
+        try { setLastBulkCampaignId(selectedPageId ? window.localStorage.getItem(getLastBulkCampaignKey(selectedPageId)) : null); }
+        catch { setLastBulkCampaignId(null); }
+    }, [selectedPageId]);
     const [manualBatchEnabled, setManualBatchEnabled] = useState(false);
     const [manualBatchSize, setManualBatchSize] = useState(5000);
     const [manualBatchNumber, setManualBatchNumber] = useState(1);
@@ -1013,6 +1019,7 @@ export default function ContactsPage() {
         resetBestTimeScheduleState();
 
         let campaignReadyToSend = false;
+        let savedCampaignId: string | null = null;
 
         try {
             if (templateMediaHeader) {
@@ -1081,7 +1088,14 @@ export default function ContactsPage() {
             });
 
             const createData = await readApiResponse(createResponse);
+            savedCampaignId = createData.campaign?.id || createData.campaignId || null;
+            if (savedCampaignId) {
+                setLastBulkCampaignId(savedCampaignId);
+                try { window.localStorage.setItem(getLastBulkCampaignKey(selectedPageId), savedCampaignId); }
+                catch { /* The saved server queue does not depend on browser storage. */ }
+            }
             if (!createResponse.ok) {
+                campaignReadyToSend = createData.campaignReady === true;
                 throw new Error(createData.message || 'Failed to create tracked bulk send');
             }
 
@@ -1143,42 +1157,17 @@ export default function ContactsPage() {
                 : '';
             setBulkSendProgress(`${batchLabel}Campaign ${campaignId.slice(0, 8)}: ${sent} sent, ${failed} failed, ${remaining} pending`);
 
-            let deliveryQueuedForRetry = sendData.retryable === true || sendData.queued === true;
-            while (shouldContinueCampaignDelivery({ ...sendData, remaining })) {
-                const response = await fetch(`/api/campaigns/${campaignId}/send`, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({
-                        sendBatchSize: 25,
-                        delayBetweenBatchesMs: 0,
-                        maxProcessingTimeMs: 45000,
-                        templateMediaHeader
-                    })
-                });
-
-                sendData = await readApiResponse(response);
-                deliveryQueuedForRetry = sendData.retryable === true || sendData.queued === true;
-                if (!response.ok) {
-                    if (sendData.retryable === true) {
-                        sent = Number(sendData.sent || sent);
-                        failed = Number(sendData.failed || failed);
-                        remaining = Number(sendData.remaining || remaining);
-                        deliveryQueuedForRetry = true;
-                        setBulkSendProgress(
-                            `${batchLabel}Campaign ${campaignId.slice(0, 8)} is safely queued for automatic retry: ` +
-                            `${sent} sent, ${failed} failed, ${remaining} pending`
-                        );
-                        break;
-                    }
-                    throw new Error(sendData.message || `Failed to continue tracked send (HTTP ${response.status})`);
+            sendData = await runCampaignDelivery(campaignId, {
+                initial: sendData,
+                payload: { sendBatchSize: 25, delayBetweenBatchesMs: 0, templateMediaHeader },
+                onProgress: progress => {
+                    sent = Number(progress.sent ?? sent);
+                    failed = Number(progress.failed ?? failed);
+                    remaining = Number(progress.remaining ?? remaining);
+                    setBulkSendProgress(`${batchLabel}Campaign ${campaignId.slice(0, 8)}: ${sent} sent, ${failed} failed, ${remaining} pending` +
+                        (progress.retryable ? ' — waiting to retry automatically' : ''));
                 }
-
-                sent = Number(sendData.sent || sent);
-                failed = Number(sendData.failed || failed);
-                remaining = Number(sendData.remaining || Math.max((createData.recipients || 0) - sent - failed, 0));
-                setBulkSendProgress(`${batchLabel}Campaign ${campaignId.slice(0, 8)}: ${sent} sent, ${failed} failed, ${remaining} pending`);
-                if (sendData.processed === 0) break;
-            }
+            });
 
             setLastSendResults({ sent, failed });
             setShowMessageModal(false);
@@ -1189,20 +1178,17 @@ export default function ContactsPage() {
             resetBestTimeScheduleState();
             clearSelection();
 
-            alert((sendData.paused && !deliveryQueuedForRetry) || sendData.cancelled
+            alert(sendData.paused || sendData.cancelled
                 ? (sendData.message || 'Campaign stopped. Unsent recipients remain saved.')
-                : deliveryQueuedForRetry
-                ? `Tracked bulk send is safely queued for automatic retry.\n\n${batchLabel}Recipients: ${createData.recipients}\nSent: ${sent}\nFailed: ${failed}\nRemaining: ${remaining}\nCampaign ID: ${campaignId}\n\nFacebook or the delivery service asked for a temporary pause. The background worker will resume without resending completed recipients.`
-                : sendData.partial && remaining > 0
-                ? `Tracked bulk send started in the durable background queue.\n\n${batchLabel}Recipients: ${createData.recipients}\nSent: ${sent}\nFailed: ${failed}\nRemaining: ${remaining}\nCampaign ID: ${campaignId}\n\nThe campaign worker will continue even if this browser closes.`
                 : `Tracked bulk send finished.\n\n${batchLabel}Recipients in this campaign: ${createData.recipients}\nSent: ${sent}\nFailed: ${failed}\nCampaign ID: ${campaignId}`
             );
             await fetchContacts();
         } catch (error) {
             console.error('Error sending tracked bulk messages:', error);
             const recoveryMessage = campaignReadyToSend
-                ? 'Open Campaigns and press Continue Unsent to resume pending recipients without resending completed ones.'
-                : 'Campaign setup did not finish, so do not press Send on an incomplete campaign. Create the campaign again after this error is fixed.';
+                ? 'Pending recipients remain saved. Use the View bulk send status link to see this exact campaign and any Page or template issue that needs attention.'
+                : savedCampaignId ? 'Campaign setup is incomplete. Use View bulk send status to inspect the saved campaign before starting another send.'
+                : 'The campaign could not be confirmed. Check your bulk send history before starting another send.';
             alert(`Tracked bulk send stopped: ${(error as Error).message}\n\n${recoveryMessage}`);
         } finally {
             setActionLoading(false);
@@ -2077,6 +2063,10 @@ export default function ContactsPage() {
             </div>
 
             <p className="text-xs text-gray-500 mb-3">Contacts are shared with everyone assigned to this Page. One sync updates the whole team. Auto-tag follows this Page&apos;s setting in Settings.</p>
+            {lastBulkCampaignId && <p className="border border-blue-300 bg-blue-50 p-3 text-sm mb-3">
+                <a className="font-bold underline" href={getCampaignRecoveryUrl(lastBulkCampaignId, selectedPageId)}>View bulk send status</a>
+                <span className="font-mono text-xs ml-2">Campaign {lastBulkCampaignId}</span>
+            </p>}
             {contactFetchError && <div role="alert" className="border border-amber-500 bg-amber-50 p-3 text-sm mb-3">
                 <p>{contactFetchError}</p>
                 <button className="font-bold underline mt-1" onClick={() => void fetchContacts()}>Retry</button>
@@ -2636,6 +2626,7 @@ export default function ContactsPage() {
                     {bulkSendProgress && (
                         <div className="bg-blue-50 border-2 border-blue-300 p-3 rounded">
                             <p className="font-mono text-sm text-blue-800">{bulkSendProgress}</p>
+                            {lastBulkCampaignId && <a className="text-sm underline" href={getCampaignRecoveryUrl(lastBulkCampaignId, selectedPageId)}>View bulk send status</a>}
                         </div>
                     )}
                     {bestTimeScheduleStatus && (

@@ -52,6 +52,8 @@ export async function POST(
     const sendOptions = {
         campaignId,
         userId: session.user.id,
+        backgroundOnly: body.backgroundOnly === true,
+        expectedUpdatedAt: typeof body.expectedUpdatedAt === 'string' ? body.expectedUpdatedAt : undefined,
         sendBatchSize: typeof body.sendBatchSize === 'number' ? body.sendBatchSize : undefined,
         maxRecipientsPerRun: MAX_RECIPIENTS_PER_INVOCATION,
         delayBetweenBatchesMs,
