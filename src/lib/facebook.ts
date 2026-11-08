@@ -4,6 +4,7 @@ import { isFacebookReauthMessage } from './facebook-errors';
 import type { TemplateMediaType } from './facebook-templates';
 import { getUtilityTemplateParameterValidationError } from './send-errors';
 import { requestWithTimeout } from './request-timeout';
+import { readMetaDeliveryFeedback, type MetaDeliveryFeedback } from './meta-delivery-feedback';
 
 // Re-export templates from dedicated file
 export { UTILITY_TEMPLATES } from './facebook-templates';
@@ -25,6 +26,9 @@ type FacebookGraphErrorBody = {
 };
 
 export class FacebookGraphApiError extends Error {
+    retryAfterMs?: number;
+    usagePercent?: number;
+    scope?: 'page' | 'app';
     status: number;
     code?: number;
     subcode?: number;
@@ -101,7 +105,7 @@ async function readFacebookError(response: Response, endpoint: string, parsedBod
         `HTTP ${response.status}: ${response.statusText || 'Facebook Graph request failed'}`;
     const requiresReauth = isFacebookPageAuthorizationFailure(body, endpoint);
 
-    return new FacebookGraphApiError(
+    return Object.assign(new FacebookGraphApiError(
         requiresReauth ? FACEBOOK_REAUTH_MESSAGE : message,
         {
             status: response.status,
@@ -111,7 +115,7 @@ async function readFacebookError(response: Response, endpoint: string, parsedBod
             requiresReauth,
             raw: body
         }
-    );
+    ), readMetaDeliveryFeedback(response.headers));
 }
 
 async function fetchFacebookJson(input: string, init: RequestInit, timeoutMs: number, message: string, signal?: AbortSignal) {
@@ -446,7 +450,7 @@ export async function sendMessage(
     templateBodyParameters?: string[],
     templateButtons?: Array<{ type: 'URL'; text: string; url: string } | { type: 'POSTBACK'; text: string; payload: string }>,
     templateMediaHeader?: { type: TemplateMediaType; url: string }
-): Promise<{ message_id: string }> {
+): Promise<{ message_id: string; deliveryFeedback?: MetaDeliveryFeedback }> {
     // Build the request payload based on messaging type
     let bodyPayload: Record<string, unknown>;
 
@@ -602,7 +606,8 @@ export async function sendMessage(
         recipientPsid,
         messageId: result.message_id
     });
-    return result;
+    const deliveryFeedback = readMetaDeliveryFeedback(response.headers);
+    return deliveryFeedback ? { ...result, deliveryFeedback } : result;
 }
 
 export async function sendMessengerMediaAttachment(
@@ -950,7 +955,9 @@ export async function getPageTemplates(
                 typeof errorSubcode !== 'undefined' ? `subcode=${errorSubcode}` : null,
                 errorDetails ? `details=${errorDetails}` : null
             ].filter(Boolean);
-            throw new Error(diagnosticParts.join(' | '));
+            throw Object.assign(new Error(diagnosticParts.join(' | ')), {
+                status: response.status, code: errorCode, subcode: errorSubcode
+            }, readMetaDeliveryFeedback(response.headers));
         }
 
         const data: { data?: any[]; paging?: { next?: string } } = body;

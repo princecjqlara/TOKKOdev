@@ -83,6 +83,19 @@ describe('getPageTemplates', () => {
 });
 
 describe('sendMessage', () => {
+    it('preserves usage and retry feedback from Meta for the adaptive bulk sender', async () => {
+        vi.stubGlobal('fetch', vi.fn().mockResolvedValueOnce(new Response(JSON.stringify({ message_id: 'accepted' }), {
+            headers: { 'x-app-usage': JSON.stringify({ call_count: 85 }) }
+        })).mockResolvedValueOnce(new Response(JSON.stringify({ error: { message: 'Application request limit reached', code: 4 } }), {
+            status: 429, headers: { 'retry-after': '120', 'x-app-usage': JSON.stringify({ call_count: 100 }) }
+        })));
+        expect(await sendMessage('page', 'token', 'psid', 'Hello')).toMatchObject({
+            message_id: 'accepted', deliveryFeedback: { usagePercent: 85, scope: 'app' }
+        });
+        await expect(sendMessage('page', 'token', 'psid', 'Hello')).rejects.toMatchObject({
+            code: 4, status: 429, retryAfterMs: 120_000, scope: 'app'
+        });
+    });
     it('rejects invalid utility parameters before calling Facebook', async () => {
         const fetchMock = vi.fn();
         vi.stubGlobal('fetch', fetchMock);

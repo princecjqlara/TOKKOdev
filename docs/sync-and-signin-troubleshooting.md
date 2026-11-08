@@ -28,6 +28,15 @@ background run was accepted, while actual progress is recorded on the campaign.
 Check campaign counts and `last_error` as well as scheduler history: a successful
 acknowledgment alone does not establish that every recipient was delivered.
 
+For automatic speed adjustment, apply `database/migration_campaign_delivery_adaptive.sql`
+and deploy the matching sender. Concurrency alone does not bound requests per
+second: fast responses and multi-part messages can still exhaust a Page or app
+quota. The controller spaces individual message starts, backs off as usage rises,
+honors provider recovery times, and saves the learned pace on the Page. Missing
+usage headers trigger gradual probing rather than another immediate large burst.
+Without a provider recovery estimate, repeated throttles use increasing retry
+windows. Existing future cooldowns and manual Stop remain in effect.
+
 Temporary worker failures, timeouts, expired recipient claims, and unrecognized
 infrastructure interruptions keep campaigns queued for automatic retry after
 one minute. Facebook rate limits keep their shared Page cooldown instead.

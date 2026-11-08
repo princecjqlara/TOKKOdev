@@ -7,6 +7,24 @@ export function waitForPageDeliveryBatch(milliseconds: number): Promise<void> {
     return new Promise(resolve => setTimeout(resolve, milliseconds));
 }
 
+export async function reportPageDeliveryFeedback(supabase: ReturnType<typeof getSupabaseAdmin>, pageId: string, owner: string,
+    state?: { concurrency: number; intervalMs: number; limited: boolean; providerRetryAt: number; scope: 'page' | 'app' }) {
+    const { data, error } = await databaseRequest(supabase.rpc('report_page_campaign_delivery_feedback', {
+        p_page_id: pageId, p_owner: owner,
+        p_concurrency: state?.concurrency ?? null, p_interval_ms: state?.intervalMs ?? null,
+        p_rate_limited: state?.limited ?? false,
+        p_retry_after_ms: state ? Math.ceil(Math.max(0, state.providerRetryAt - Date.now())) : 0,
+        p_scope: state?.scope || 'page'
+    }));
+    if (error) throw error;
+    if (!data?.owned) throw new Error('Page delivery lease changed. Delivery will retry automatically.');
+    if (!Number.isInteger(data.concurrency) || data.concurrency < 1 || data.concurrency > MAX_PAGE_DELIVERY_CONCURRENCY ||
+        !Number.isInteger(data.interval_ms) || data.interval_ms < 0 || data.interval_ms > 5000) {
+        throw new Error('Page delivery feedback is temporarily unavailable.');
+    }
+    return { concurrency: Number(data.concurrency), intervalMs: Number(data.interval_ms), retryAt: data.retry_at as string | null };
+}
+
 export async function acquirePageDelivery(supabase: ReturnType<typeof getSupabaseAdmin>, pageId: string) {
     const owner = randomUUID();
     const { data, error } = await databaseRequest(supabase.rpc('acquire_page_campaign_delivery', { p_page_id: pageId, p_owner: owner }));

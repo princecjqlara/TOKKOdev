@@ -21,7 +21,8 @@ import type { ClaimedCampaignRecipient, CampaignRecipientResult } from './campai
 import { mapConcurrentSettled } from './concurrent-work';
 import type { TemplateMediaType } from './facebook-templates';
 import { recordOutboundMessageEvents, type OutboundMessageEventInput } from './outbound-message-events';
-import { acquirePageDelivery, releasePageDelivery, waitForPageDeliveryBatch, MAX_PAGE_DELIVERY_CONCURRENCY } from './page-delivery';
+import { acquirePageDelivery, releasePageDelivery, reportPageDeliveryFeedback, waitForPageDeliveryBatch, MAX_PAGE_DELIVERY_CONCURRENCY } from './page-delivery';
+import { AdaptiveDeliveryController } from './adaptive-delivery';
 import { databaseRequest, DATABASE_REQUEST_TIMEOUT_MS } from './database-request';
 
 type SupabaseLike = ReturnType<typeof getSupabaseAdmin>;
@@ -55,7 +56,7 @@ type SendCampaignByIdResult = {
 
 const SENDABLE_TEMPLATE_STATUSES = new Set(['APPROVED', 'ACTIVE']);
 const TRANSIENT_RETRY_DELAY_MS = 60_000;
-const RATE_LIMIT_RETRY_DELAY_MS = 5 * 60_000;
+const RATE_LIMIT_RETRY_DELAY_MS = 60_000;
 const OUTBOUND_AUDIT_BATCH_SIZE = 250;
 
 async function updateCampaignState(supabase: SupabaseLike, campaignId: string,
@@ -142,6 +143,17 @@ export async function sendCampaignById({
     let isLoopCampaign = false;
     let continuationSaved = false;
     let stoppedResult: SendCampaignByIdResult | undefined;
+    let adaptive: AdaptiveDeliveryController | undefined;
+    const persistFeedback = async () => {
+        if (!pageLease || !adaptive) return;
+        const budget = await reportPageDeliveryFeedback(supabase, pageLease.pageId, pageLease.owner, adaptive);
+        if (budget.retryAt && Date.parse(budget.retryAt) > Date.now()) {
+            adaptive.concurrency = Math.min(adaptive.concurrency, budget.concurrency);
+            adaptive.intervalMs = Math.max(adaptive.intervalMs, budget.intervalMs);
+            adaptive.pause(Date.parse(budget.retryAt) - Date.now());
+            pageRateLimited = true;
+        }
+    };
     const pendingOutboundEvents: OutboundMessageEventInput[] = [];
     const flushOutboundEvents = async (includePartial = false) => {
         while (pendingOutboundEvents.length >= OUTBOUND_AUDIT_BATCH_SIZE || includePartial && pendingOutboundEvents.length) {
@@ -453,15 +465,13 @@ export async function sendCampaignById({
         let failedThisRun = 0;
         let processedThisRun = 0;
         const MAX_SEND_BATCH_SIZE = Number.isFinite(sendBatchSize)
-            ? Math.max(1, Math.min(Math.floor(sendBatchSize), pageLease.batchSize))
-            : pageLease.batchSize;
-        let sendBatchSizeThisRun = Math.min(25, MAX_SEND_BATCH_SIZE);
-        // Keep a recovery Page slow across every caller, even when the browser
-        // requests zero delay. Multi-part campaigns consume multiple API calls.
-        const DELAY_BETWEEN_BATCHES = Math.max(
-            (pageLease.batchSize < 5 ? 2000 : 0) * Math.max(1, campaignMessageParts.length),
-            delayBetweenBatchesMs || 0
-        );
+            ? Math.max(1, Math.min(Math.floor(sendBatchSize), MAX_PAGE_DELIVERY_CONCURRENCY))
+            : MAX_PAGE_DELIVERY_CONCURRENCY;
+        const learned = await reportPageDeliveryFeedback(supabase, pageLease.pageId, pageLease.owner);
+        adaptive = new AdaptiveDeliveryController(MAX_SEND_BATCH_SIZE, learned.concurrency, learned.intervalMs);
+        if (learned.retryAt && Date.parse(learned.retryAt) > Date.now()) adaptive.pause(Date.parse(learned.retryAt) - Date.now());
+        let sendBatchSizeThisRun = adaptive.concurrency;
+        const DELAY_BETWEEN_BATCHES = Math.max(0, delayBetweenBatchesMs || 0);
         const MAX_PROCESSING_TIME = Math.max(10000, Math.min(maxProcessingTimeMs || 240000, 270000));
         const SEND_RETRY_ATTEMPTS = Math.max(0, Math.min(sendRetryAttempts || 0, 3));
         const SEND_RETRY_DELAY = Math.max(0, Math.min(sendRetryDelayMs || 0, 5000));
@@ -638,7 +648,11 @@ export async function sendCampaignById({
                                     sendArgs.push(undefined, messageMediaHeader);
                                 }
 
-                                const sendResult = await sendMessage(...sendArgs);
+                                const sendResult = await adaptive!.run(async () => {
+                                    const result = await sendMessage(...sendArgs);
+                                    adaptive!.observeSuccess(result.deliveryFeedback);
+                                    return result;
+                                }, () => !batchPause && Date.now() - startTime + DATABASE_REQUEST_TIMEOUT_MS < MAX_PROCESSING_TIME);
                                 outboundEvents.push({
                                     pageId: campaign.page_id,
                                     contactId: recipient.contact_id,
@@ -748,7 +762,7 @@ export async function sendCampaignById({
                     : { success: true, contactId: recipient.contact_id, pauseCampaign: false, retryable: false };
             };
 
-            const batchResults = await mapConcurrentSettled(batch, sendBatchSizeThisRun, deliverRecipient, async result => {
+            const batchResults = await mapConcurrentSettled(batch, MAX_SEND_BATCH_SIZE, deliverRecipient, async result => {
                 if (result.status !== 'fulfilled' || result.value.pauseCampaign || saveFailed) return;
                 checkpointResults.push({ contact_id: result.value.contactId, success: result.value.success,
                     error_message: result.value.success ? null : result.value.error || 'Unknown delivery error' });
@@ -765,6 +779,7 @@ export async function sendCampaignById({
                             .select('status').eq('id', campaignId).single());
                         if (error) { batchPause = { error: error.message, retryable: isRetryableInfrastructureError(error) }; }
                         else if (current?.status !== 'sending') batchPause = { error: 'Campaign stopped. Unsent recipients remain saved.', retryable: false };
+                        await persistFeedback();
                     } catch (error) {
                         saveError = error; saveFailed = true;
                         batchPause = { error: 'Saving delivery progress is temporarily unavailable.', retryable: true };
@@ -855,9 +870,11 @@ export async function sendCampaignById({
                     ? (allowScheduled ? 'scheduled' : 'sending')
                     : 'draft';
                 let nextAttemptAt = shouldRetryAutomatically
-                    ? new Date(Date.now() + (pageRateLimited ? RATE_LIMIT_RETRY_DELAY_MS : TRANSIENT_RETRY_DELAY_MS)).toISOString()
+                    ? new Date(pageRateLimited && adaptive?.retryAt ? adaptive.retryAt
+                        : Date.now() + (pageRateLimited ? RATE_LIMIT_RETRY_DELAY_MS : TRANSIENT_RETRY_DELAY_MS)).toISOString()
                     : null;
                 if (pageRateLimited && pageLease) {
+                    await persistFeedback();
                     const recovery = await releasePageDelivery(supabase, pageLease.pageId, pageLease.owner, true);
                     pageLease = null;
                     if (recovery) nextAttemptAt = recovery;
@@ -896,9 +913,7 @@ export async function sendCampaignById({
                 };
             }
 
-            // A clean batch proves this Page is accepting work. Grow only
-            // within the shared Page budget; a throttle still ends the slice.
-            sendBatchSizeThisRun = Math.min(MAX_SEND_BATCH_SIZE, Math.max(sendBatchSizeThisRun + 5, sendBatchSizeThisRun * 2));
+            sendBatchSizeThisRun = adaptive.concurrency;
 
             if (processedThisRun < MAX_RECIPIENTS && DELAY_BETWEEN_BATCHES > 0 &&
                 Date.now() - startTime + DELAY_BETWEEN_BATCHES + lastBatchDurationMs + DATABASE_REQUEST_TIMEOUT_MS < MAX_PROCESSING_TIME) {
@@ -974,12 +989,19 @@ export async function sendCampaignById({
             failed: progress.failed
         };
     } catch (error) {
-        if (categorizeSendError(error) === 'rate_limited') pageRateLimited = true;
+        if (categorizeSendError(error) === 'rate_limited') {
+            pageRateLimited = true;
+            const meta = error as { retryAfterMs?: number; scope?: 'page' | 'app'; code?: number };
+            if (pageLease && !adaptive) adaptive = new AdaptiveDeliveryController(MAX_PAGE_DELIVERY_CONCURRENCY, pageLease.batchSize, 100);
+            adaptive?.pause(meta.retryAfterMs || RATE_LIMIT_RETRY_DELAY_MS,
+                [4, 17].includes(meta.code || 0) ? 'app' : meta.scope, Boolean(meta.retryAfterMs));
+        }
         console.error('Error sending campaign:', error);
         const databaseError = error && typeof error === 'object' ? error as { code?: string; message?: string } : {};
         const shouldRetryAutomatically = isRetryableInfrastructureError(error);
         const retryAt = shouldRetryAutomatically
-            ? new Date(Date.now() + (pageRateLimited ? RATE_LIMIT_RETRY_DELAY_MS : TRANSIENT_RETRY_DELAY_MS)).toISOString()
+            ? new Date(pageRateLimited && adaptive?.retryAt ? adaptive.retryAt
+                : Date.now() + (pageRateLimited ? RATE_LIMIT_RETRY_DELAY_MS : TRANSIENT_RETRY_DELAY_MS)).toISOString()
             : null;
         let queued = shouldRetryAutomatically && continuationSaved;
 
@@ -1024,6 +1046,9 @@ export async function sendCampaignById({
         try { await flushOutboundEvents(true); }
         catch (auditError) { console.error('Optional campaign attribution could not be flushed:', auditError); }
         if (pageLease) {
+            if (adaptive?.limited) pageRateLimited = true;
+            try { await persistFeedback(); }
+            catch (feedbackError) { console.error('Page delivery feedback could not be saved:', feedbackError); }
             try { await releasePageDelivery(supabase, pageLease.pageId, pageLease.owner, pageRateLimited); }
             catch (releaseError) { console.error('Page delivery lease release failed; the lease will expire:', releaseError); }
         }
