@@ -519,7 +519,9 @@ export async function sendCampaignById({
                 };
             }
 
-            const claimSize = sendBatchSizeThisRun >= 25 ? Math.min(500, sendBatchSizeThisRun * 5) : sendBatchSizeThisRun;
+            // Prefetch work while learning speed too. The adaptive gate still
+            // controls actual message starts; fetching need not idle the workers.
+            const claimSize = sendBatchSizeThisRun >= 5 ? Math.min(500, sendBatchSizeThisRun * 5) : sendBatchSizeThisRun;
             const batch = await claimCampaignRecipients({
                 supabase,
                 campaignId,

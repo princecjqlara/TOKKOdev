@@ -197,7 +197,10 @@ rate when Meta usage rises. It reads `X-App-Usage`, `X-Page-Usage`,
 `X-Business-Use-Case-Usage`, and `Retry-After` when available. App-level throttles
 share their cooldown across Pages; Page-level throttles stay local. The learned
 pace survives worker restarts. It refills each free worker slot and groups audit
-writes into 250-message chunks after saving delivery results. Browser requests
+writes into 250-message chunks after saving delivery results. Once a Page
+reaches five workers, each fetch can supply five contacts per worker, reducing
+database waits as the sender learns its speed. Prefetched contacts still pass
+through the learned concurrency and message spacing. Browser requests
 process as many recipients as fit in their 45-second slice instead of stopping
 at 500. On Vercel, the campaign cron acknowledges the scheduler immediately and
 keeps its delivery work alive for up to 210 seconds using `waitUntil`, within

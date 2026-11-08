@@ -555,10 +555,11 @@ describe('sendCampaignById', () => {
         vi.useFakeTimers();
         const metrics: Array<{ mode: string; elapsedMs: number; auditWrites: number; maxInFlight: number }> = [];
         for (const settings of [
-            { mode: 'prior pacing', pageSize: 5, delay: 1000 },
-            { mode: 'optimized existing Page budget', pageSize: 5, delay: 0 },
-            { mode: '25 rolling workers', pageSize: 25, delay: 0 },
-            { mode: '100 rolling workers', pageSize: 100, delay: 0 }
+            { mode: 'prior pacing', pageSize: 5, delay: 1000, fetchedBatchSize: 5 },
+            { mode: 'small fetches at five workers', pageSize: 5, delay: 0, fetchedBatchSize: 5 },
+            { mode: 'prefetched five workers', pageSize: 5, delay: 0, fetchedBatchSize: Infinity },
+            { mode: '25 rolling workers', pageSize: 25, delay: 0, fetchedBatchSize: Infinity },
+            { mode: '100 rolling workers', pageSize: 100, delay: 0, fetchedBatchSize: Infinity }
         ]) {
             vi.setSystemTime(new Date('2026-11-08T00:00:00Z'));
             const wait = (ms: number) => new Promise<void>(resolve => setTimeout(resolve, ms));
@@ -566,7 +567,12 @@ describe('sendCampaignById', () => {
                 Array.from({ length: 1000 }, (_, i) => ({ id: `r${i}`, contact_id: `c${i}`, contacts: { psid: `p${i}` } }))
             });
             const rpc = supabase.rpc.getMockImplementation()!;
-            supabase.rpc.mockImplementation(async (name, args) => { await wait(20); return rpc(name, args); });
+            supabase.rpc.mockImplementation(async (name, args) => {
+                await wait(20);
+                return rpc(name, name === 'claim_campaign_recipients'
+                    ? { ...args, p_batch_size: Math.min(args.p_batch_size, settings.fetchedBatchSize) }
+                    : args);
+            });
             const read = supabase.campaignSingle.getMockImplementation()!;
             supabase.campaignSingle.mockImplementation(async () => { await wait(20); return read(); });
             supabase.outboundUpsert.mockImplementation(async () => { await wait(20); return { error: null }; });
@@ -588,7 +594,8 @@ describe('sendCampaignById', () => {
                 auditWrites: supabase.outboundUpsert.mock.calls.length, maxInFlight });
         }
         expect(metrics[1].elapsedMs).toBeLessThan(metrics[0].elapsedMs / 3);
-        expect(metrics[2].elapsedMs).toBeLessThan(metrics[0].elapsedMs / 10);
+        expect(metrics[2].elapsedMs).toBeLessThan(metrics[1].elapsedMs * 0.9);
+        expect(metrics[3].elapsedMs).toBeLessThan(metrics[0].elapsedMs / 10);
         console.info('Synthetic sender benchmark (200ms Meta latency, 20ms database latency; no real sends):', JSON.stringify(metrics));
     });
 
@@ -1499,8 +1506,8 @@ describe('sendCampaignById', () => {
         expect(result.sent).toBe(2001);
         expect(result.failed).toBe(0);
         expect(sendMessage).toHaveBeenCalledTimes(2001);
-        expect(supabase.claimRpc).toHaveBeenCalledTimes(202);
-        expect(supabase.claimRpc).toHaveBeenNthCalledWith(1, expect.objectContaining({ p_batch_size: 10 }));
+        expect(supabase.claimRpc).toHaveBeenCalledTimes(42);
+        expect(supabase.claimRpc).toHaveBeenNthCalledWith(1, expect.objectContaining({ p_batch_size: 50 }));
     });
 
     it('caps fetched recipients for short cron runs', async () => {
@@ -1529,8 +1536,8 @@ describe('sendCampaignById', () => {
         expect(result.body.partial).toBe(true);
         expect(result.sent).toBe(10);
         expect(sendMessage).toHaveBeenCalledTimes(10);
-        expect(supabase.claimRpc).toHaveBeenCalledTimes(2);
-        expect(supabase.claimRpc).toHaveBeenLastCalledWith(expect.objectContaining({ p_batch_size: 5 }));
+        expect(supabase.claimRpc).toHaveBeenCalledTimes(1);
+        expect(supabase.claimRpc).toHaveBeenLastCalledWith(expect.objectContaining({ p_batch_size: 10 }));
     });
 
     it('resumes a 10,005-recipient queue after the browser stops at 3,500 without resending completed contacts', async () => {
