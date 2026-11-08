@@ -82,6 +82,7 @@ For large campaigns, deploy the compact delivery queue in this exact order:
 4. Run `database/migration_campaign_delivery_timeout_fix.sql` to make immediate claims and progress checks constant-time for fully materialized one-time campaigns.
 5. Run `database/migration_campaign_delivery_recovery.sql` to pace delivery after Meta throttling and convert historical manual holds into resumable drafts.
 6. Run `database/migration_campaign_delivery_throughput.sql` with the faster sender to raise healthy Page capacity to 25 parallel recipients. Pages recovering from throttles retain their smaller shared budgets and cooldowns.
+7. Run `database/migration_campaign_delivery_parallel.sql` for the rolling sender. Healthy Pages can use up to 100 active recipient workers, while the application claims at most 500 rows at a time and saves completed results in groups of 50. Older senders retain their lower application limit.
 
 Do not run the finalizer before step 2. Older senders calculate progress from terminal queue rows that the finalizer intentionally removes.
 
@@ -188,14 +189,17 @@ results. Stop still pauses delivery; Page authorization and template errors
 remain visible when they require a repair. The minute campaign scheduler is
 required to continue sending after the browser closes.
 
-The faster sender increases parallel batches from 10 to 25 on healthy Pages,
-uses no artificial delay between healthy batches, and groups optional audit
+The faster sender grows from 25 to 50 to 100 active recipients on healthy Pages,
+refills each worker as soon as it finishes, uses no artificial delay between
+healthy batches, and groups optional audit
 writes into 250-message chunks after saving delivery results. Browser requests
 process as many recipients as fit in their 45-second slice instead of stopping
 at 500. On Vercel, the campaign cron acknowledges the scheduler immediately and
 keeps its delivery work alive for up to 210 seconds using `waitUntil`, within
 the configured five-minute function lifetime. Other hosts keep the short
-synchronous worker response. Recipient claims, manual Stop, and shared Meta
+synchronous worker response. Up to four different Pages can make progress in
+one cron run; a shared lease prevents overlapping senders for the same Page.
+Recipient claims, manual Stop, and shared Meta
 recovery windows still apply. A later scheduler tick resumes any remaining work.
 
 Campaigns opens across all assigned Pages. Bulk send status and History link

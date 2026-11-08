@@ -1159,7 +1159,7 @@ export default function ContactsPage() {
 
             sendData = await runCampaignDelivery(campaignId, {
                 initial: sendData,
-                payload: { sendBatchSize: 25, delayBetweenBatchesMs: 0, templateMediaHeader },
+                payload: { sendBatchSize: 100, delayBetweenBatchesMs: 0, templateMediaHeader },
                 onProgress: progress => {
                     sent = Number(progress.sent ?? sent);
                     failed = Number(progress.failed ?? failed);

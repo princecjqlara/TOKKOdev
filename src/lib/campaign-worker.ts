@@ -5,7 +5,7 @@ import { databaseRequest } from './database-request';
 const STALE_SENDING_AFTER_MS = 10 * 60 * 1000;
 // Each campaign gets a bounded slice. Run the independent slices together
 // so two queues do not consume two consecutive scheduler timeout windows.
-const MAX_CAMPAIGNS_PER_CRON_RUN = 2;
+const MAX_CAMPAIGNS_PER_CRON_RUN = 4;
 const MAX_RECIPIENTS_PER_CAMPAIGN_RUN = 250;
 const MAX_IMMEDIATE_RECIPIENTS_PER_CAMPAIGN_RUN = 250;
 const MAX_DUE_RECIPIENT_ROWS_TO_SCAN = 500;
@@ -238,7 +238,7 @@ export async function processCampaignQueue({ extendedRun = false }: { extendedRu
                 backgroundOnly: true,
                 allowScheduled: !isImmediateResume,
                 dueAt: isImmediateResume ? undefined : now,
-                sendBatchSize: 25,
+                sendBatchSize: 100,
                 delayBetweenBatchesMs: 0,
                 maxRecipientsPerRun: extendedRun ? undefined : isImmediateResume
                     ? MAX_IMMEDIATE_RECIPIENTS_PER_CAMPAIGN_RUN

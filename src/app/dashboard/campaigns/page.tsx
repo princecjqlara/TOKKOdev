@@ -1017,7 +1017,7 @@ export default function CampaignsPage() {
                 header?.url ? { type: 'image' as const, url: header.url } : undefined
             ));
             const sendPayload = {
-                sendBatchSize: 25,
+                sendBatchSize: 100,
                 delayBetweenBatchesMs: 0,
                 maxProcessingTimeMs: 45000,
                 templateMediaHeader: fallbackMediaHeader,

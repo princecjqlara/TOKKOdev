@@ -444,14 +444,14 @@ describe('sendCampaignById', () => {
     });
 
     it('ramps a healthy Page within its shared budget without artificial waits', async () => {
-        const supabase = createSupabaseMock('draft', { deliveryBatchSize: 25, recipients:
+        const supabase = createSupabaseMock('draft', { deliveryBatchSize: 100, recipients:
             Array.from({ length: 1000 }, (_, i) => ({ id: `r${i}`, contact_id: `c${i}`, contacts: { psid: `p${i}` } }))
         });
         vi.mocked(sendMessage).mockImplementation(async (_page, _token, psid) => ({ message_id: `mid_${psid}` }));
         const result = await sendCampaignById({ campaignId: 'campaign_1', supabase: supabase as never });
         expect(result.sent).toBe(1000);
-        expect(supabase.claimRpc.mock.calls.slice(0, 4).map(([args]) => args.p_batch_size)).toEqual([10, 15, 20, 25]);
-        expect(supabase.claimRpc.mock.calls.every(([args]) => args.p_batch_size <= 25)).toBe(true);
+        expect(supabase.claimRpc.mock.calls.slice(0, 3).map(([args]) => args.p_batch_size)).toEqual([125, 250, 500]);
+        expect(supabase.claimRpc.mock.calls.every(([args]) => args.p_batch_size <= 500)).toBe(true);
         expect(waitForPageDeliveryBatch).not.toHaveBeenCalled();
         expect(supabase.outboundUpsert).toHaveBeenCalledTimes(4);
         expect(supabase.outboundUpsert.mock.calls.flatMap(([events]) => events)).toHaveLength(1000);
@@ -468,9 +468,46 @@ describe('sendCampaignById', () => {
         });
         const result = await sendCampaignById({ campaignId: 'campaign_1', supabase: supabase as never });
         expect(result.body).toMatchObject({ retryable: true, remaining: 76, sent: 24, failed: 0 });
-        expect(supabase.claimRpc.mock.calls.map(([args]) => args.p_batch_size)).toEqual([10, 15]);
+        expect(supabase.claimRpc.mock.calls.map(([args]) => args.p_batch_size)).toEqual([125]);
         expect(supabase.outboundUpsert.mock.calls.flatMap(([events]) => events)).toHaveLength(24);
         expect(supabase.campaignRecord.background_delivery_enabled).toBe(true);
+    });
+
+    it('checkpoints fast recipients while a slow recipient still occupies another slot', async () => {
+        vi.useFakeTimers();
+        const supabase = createSupabaseMock('draft', { deliveryBatchSize: 100, recipients:
+            Array.from({ length: 125 }, (_, i) => ({ id: `r${i}`, contact_id: `c${i}`, contacts: { psid: `p${i}` } }))
+        });
+        vi.mocked(sendMessage).mockImplementation(async (_page, _token, psid) => {
+            await new Promise(resolve => setTimeout(resolve, psid === 'p0' ? 10_000 : 100));
+            return { message_id: `mid_${psid}` };
+        });
+        const pending = sendCampaignById({ campaignId: 'campaign_1', supabase: supabase as never });
+        await vi.advanceTimersByTimeAsync(1000);
+        expect(sendMessage).toHaveBeenCalledTimes(125);
+        expect(supabase.finishBatchRpc.mock.calls.flatMap(([args]) => args.p_results)).toHaveLength(100);
+        expect(supabase.finishBatchRpc.mock.calls.flatMap(([args]) => args.p_results).some(result => result.contact_id === 'c0')).toBe(false);
+        await vi.runAllTimersAsync();
+        expect((await pending).body).toMatchObject({ success: true, sent: 125, failed: 0 });
+        expect(new Set(supabase.finishBatchRpc.mock.calls.flatMap(([args]) => args.p_results.map((result: any) => result.contact_id))).size).toBe(125);
+    });
+
+    it('honors Stop at a checkpoint and releases unstarted recipients from a large claim', async () => {
+        vi.useFakeTimers();
+        const supabase = createSupabaseMock('draft', { deliveryBatchSize: 100, stopAfterFirstBatch: true, recipients:
+            Array.from({ length: 500 }, (_, i) => ({ id: `r${i}`, contact_id: `c${i}`, contacts: { psid: `p${i}` } }))
+        });
+        vi.mocked(sendMessage).mockImplementation(async (_page, _token, psid) => {
+            await new Promise(resolve => setTimeout(resolve, 100));
+            return { message_id: `mid_${psid}` };
+        });
+        const pending = sendCampaignById({ campaignId: 'campaign_1', supabase: supabase as never });
+        await vi.runAllTimersAsync();
+        expect((await pending).body.paused).toBe(true);
+        expect(supabase.campaignRecord.status).toBe('draft');
+        expect(sendMessage.mock.calls.length).toBeLessThan(125);
+        expect(supabase.releaseBatchUpdate).toHaveBeenCalled();
+        expect(supabase.claimRpc).toHaveBeenCalledTimes(1);
     });
 
     it('benchmarks prior pacing against aggressive delivery with simulated network latency', async () => {
@@ -479,7 +516,8 @@ describe('sendCampaignById', () => {
         for (const settings of [
             { mode: 'prior pacing', pageSize: 5, delay: 1000 },
             { mode: 'optimized existing Page budget', pageSize: 5, delay: 0 },
-            { mode: 'aggressive Page budget', pageSize: 25, delay: 0 }
+            { mode: '25 rolling workers', pageSize: 25, delay: 0 },
+            { mode: '100 rolling workers', pageSize: 100, delay: 0 }
         ]) {
             vi.setSystemTime(new Date('2026-11-08T00:00:00Z'));
             const wait = (ms: number) => new Promise<void>(resolve => setTimeout(resolve, ms));

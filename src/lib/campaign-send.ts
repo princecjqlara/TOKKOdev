@@ -17,9 +17,11 @@ import {
     getCampaignDeliveryProgress,
     releaseCampaignRecipientBatch
 } from './campaign-recipient-queue';
+import type { ClaimedCampaignRecipient, CampaignRecipientResult } from './campaign-recipient-queue';
+import { mapConcurrentSettled } from './concurrent-work';
 import type { TemplateMediaType } from './facebook-templates';
 import { recordOutboundMessageEvents, type OutboundMessageEventInput } from './outbound-message-events';
-import { acquirePageDelivery, releasePageDelivery, waitForPageDeliveryBatch } from './page-delivery';
+import { acquirePageDelivery, releasePageDelivery, waitForPageDeliveryBatch, MAX_PAGE_DELIVERY_CONCURRENCY } from './page-delivery';
 import { databaseRequest, DATABASE_REQUEST_TIMEOUT_MS } from './database-request';
 
 type SupabaseLike = ReturnType<typeof getSupabaseAdmin>;
@@ -123,7 +125,7 @@ export async function sendCampaignById({
     expectedUpdatedAt,
     dueAt,
     includeUnscheduledRecipients = false,
-    sendBatchSize = 25,
+    sendBatchSize = MAX_PAGE_DELIVERY_CONCURRENCY,
     maxRecipientsPerRun,
     delayBetweenBatchesMs = 0,
     maxProcessingTimeMs = 240000,
@@ -453,7 +455,7 @@ export async function sendCampaignById({
         const MAX_SEND_BATCH_SIZE = Number.isFinite(sendBatchSize)
             ? Math.max(1, Math.min(Math.floor(sendBatchSize), pageLease.batchSize))
             : pageLease.batchSize;
-        let sendBatchSizeThisRun = Math.min(10, MAX_SEND_BATCH_SIZE);
+        let sendBatchSizeThisRun = Math.min(25, MAX_SEND_BATCH_SIZE);
         // Keep a recovery Page slow across every caller, even when the browser
         // requests zero delay. Multi-part campaigns consume multiple API calls.
         const DELAY_BETWEEN_BATCHES = Math.max(
@@ -507,10 +509,11 @@ export async function sendCampaignById({
                 };
             }
 
+            const claimSize = sendBatchSizeThisRun >= 25 ? Math.min(500, sendBatchSizeThisRun * 5) : sendBatchSizeThisRun;
             const batch = await claimCampaignRecipients({
                 supabase,
                 campaignId,
-                batchSize: Math.min(sendBatchSizeThisRun, MAX_RECIPIENTS - processedThisRun),
+                batchSize: Math.min(claimSize, MAX_RECIPIENTS - processedThisRun),
                 dueAt,
                 includeUnscheduledRecipients
             });
@@ -518,7 +521,18 @@ export async function sendCampaignById({
             if (batch.length === 0) break;
 
             const outboundEvents: OutboundMessageEventInput[] = [];
-            const batchPromises = batch.map(async (recipient) => {
+            let batchPause: { error: string; retryable: boolean } | null = null;
+            let saveError: unknown;
+            let saveFailed = false;
+            const checkpointed = new Set<string>();
+            const checkpointResults: CampaignRecipientResult[] = [];
+            let saveChain = Promise.resolve();
+            const deliverRecipient = async (recipient: ClaimedCampaignRecipient) => {
+                if (!batchPause && Date.now() - startTime + DATABASE_REQUEST_TIMEOUT_MS >= MAX_PROCESSING_TIME) {
+                    batchPause = { error: 'Delivery slice ended. Unsent recipients remain queued.', retryable: true };
+                }
+                if (batchPause) return { success: false, contactId: recipient.contact_id,
+                    pauseCampaign: true, ...batchPause };
                 if (!recipient.contact_psid) {
                     return {
                         success: false,
@@ -695,16 +709,21 @@ export async function sendCampaignById({
                                 }
                                 const { data: current, error: stateError } = await databaseRequest(supabase
                                     .from('campaigns').select('status').eq('id', campaignId).single());
-                                if (stateError) return {
+                                if (stateError) { batchPause = {
+                                    error: stateError.message || 'Campaign status could not be verified.',
+                                    retryable: isRetryableInfrastructureError(stateError)
+                                }; return {
                                     success: false, contactId: recipient.contact_id,
                                     error: stateError.message || 'Campaign status could not be verified.',
                                     pauseCampaign: true, retryable: isRetryableInfrastructureError(stateError)
-                                };
-                                if (current?.status !== 'sending') return {
+                                }; }
+                                if (current?.status !== 'sending') { batchPause = {
+                                    error: 'Campaign stopped. Unsent recipients remain saved.', retryable: false
+                                }; return {
                                     success: false, contactId: recipient.contact_id,
                                     error: 'Campaign stopped. Unsent recipients remain saved.',
                                     pauseCampaign: true, retryable: false
-                                };
+                                }; }
                                 if (Date.now() - startTime + DATABASE_REQUEST_TIMEOUT_MS >= MAX_PROCESSING_TIME) throw sendError;
                             }
                         }
@@ -713,6 +732,7 @@ export async function sendCampaignById({
                 } catch (error) {
                     deliveryError = (error as Error).message;
                     pauseCampaign = shouldPauseCampaignForSendError(error);
+                    if (pauseCampaign) batchPause = { error: deliveryError || 'Delivery temporarily unavailable.', retryable: isRetryableSendError(error) };
                     console.warn(`Failed to send to ${recipient.contact_psid}: ${deliveryError}`);
                     return {
                         success: false,
@@ -726,12 +746,37 @@ export async function sendCampaignById({
                 return deliveryError
                     ? { success: false, contactId: recipient.contact_id, error: deliveryError, pauseCampaign, retryable: false }
                     : { success: true, contactId: recipient.contact_id, pauseCampaign: false, retryable: false };
-            });
+            };
 
-            const batchResults = await Promise.allSettled(batchPromises);
+            const batchResults = await mapConcurrentSettled(batch, sendBatchSizeThisRun, deliverRecipient, async result => {
+                if (result.status !== 'fulfilled' || result.value.pauseCampaign || saveFailed) return;
+                checkpointResults.push({ contact_id: result.value.contactId, success: result.value.success,
+                    error_message: result.value.success ? null : result.value.error || 'Unknown delivery error' });
+                if (checkpointResults.length < 50) return;
+                const receipts = checkpointResults.splice(0, 50);
+                saveChain = saveChain.then(async () => {
+                    if (saveFailed) return;
+                    try {
+                        await finishCampaignRecipientBatch({ supabase, campaignId, claimToken: batch[0].claim_token, results: receipts });
+                        for (const receipt of receipts) checkpointed.add(receipt.contact_id);
+                        // Check Stop while refilling a large claim instead of
+                        // waiting for every slow recipient in the claim.
+                        const { data: current, error } = await databaseRequest(supabase.from('campaigns')
+                            .select('status').eq('id', campaignId).single());
+                        if (error) { batchPause = { error: error.message, retryable: isRetryableInfrastructureError(error) }; }
+                        else if (current?.status !== 'sending') batchPause = { error: 'Campaign stopped. Unsent recipients remain saved.', retryable: false };
+                    } catch (error) {
+                        saveError = error; saveFailed = true;
+                        batchPause = { error: 'Saving delivery progress is temporarily unavailable.', retryable: true };
+                    }
+                });
+                await saveChain;
+            });
+            await saveChain;
+            if (saveFailed) throw saveError;
             const completionResults = batchResults.flatMap((result, index) => {
                 if (result.status === 'fulfilled') {
-                    if (result.value.pauseCampaign) return [];
+                    if (result.value.pauseCampaign || checkpointed.has(result.value.contactId)) return [];
                     return [{
                         contact_id: result.value.contactId,
                         success: result.value.success,
@@ -800,7 +845,7 @@ export async function sendCampaignById({
                     failedThisRun++;
                 }
             }
-            processedThisRun += completionResults.length;
+            processedThisRun += completionResults.length + checkpointed.size;
             lastBatchDurationMs = Date.now() - batchStartedAt;
 
             if (pausedResults.length > 0) {
@@ -853,7 +898,7 @@ export async function sendCampaignById({
 
             // A clean batch proves this Page is accepting work. Grow only
             // within the shared Page budget; a throttle still ends the slice.
-            sendBatchSizeThisRun = Math.min(MAX_SEND_BATCH_SIZE, sendBatchSizeThisRun + 5);
+            sendBatchSizeThisRun = Math.min(MAX_SEND_BATCH_SIZE, Math.max(sendBatchSizeThisRun + 5, sendBatchSizeThisRun * 2));
 
             if (processedThisRun < MAX_RECIPIENTS && DELAY_BETWEEN_BATCHES > 0 &&
                 Date.now() - startTime + DELAY_BETWEEN_BATCHES + lastBatchDurationMs + DATABASE_REQUEST_TIMEOUT_MS < MAX_PROCESSING_TIME) {

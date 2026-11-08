@@ -89,7 +89,14 @@ try {
             return { contact_id: row.contact_id, success, error_message: success ? null : 'Synthetic recipient unavailable' };
         });
         const before = performance.now();
-        check((await db.query('SELECT finish_campaign_recipient_batch($1,$2,$3::jsonb) processed', [id, rows[0].claim_token, JSON.stringify(results)])).rows[0].processed, rows.length);
+        // Exercise partial checkpoints under one claim token as well as full
+        // batches; the rolling sender persists fast recipients in groups of 50.
+        const checkpointSize = report.batches % 100 === 0 ? 50 : 500;
+        for (let offset = 0; offset < results.length; offset += checkpointSize) {
+            const receipts = results.slice(offset, offset + checkpointSize);
+            check((await db.query('SELECT finish_campaign_recipient_batch($1,$2,$3::jsonb) processed',
+                [id, rows[0].claim_token, JSON.stringify(receipts)])).rows[0].processed, receipts.length);
+        }
         report.maxFinishMs = Math.max(report.maxFinishMs, Math.round(performance.now() - before));
         for (const row of rows) {
             const n = Number(row.contact_psid.slice('synthetic-'.length));

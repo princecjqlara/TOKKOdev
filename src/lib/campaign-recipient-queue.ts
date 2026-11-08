@@ -129,20 +129,22 @@ export async function releaseCampaignRecipientBatch({
 
     // Keep recoverable page/template/service failures pending. The claim-token
     // guard prevents an expired worker from releasing a newer worker's claim.
-    const { error } = await databaseRequest(supabase
-        .from('campaign_recipients')
-        .update({
-            status: 'pending',
-            claim_token: null,
-            claimed_at: null,
-            error_message: null
-        })
-        .eq('campaign_id', campaignId)
-        .eq('status', 'processing')
-        .eq('claim_token', claimToken)
-        .in('contact_id', contactIds));
+    for (let offset = 0; offset < contactIds.length; offset += 100) {
+        const { error } = await databaseRequest(supabase
+            .from('campaign_recipients')
+            .update({
+                status: 'pending',
+                claim_token: null,
+                claimed_at: null,
+                error_message: null
+            })
+            .eq('campaign_id', campaignId)
+            .eq('status', 'processing')
+            .eq('claim_token', claimToken)
+            .in('contact_id', contactIds.slice(offset, offset + 100)));
 
-    if (error) throw error;
+        if (error) throw error;
+    }
 }
 
 export async function getCampaignDeliveryProgress(

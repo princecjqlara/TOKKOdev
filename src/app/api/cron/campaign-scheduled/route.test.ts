@@ -229,7 +229,7 @@ describe('GET /api/cron/campaign-scheduled', () => {
             backgroundOnly: true,
             allowScheduled: true,
             dueAt: expect.any(String),
-            sendBatchSize: 25,
+            sendBatchSize: 100,
             delayBetweenBatchesMs: 0,
             maxRecipientsPerRun: 250,
             maxProcessingTimeMs: 15000,
@@ -312,7 +312,7 @@ describe('GET /api/cron/campaign-scheduled', () => {
             backgroundOnly: true,
             allowScheduled: true,
             dueAt: expect.any(String),
-            sendBatchSize: 25,
+            sendBatchSize: 100,
             delayBetweenBatchesMs: 0,
             maxRecipientsPerRun: 250,
             maxProcessingTimeMs: 15000,
@@ -350,7 +350,7 @@ describe('GET /api/cron/campaign-scheduled', () => {
             backgroundOnly: true,
             allowScheduled: false,
             dueAt: undefined,
-            sendBatchSize: 25,
+            sendBatchSize: 100,
             delayBetweenBatchesMs: 0,
             maxRecipientsPerRun: 250,
             maxProcessingTimeMs: 15000,
@@ -470,6 +470,25 @@ describe('GET /api/cron/campaign-scheduled', () => {
 
         expect(mocks.sendCampaignById).toHaveBeenCalledTimes(2);
         expect(mocks.sendCampaignById.mock.calls.map(([options]) => options.campaignId)).toEqual(['first', 'second']);
+    });
+
+    it('runs four different Pages concurrently within the worker budget', async () => {
+        const { GET } = await loadRoute();
+        const campaigns = Array.from({ length: 6 }, (_, i) => createCampaign({
+            id: `campaign_${i}`, page_id: `page_${i}`, status: 'sending', scheduled_at: null, audience_mode: 'specific'
+        }));
+        const supabase = createSupabaseMock({ campaignLevelCampaigns: [], immediateCampaigns: campaigns });
+        mocks.getSupabaseAdmin.mockReturnValue(supabase);
+        let started = 0;
+        const finish: Array<() => void> = [];
+        mocks.sendCampaignById.mockImplementation(() => new Promise(resolve => {
+            started++; finish.push(() => resolve({ success: true, body: {} }));
+        }));
+        const pending = GET(createRequest());
+        await vi.waitFor(() => expect(started).toBe(4));
+        expect(mocks.sendCampaignById.mock.calls.map(([options]) => options.campaignId)).toEqual(campaigns.slice(0, 4).map(row => row.id));
+        finish.forEach(done => done());
+        expect((await pending).status).toBe(200);
     });
 
     it('keeps a recovered best-time campaign restricted to due recipients', async () => {

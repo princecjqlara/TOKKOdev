@@ -28,6 +28,7 @@ try {
             campaign_delivery_rate_strikes INTEGER DEFAULT 0, campaign_delivery_last_rate_limit_at TIMESTAMPTZ);
         CREATE TABLE campaigns(id UUID PRIMARY KEY,page_id UUID,status TEXT,next_attempt_at TIMESTAMPTZ);`);
     await db.exec(await readFile(resolve('database/migration_campaign_delivery_throughput.sql'), 'utf8'));
+    await db.exec(await readFile(resolve('database/migration_campaign_delivery_parallel.sql'), 'utf8'));
     const coordination = await readFile(resolve('database/migration_page_worker_coordination.sql'), 'utf8');
     const start = coordination.indexOf('CREATE OR REPLACE FUNCTION public.release_page_campaign_delivery(');
     const end = coordination.indexOf('$$;', start);
@@ -37,7 +38,7 @@ try {
     for (const status of ['sending', 'scheduled', 'draft', 'cancelled']) {
         await db.query('INSERT INTO campaigns(id,page_id,status) VALUES($1,$2,$3)', [randomUUID(), page, status]);
     }
-    check((await acquire()).batch_size, 25);
+    check((await acquire()).batch_size, 100);
     check((await acquire(page, otherOwner)).acquired, false);
     check((await acquire(otherPage, otherOwner)).acquired, true);
     await release(false, otherOwner);
@@ -65,7 +66,7 @@ try {
     // only after the old throttle window has elapsed.
     await db.query(`UPDATE pages SET campaign_delivery_last_rate_limit_at=now()-interval '7 hours',
         campaign_delivery_owner=$2,campaign_delivery_lease_until=now()-interval '1 second' WHERE id=$1`, [page, otherOwner]);
-    check((await acquire()).batch_size, 25);
+    check((await acquire()).batch_size, 100);
     check((await db.query('SELECT campaign_delivery_rate_strikes strikes FROM pages WHERE id=$1', [page])).rows[0].strikes, 0);
     await release();
     await db.query("UPDATE pages SET campaign_delivery_last_rate_limit_at=now()-interval '7 hours',campaign_delivery_cooldown_until=now()+interval '1 minute' WHERE id=$1", [page]);

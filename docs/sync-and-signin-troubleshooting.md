@@ -18,7 +18,12 @@ rate-limit cooldowns remain in effect. Manually stopped campaigns stay stopped
 until **Continue Unsent** is selected. Deploy the updated application to activate
 this recovery change. The faster delivery upgrade also uses
 `database/migration_campaign_delivery_throughput.sql`; the existing minute
-campaign job stays in place. On Vercel its HTTP response acknowledges that a
+campaign job stays in place. The rolling 100-worker upgrade uses
+`database/migration_campaign_delivery_parallel.sql`. Check the deployed
+`acquire_page_campaign_delivery` function as well as application code: an older
+database budget of five recipients still constrains a newer sender. Applying
+the new budget does not clear an active lease, reset recipients, or bypass a
+Page cooldown. On Vercel its HTTP response acknowledges that a
 background run was accepted, while actual progress is recorded on the campaign.
 Check campaign counts and `last_error` as well as scheduler history: a successful
 acknowledgment alone does not establish that every recipient was delivered.

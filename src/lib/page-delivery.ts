@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { getSupabaseAdmin } from './supabase';
 import { databaseRequest } from './database-request';
+export const MAX_PAGE_DELIVERY_CONCURRENCY = 100;
 
 export function waitForPageDeliveryBatch(milliseconds: number): Promise<void> {
     return new Promise(resolve => setTimeout(resolve, milliseconds));
@@ -12,7 +13,7 @@ export async function acquirePageDelivery(supabase: ReturnType<typeof getSupabas
     if (error) throw error;
     const row = Array.isArray(data) ? data[0] : data;
     if (!row || typeof row.acquired !== 'boolean') throw new Error('Page delivery coordination returned an invalid response');
-    return { owner, acquired: row.acquired, retryAt: row.retry_at as string | null, batchSize: Math.max(1, Math.min(25, Number(row.batch_size) || 1)) };
+    return { owner, acquired: row.acquired, retryAt: row.retry_at as string | null, batchSize: Math.max(1, Math.min(MAX_PAGE_DELIVERY_CONCURRENCY, Number(row.batch_size) || 1)) };
 }
 
 export async function releasePageDelivery(supabase: ReturnType<typeof getSupabaseAdmin>, pageId: string, owner: string, rateLimited: boolean) {
