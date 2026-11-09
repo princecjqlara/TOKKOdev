@@ -12,7 +12,7 @@ export async function GET(_request: NextRequest) {
     const startTime = Date.now();
 
     // Start the primary job first, then run polling alongside it in this same
-    // authenticated scheduler invocation. Slow or failing follow-ups must not
+    // scheduler invocation. Slow or failing follow-ups must not
     // prevent the Page cursor from advancing. No extra cron or HTTP call.
     const followUpTask = (async () => processDueFollowUpAutomationSteps({
         supabase: getSupabaseAdmin(), limit: 10
@@ -32,7 +32,7 @@ export async function GET(_request: NextRequest) {
         message: 'Contact import is pending; its database checkpoint is retained.' }));
 
     // Start continuation independently of follow-ups. Use the shared worker in
-    // this authenticated invocation so a second HTTP request and its timeout
+    // this invocation so a second HTTP request and its timeout
     // cannot interrupt the handoff after the browser stops sending.
     const campaignTask = (async (): Promise<Record<string, unknown>> => {
         try {

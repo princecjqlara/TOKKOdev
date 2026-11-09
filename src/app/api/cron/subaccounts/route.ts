@@ -2,7 +2,7 @@ import { NextResponse } from 'next/server';
 import { getSupabaseAdmin } from '@/lib/supabase';
 export const dynamic = 'force-dynamic';
 export const maxDuration = 60;
-// The shared cron middleware requires Authorization: Bearer <CRON_SECRET>.
+// Public scheduler endpoint; cleanup remains bounded by the database worker.
 export async function GET() {
     try {
     const { data, error } = await getSupabaseAdmin().rpc('tokko_delete_expired_subaccounts', { p_limit: 100 });

@@ -116,7 +116,7 @@ src/
 ## Development
 
 See [sync and sign-in recovery](docs/sync-and-signin-troubleshooting.md) for
-worker authentication, expired Page connections, and temporary account failures.
+worker scheduling, expired Page connections, and temporary account failures.
 
 Contact imports also refresh Messenger lead-stage and order-created tags. See
 [Messenger auto-tag behavior](docs/messaging-auto-tag.md) for event mappings,
@@ -137,7 +137,7 @@ outside this application's source tree.
 
 ## Deployment
 
-For original Facebook parent users and their email/password team subaccounts, follow [the account rollout guide](docs/page-member-accounts.md). Subaccounts support overlapping multi-Page access and optional scheduled deletion. Apply the account migrations before application code, configure authenticated workers, and finalize shared-database isolation before enabling production subaccounts. Email delivery is optional for parent-created initial-password accounts.
+For original Facebook parent users and their email/password team subaccounts, follow [the account rollout guide](docs/page-member-accounts.md). Subaccounts support overlapping multi-Page access and optional scheduled deletion. Apply the account migrations before application code, configure scheduled workers, and finalize shared-database isolation before enabling production subaccounts. Email delivery is optional for parent-created initial-password accounts.
 
 ### Vercel Deployment
 
@@ -154,7 +154,6 @@ For original Facebook parent users and their email/password team subaccounts, fo
    - `SUPABASE_URL` - The server's Supabase project URL; use the same project as the public URL
    - `NEXT_PUBLIC_SUPABASE_ANON_KEY` - Your Supabase anon key
    - `SUPABASE_SERVICE_ROLE_KEY` - Your Supabase service role key
-   - `CRON_SECRET` - A private random secret shared only with your external scheduler
 
 5. Update Facebook App settings:
    - Add your Vercel URL to Facebook App redirect URIs:
@@ -176,11 +175,13 @@ Vercel Cron is not used. Configure cron jobs in [cron-jobs.org](https://cron-job
 - Follow-up automations, every minute: `https://your-app.vercel.app/api/cron/follow-up-automations`
 - Conversation export worker, every minute: `https://your-app.vercel.app/api/cron/exports`
 
-Use `GET` requests and configure the HTTP header `Authorization: Bearer <CRON_SECRET>`
-on every job, using the same secret as the deployed environment. Requests without
-that header return `401`; missing server configuration returns `503`. Check each
-job's execution history after changing deployment settings. A failed or disabled
-scheduler stops background sync, campaign continuation, and follow-ups.
+Use `GET` requests with the URL alone. All `/api/cron/*` endpoints are public:
+no sign-in, Authorization header, random key, or `CRON_SECRET` environment variable
+is required. Existing scheduler headers and an old `CRON_SECRET` value are ignored.
+Deploy this version before switching an older installation to public workers.
+Check each job's execution history and re-enable jobs disabled after repeated
+failures. A failed or disabled scheduler stops background sync, campaign
+continuation, and follow-ups.
 
 Bulk sends save their background continuation before returning the prepared
 campaign. Both sending screens retry temporary network failures, gateway

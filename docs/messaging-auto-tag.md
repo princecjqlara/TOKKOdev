@@ -24,7 +24,7 @@ skip tagging for one manual sync; that choice persists across its continuation
 requests. It cannot override a disabled Page setting.
 
 The existing cron-jobs.org minute job calls
-`/api/cron/follow-up-automations`. That same authenticated invocation starts
+`/api/cron/follow-up-automations`. That same scheduler invocation starts
 auto-tag polling alongside follow-ups; no additional scheduler job or request
 to `/api/cron/messaging-auto-tag` is needed. Follow-up failures cannot skip the
 tag worker, and individual Page failures do not stop other Pages. The response
@@ -67,6 +67,6 @@ Missing tags are repaired with `ensure_page_default_tags`.
 `node --env-file=.env.local scripts/repair-operational-setup.mjs --preflight`
 verifies the migration and rolls back fixtures. `--apply` backs up definitions
 and metadata before committing the repair. The optional standalone diagnostic
-endpoint `/api/cron/messaging-auto-tag` requires the configured CRON_SECRET
-bearer token. Regular polling uses the existing follow-up scheduler instead.
+endpoint `/api/cron/messaging-auto-tag` is public and accepts a plain `GET`
+request without credentials. Regular polling uses the existing follow-up scheduler instead.
 Rejected Facebook Page tokens require reconnecting the affected Page.

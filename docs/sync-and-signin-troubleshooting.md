@@ -1,13 +1,17 @@
 # Sync and sign-in recovery
 
 Automatic sync depends on the external scheduler. Configure every `/api/cron/*`
-job with `Authorization: Bearer <CRON_SECRET>`, matching the secret on the live
-deployment. `401` means the supplied header was rejected; `503` can mean the
-deployment has no worker secret. Check job execution history and whether the
-scheduler disabled a failing job. Never remove worker authentication to restore
-sync. The existing follow-up job also advances Messenger tag scans and campaigns.
+job as a `GET` request to its URL. Worker endpoints are intentionally public and
+require no sign-in, Authorization header, random key, or `CRON_SECRET` environment
+variable. Existing scheduler headers and an old environment value are ignored.
+Deploy this version to activate public workers; an older deployment may still
+reject requests with `401`. Verify the deployment without running a worker by
+sending `OPTIONS /api/cron/campaign-scheduled`, which should return `204` without
+credentials. Check job execution history and re-enable jobs disabled after
+repeated failures. The existing follow-up job also advances Messenger tag scans
+and campaigns.
 
-Campaign continuation runs independently of follow-ups in that authenticated
+Campaign continuation runs independently of follow-ups in that scheduler
 invocation. It calls the same worker as `/api/cron/campaign-scheduled` directly,
 so a follow-up failure or nested HTTP timeout cannot prevent queued campaigns
 from resuming. A failed scheduled or best-time lookup does not block a healthy
@@ -55,10 +59,9 @@ retries reuse the same claim and results without issuing another Facebook send.
 Manual Stop is rechecked before an immediate send retry begins.
 
 Use the deployment that actually serves the live domain when inspecting settings.
-A local `.vercel/project.json` can point to a different project, and `.env.local`
-can contain an older secret. Updating an environment variable requires a new
-deployment before existing functions receive its value. Coordinate changes with
-the scheduler so both use the same secret.
+A local `.vercel/project.json` can point to a different project. Deploy the
+updated worker middleware to the live project; editing a local environment file
+or changing the scheduler's headers cannot update older deployed code.
 
 Facebook error code `190` indicates that the saved Page connection needs to be
 renewed. A Page manager should use **Connect Pages → Reconnect**. Keep the existing
@@ -72,7 +75,7 @@ before deploying this importer. Each bounded slice saves its contacts and the
 next folder/cursor atomically. Failed saves retain the current batch. Retrying
 Sync, including after reopening the browser, attaches to an unfinished Page import; the regular
 sync and existing minute follow-up workers also continue saved imports. Their
-worker credentials still need to be configured correctly.
+scheduler jobs still need to be enabled and call the live deployment.
 
 The importer reads conversation participants first. It no longer fetches a
 separate profile and up to 500 historical messages for every contact before

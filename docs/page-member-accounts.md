@@ -55,7 +55,7 @@ If Facebook callbacks and webhook Page lookups fail together, check the deployed
 
 Use the existing canonical live application URL, `https://tokkobeta.vercel.app`. The live Vercel project is `tokkobeta` in `sircjdigiworks-4427s-projects`. The locally linked `tokkodev` project in `bigclicklara-2607s-projects` is a different project; do not deploy there or change the Facebook callback URL to bypass missing live-team access.
 
-Required server configuration is `NEXTAUTH_URL`, `NEXTAUTH_SECRET`, existing Facebook/Supabase server credentials, and `CRON_SECRET` for HTTP workers. Initial-password creation and assigning an existing account do not require an email sender. Email invitations and password recovery require `RESEND_API_KEY` and `TOKKO_ACCOUNT_EMAIL_FROM`.
+Required server configuration is `NEXTAUTH_URL`, `NEXTAUTH_SECRET`, and existing Facebook/Supabase server credentials. HTTP workers are public and require no scheduler secret or Authorization header. Initial-password creation and assigning an existing account do not require an email sender. Email invitations and password recovery require `RESEND_API_KEY` and `TOKKO_ACCOUNT_EMAIL_FROM`.
 
 Apply migrations in this order, in transactions:
 
@@ -70,7 +70,7 @@ Apply migrations in this order, in transactions:
 9. `database/migration_facebook_messaging_access.sql` (records the historical messaging-access rule).
 10. `database/migration_parent_connected_page_assignment.sql` (allows original parents to assign every connected Page, including messaging connections).
 
-The scheduler migration installs `tokko-expired-subaccounts` in `pg_cron` when that extension is available. Otherwise configure an authenticated `GET /api/cron/subaccounts` every minute with `Authorization: Bearer <CRON_SECRET>`. This worker is independent of account email delivery. Inspect its `deleted` and `failed` counts and private access-audit records if cleanup fails.
+The scheduler migration installs `tokko-expired-subaccounts` in `pg_cron` when that extension is available. Otherwise configure a plain `GET /api/cron/subaccounts` every minute, with no credentials. This worker is independent of account email delivery. Inspect its `deleted` and `failed` counts and private access-audit records if cleanup fails.
 
 For a new deployment, password subaccounts remain disabled until database isolation is finalized. Review all consumers of the shared Supabase database, including the separate chatbot. They must use authorized server handlers/service credentials rather than direct anonymous or authenticated reads of Page data. Keep the media/export buckets private. After that review, run `node --env-file=.env.local scripts/enable-team-accounts.mjs`. It backs up permissions under the ignored `.vercel/backups` directory, applies `database/migration_page_member_isolation.sql` in one transaction, verifies readiness and service-role access, exercises account creation/assignment with rolled-back fixtures, and preserves existing users and memberships. Any pre-commit failure rolls back activation. Do not bypass readiness or activate passwords by editing user flags manually.
 
