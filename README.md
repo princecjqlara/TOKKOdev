@@ -84,6 +84,7 @@ For large campaigns, deploy the compact delivery queue in this exact order:
 6. Run `database/migration_campaign_delivery_throughput.sql` with the faster sender to raise healthy Page capacity to 25 parallel recipients. Pages recovering from throttles retain their smaller shared budgets and cooldowns.
 7. Run `database/migration_campaign_delivery_parallel.sql` for the rolling sender. Healthy Pages can use up to 100 active recipient workers, while the application claims at most 500 rows at a time and saves completed results in groups of 50. Older senders retain their lower application limit.
 8. Run `database/migration_campaign_delivery_adaptive.sql` before deploying the quota-aware sender. It persists learned concurrency and message spacing, shares application-wide cooldowns, and starts unknown Pages conservatively without resetting existing recipients or recovery windows.
+9. After deploying the public campaign worker, run `database/migration_campaign_worker_schedule.sql` to continue saved campaigns automatically through the existing database scheduler. It installs `pg_net` and one minute job, dispatches only eligible queues on idle Pages, and needs no scheduler account or credentials. The migration targets the canonical `tokkobeta.vercel.app` deployment; update its URL before using it for a different installation. `node --env-file=.env.local scripts/configure-campaign-scheduler.mjs --preflight` verifies 24 dispatch and recovery checks with rolled-back fixtures; `--apply` backs up the previous named job and installs the verified schedule.
 
 Do not run the finalizer before step 2. Older senders calculate progress from terminal queue rows that the finalizer intentionally removes.
 
@@ -165,7 +166,15 @@ For original Facebook parent users and their email/password team subaccounts, fo
 
 ### cron-jobs.org Setup
 
-Vercel Cron is not used. Configure cron jobs in [cron-jobs.org](https://cron-jobs.org) to call the deployed API routes:
+Vercel Cron is not used. With `migration_campaign_worker_schedule.sql` installed,
+saved campaigns continue through the database's `tokko-campaign-delivery` minute
+job even when the browser or external scheduler stops. It waits for Page leases,
+retry windows, cooldowns, and scheduled recipient times. Existing cron-job.org
+campaign calls can coexist through the same delivery leases, but are optional
+for campaign continuation once the database job is enabled.
+
+Configure the other background jobs in [cron-job.org](https://cron-job.org) to call
+the deployed API routes:
 
 - Contact/name sync, every 30 minutes: `https://your-app.vercel.app/api/cron/sync`
   Each call advances a saved contact-import batch; the existing minute follow-up
@@ -188,8 +197,8 @@ campaign. Both sending screens retry temporary network failures, gateway
 timeouts, and service errors automatically, and wait for Meta cooldowns before
 continuing. They resume the same campaign and retain completed recipient
 results. Stop still pauses delivery; Page authorization and template errors
-remain visible when they require a repair. The minute campaign scheduler is
-required to continue sending after the browser closes.
+remain visible when they require a repair. The minute database job or external
+campaign scheduler is required to continue sending after the browser closes.
 
 The sender learns each Page's available capacity, up to 100 active recipients.
 It starts unknown Pages at five workers with 100ms message spacing, increases

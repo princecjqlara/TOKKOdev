@@ -258,6 +258,88 @@ describe('sendCampaignById', () => {
         expect(sendMessage).not.toHaveBeenCalled();
     });
 
+    it.each([false, true])('retries a stale activation after another worker saves progress (Page busy: %s)', async busy => {
+        const settings = { deliveryBusy: busy, recipients: [
+            { id: 'done', contact_id: 'done', contacts: { psid: 'already-delivered' } },
+            { id: 'pending', contact_id: 'pending', contacts: { psid: 'still-pending' } }
+        ] };
+        const supabase = createSupabaseMock('sending', settings);
+        const rpc = supabase.rpc.getMockImplementation()!;
+        let advanced = false;
+        supabase.rpc.mockImplementation(async (name, args) => {
+            if (name === 'acquire_page_campaign_delivery' && !advanced) {
+                advanced = true;
+                // Another worker completes a recipient after this request's
+                // campaign read and before its conditional activation write.
+                await rpc('claim_campaign_recipients', { p_batch_size: 1 });
+                await rpc('finish_campaign_recipient_batch', {
+                    p_results: [{ contact_id: 'done', success: true }]
+                });
+                Object.assign(supabase.campaignRecord, {
+                    sent_count: 1, updated_at: '2026-11-09T00:00:01.000Z'
+                });
+            }
+            return rpc(name, args);
+        });
+        vi.mocked(sendMessage).mockResolvedValue({ message_id: 'accepted-pending' });
+        const options = { campaignId: 'campaign_1', supabase: supabase as never, backgroundOnly: true };
+
+        const deferred = await sendCampaignById(options);
+
+        expect(deferred.body).toMatchObject({ partial: true, queued: true, retryable: true,
+            sent: 1, failed: 0, remaining: 1 });
+        expect(deferred.body.paused).not.toBe(true);
+        expect(supabase.campaignRecord.status).toBe('sending');
+        expect(sendMessage).not.toHaveBeenCalled();
+
+        settings.deliveryBusy = false;
+        const resumed = await sendCampaignById(options);
+
+        expect(resumed.body).toMatchObject({ success: true, sent: 2, failed: 0 });
+        expect(sendMessage).toHaveBeenCalledTimes(1);
+        expect(vi.mocked(sendMessage).mock.calls[0][2]).toBe('still-pending');
+        expect(supabase.campaignRecord.status).toBe('completed');
+    });
+
+    it.each(['draft', 'cancelled'])('honors a concurrent %s instead of rearming it after an activation conflict', async status => {
+        const supabase = createSupabaseMock('sending', { remainingPendingCount: 200 });
+        const rpc = supabase.rpc.getMockImplementation()!;
+        supabase.rpc.mockImplementation(async (name, args) => {
+            if (name === 'acquire_page_campaign_delivery') {
+                Object.assign(supabase.campaignRecord, { status, background_delivery_enabled: false,
+                    updated_at: '2026-11-09T00:00:01.000Z' });
+            }
+            return rpc(name, args);
+        });
+
+        const result = await sendCampaignById({ campaignId: 'campaign_1', supabase: supabase as never, backgroundOnly: true });
+
+        expect(result.body).toMatchObject({ paused: true, queued: false, retryable: false,
+            cancelled: status === 'cancelled', remaining: 200 });
+        expect(supabase.campaignRecord).toMatchObject({ status, background_delivery_enabled: false });
+        expect(supabase.claimRpc).not.toHaveBeenCalled();
+        expect(sendMessage).not.toHaveBeenCalled();
+    });
+
+    it('reports fresh completion when another worker finishes during Page acquisition', async () => {
+        const supabase = createSupabaseMock('sending', { remainingPendingCount: 200 });
+        const rpc = supabase.rpc.getMockImplementation()!;
+        supabase.rpc.mockImplementation(async (name, args) => {
+            if (name === 'acquire_page_campaign_delivery') {
+                Object.assign(supabase.campaignRecord, { status: 'completed', sent_count: 190, failed_count: 10,
+                    updated_at: '2026-11-09T00:00:01.000Z' });
+            }
+            return rpc(name, args);
+        });
+
+        const result = await sendCampaignById({ campaignId: 'campaign_1', supabase: supabase as never, backgroundOnly: true });
+
+        expect(result.body).toEqual({ success: true, sent: 190, failed: 10, remaining: 0 });
+        expect(supabase.campaignRecord.status).toBe('completed');
+        expect(supabase.claimRpc).not.toHaveBeenCalled();
+        expect(sendMessage).not.toHaveBeenCalled();
+    });
+
     it('leaves persistence time before starting another slow batch and resumes the rest later', async () => {
         vi.useFakeTimers();
         const supabase = createSupabaseMock('draft', { recipients: [

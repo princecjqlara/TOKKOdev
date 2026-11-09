@@ -11,12 +11,35 @@ credentials. Check job execution history and re-enable jobs disabled after
 repeated failures. The existing follow-up job also advances Messenger tag scans
 and campaigns.
 
+Campaign delivery can continue independently through the existing database
+scheduler. Apply `database/migration_campaign_worker_schedule.sql` after deploying
+the public worker. The `tokko-campaign-delivery` job checks every minute and
+dispatches the campaign worker only when eligible work has an idle Page. It
+respects manual Stop, recipient schedules, retry windows, and shared Meta
+cooldowns. This requires no extra account connection or worker credentials.
+External campaign scheduler calls are optional once this job is enabled; their
+Page leases still prevent overlapping delivery if both schedulers run.
+
+Run `node --env-file=.env.local scripts/configure-campaign-scheduler.mjs --preflight`
+to verify installation and dispatch rules with rolled-back fixtures. `--apply`
+backs up the existing named job and commits the verified schedule. Inspect
+`cron.job_run_details` for job execution and `net._http_response` for HTTP results.
+A successful cron SQL result means a request was queued; verify its HTTP status
+and actual campaign counters too. A run with zero rows means no Page was eligible
+at that tick, such as during another worker's lease or a Meta cooldown.
+
 Campaign continuation runs independently of follow-ups in that scheduler
 invocation. It calls the same worker as `/api/cron/campaign-scheduled` directly,
 so a follow-up failure or nested HTTP timeout cannot prevent queued campaigns
 from resuming. A failed scheduled or best-time lookup does not block a healthy
 immediate campaign; partial discovery failures appear in `discoveryErrors`.
 Recipient claims and durable delivery counts preserve progress across requests.
+Receipt writes also change the campaign's update timestamp. When a browser and
+scheduler overlap, a rejected conditional update rechecks the saved state:
+an active campaign stays queued for automatic retry, a completed campaign returns
+its latest totals, and a manual Stop or cancellation remains stopped. A progress
+update from another worker must not be reported as a manual Stop. This behavior
+requires deploying the updated sender and needs no database migration.
 Completed recipients are skipped, expired claims can be recovered, and Meta
 rate-limit cooldowns remain in effect. Manually stopped campaigns stay stopped
 until **Continue Unsent** is selected. Deploy the updated application to activate

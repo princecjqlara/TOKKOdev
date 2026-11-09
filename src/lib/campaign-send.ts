@@ -144,6 +144,32 @@ export async function sendCampaignById({
     let continuationSaved = false;
     let stoppedResult: SendCampaignByIdResult | undefined;
     let adaptive: AdaptiveDeliveryController | undefined;
+    const resolveStateConflict = async (): Promise<SendCampaignByIdResult> => {
+        // Delivery receipts and other workers also update updated_at. A failed
+        // conditional write is not proof that the user pressed Stop.
+        const { data: current, error } = await databaseRequest(supabase.from('campaigns')
+            .select('status,background_delivery_enabled,sent_count,failed_count,total_recipients,next_attempt_at')
+            .eq('id', campaignId).single());
+        if (error) throw error;
+        if (!current) throw new Error('Campaign state is temporarily unavailable.');
+        const sent = Number(current.sent_count || 0);
+        const failed = Number(current.failed_count || 0);
+        const remaining = Math.max(0, Number(current.total_recipients || 0) - sent - failed);
+        if (current.status === 'completed') return { status: 200,
+            body: { success: true, sent, failed, remaining: 0 }, success: true, sent, failed };
+        if ((current.status === 'sending' && (current.background_delivery_enabled || dueAt)) ||
+            (current.status === 'scheduled' && allowScheduled)) {
+            return { status: 200, body: {
+                success: true, partial: true, paused: false, queued: true, retryable: true,
+                processed: 0, sent, failed, remaining, nextAttemptAt: current.next_attempt_at || null,
+                message: 'Another worker updated campaign progress. Delivery remains queued and will retry automatically.'
+            }, success: true, sent, failed };
+        }
+        return { status: 200, body: {
+            ...stoppedResult?.body, success: true, paused: true, retryable: false, queued: false,
+            cancelled: current.status === 'cancelled', sent, failed, remaining
+        }, success: true, sent, failed };
+    };
     const persistFeedback = async () => {
         if (!pageLease || !adaptive) return;
         const budget = await reportPageDeliveryFeedback(supabase, pageLease.pageId, pageLease.owner, adaptive);
@@ -278,7 +304,7 @@ export async function sendCampaignById({
                 audience_materialized_at: materializedAt,
                 updated_at: materializedAt
             }, expectedState);
-            if (!materialized) return stoppedResult;
+            if (!materialized) return await resolveStateConflict();
             expectedState.updatedAt = materialized.updated_at;
             campaign.audience_materialized_at = materializedAt;
         }
@@ -307,7 +333,7 @@ export async function sendCampaignById({
                 next_attempt_at: delivery.retryAt,
                 updated_at: new Date().toISOString()
             }, expectedState);
-            if (!activated) return stoppedResult;
+            if (!activated) return await resolveStateConflict();
             continuationSaved = true;
             recoveryStatus = dueAt ? 'scheduled' : 'sending';
             return { status: 200, body: {
@@ -328,7 +354,7 @@ export async function sendCampaignById({
             background_delivery_enabled: !dueAt && !campaign.is_loop,
             next_attempt_at: null, last_error: null, updated_at: new Date().toISOString()
         }, expectedState);
-        if (!activated) return stoppedResult;
+        if (!activated) return await resolveStateConflict();
         continuationSaved = true;
         recoveryStatus = 'sending';
 
@@ -890,7 +916,7 @@ export async function sendCampaignById({
                     last_error: pausedResults[0].error,
                     updated_at: new Date().toISOString()
                 }, 'sending');
-                if (!updated) return stoppedResult;
+                if (!updated) return await resolveStateConflict();
 
                 const reason = pausedResults[0].error;
                 return {
@@ -937,7 +963,7 @@ export async function sendCampaignById({
                 completed_at: progress.remaining > 0 ? null : new Date().toISOString(),
                 updated_at: new Date().toISOString()
             }, 'sending');
-            if (!updated) return stoppedResult;
+            if (!updated) return await resolveStateConflict();
 
             if (progress.remaining > 0) {
                 return {
@@ -1022,7 +1048,7 @@ export async function sendCampaignById({
                     last_error: databaseError.message || String(error),
                     updated_at: new Date().toISOString()
                 }, recoveryStatus);
-                if (!updated && stoppedResult) return stoppedResult;
+                if (!updated && stoppedResult) return await resolveStateConflict();
                 queued = shouldRetryAutomatically;
                 console.log(`Campaign ${campaignId} re-armed after sender error`);
             } catch (resetError) {
