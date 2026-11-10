@@ -64,6 +64,16 @@ usage headers trigger gradual probing rather than another immediate large burst.
 Without a provider recovery estimate, repeated throttles use increasing retry
 windows. Existing future cooldowns and manual Stop remain in effect.
 
+Successful responses reporting full quota usage slow sending to one message
+every five seconds instead of manufacturing a rate-limit error and escalating
+shared cooldowns. Explicit provider recovery estimates and rejected rate-limited
+requests still pause and retry automatically. A normal worker deadline releases
+unstarted recipients and returns a resumable slice immediately; it does not add
+a service-error backoff. An already-started multipart recipient finishes across
+that soft deadline so a later slice does not replay its completed first part.
+Manually stopped campaigns are displayed as Paused and require an explicit
+resume; they are not mistaken for drafts that have never sent.
+
 Temporary worker failures, timeouts, expired recipient claims, and unrecognized
 infrastructure interruptions keep campaigns queued for automatic retry after
 one minute. Facebook rate limits keep their shared Page cooldown instead.

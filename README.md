@@ -205,8 +205,13 @@ It starts unknown Pages at five workers with 100ms message spacing, increases
 speed after sustained clean responses, and reduces both concurrency and message
 rate when Meta usage rises. It reads `X-App-Usage`, `X-Page-Usage`,
 `X-Business-Use-Case-Usage`, and `Retry-After` when available. App-level throttles
-share their cooldown across Pages; Page-level throttles stay local. The learned
-pace survives worker restarts. It refills each free worker slot and groups audit
+share their cooldown across Pages; Page-level throttles stay local. The sender
+continues at a conservative one message every five seconds when successful
+responses report full usage, while actual throttles and explicit provider delays
+still defer delivery. Normal slice deadlines hand off pending work without an
+extra service-error cooldown. Started multipart recipients finish before that
+handoff. Manually stopped campaigns display Paused. The learned pace survives
+worker restarts. It refills each free worker slot and groups audit
 writes into 250-message chunks after saving delivery results. Once a Page
 reaches five workers, each fetch can supply five contacts per worker, reducing
 database waits as the sender learns its speed. Prefetched contacts still pass

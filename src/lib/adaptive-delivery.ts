@@ -1,7 +1,7 @@
 import { categorizeSendError } from './send-errors';
 import type { MetaDeliveryFeedback } from './meta-delivery-feedback';
 
-type Job = { start: () => void; reject: (error: Error) => void; allowed?: () => boolean };
+type Job = { start: () => void; reject: (error: unknown) => void; allowed?: () => boolean };
 
 /** A Page's learned concurrency plus message-level pacing, including multi-part sends. */
 export class AdaptiveDeliveryController {
@@ -30,7 +30,20 @@ export class AdaptiveDeliveryController {
         if (feedback?.usagePercent !== undefined) this.lastUsage = { percent: feedback.usagePercent, at: Date.now() };
         const usage = feedback?.usagePercent ??
             (this.lastUsage && Date.now() - this.lastUsage.at < 30_000 ? this.lastUsage.percent : 0);
-        if (usage >= 100) { this.pause(feedback?.retryAfterMs || 60_000, feedback?.scope, Boolean(feedback?.retryAfterMs)); return; }
+        if (feedback?.retryAfterMs && feedback.retryAfterMs > 0) {
+            this.pause(feedback.retryAfterMs, feedback.scope, true); return;
+        }
+        if (usage >= 100) {
+            // An accepted send with a usage header is not a rejected request.
+            // Keep a conservative trickle instead of escalating synthetic 429s
+            // into long shared cooldowns. Actual throttles still pause below.
+            this.clean = 0;
+            this.concurrency = 1;
+            this.intervalMs = 5000;
+            this.nextStart = Math.max(this.nextStart, Date.now() + this.intervalMs);
+            this.lastReduction = Date.now();
+            this.pump(); return;
+        }
         if (usage >= 70) {
             this.clean = 0;
             if (feedback?.usagePercent !== undefined && Date.now() - this.lastReduction >= 2000) {
@@ -102,10 +115,12 @@ export class AdaptiveDeliveryController {
                 return;
             }
             const job = this.queue.shift()!;
-            if (job.allowed && !job.allowed()) {
-                job.reject(new Error('Delivery temporarily unavailable or stopped. Unsent recipients remain queued.'));
-                continue;
-            }
+            try {
+                if (job.allowed && !job.allowed()) {
+                    job.reject(new Error('Delivery temporarily unavailable or stopped. Unsent recipients remain queued.'));
+                    continue;
+                }
+            } catch (error) { job.reject(error); continue; }
             this.nextStart = Date.now() + this.intervalMs;
             job.start();
         }

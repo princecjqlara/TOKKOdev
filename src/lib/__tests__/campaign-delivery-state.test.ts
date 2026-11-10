@@ -30,9 +30,13 @@ describe('campaign delivery recovery', () => {
         expect(getCampaignDeliveryState(campaign, now)).toBe('retrying');
         expect(getCampaignDeliveryState({ ...campaign, background_delivery_enabled: false }, now)).toBe('paused');
     });
-    it('does not relabel a best-time send or a manually paused draft', () => {
+    it('preserves ordinary drafts and best-time sends', () => {
         expect(getCampaignDeliveryState({ status: 'scheduled', scheduled_at: null, background_delivery_enabled: false }, now)).toBe('scheduled');
         expect(getCampaignDeliveryState({ status: 'sending', use_best_time: true, scheduled_at: null, background_delivery_enabled: false }, now)).toBe('sending');
         expect(getCampaignDeliveryState({ status: 'draft', scheduled_at: null, next_attempt_at: '2099-01-01' }, now)).toBe('draft');
+    });
+    it('labels a manually stopped campaign as paused instead of an unsent draft', () => {
+        expect(getCampaignDeliveryState({ status: 'draft', background_delivery_enabled: false,
+            scheduled_at: null, last_error: 'Stopped manually. Unsent recipients remain queued.' }, now)).toBe('paused');
     });
 });

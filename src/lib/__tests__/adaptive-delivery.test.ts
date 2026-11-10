@@ -73,6 +73,44 @@ describe('learning the available Meta sending capacity', () => {
         expect(vi.getTimerCount()).toBe(0);
     });
 
+    it('keeps accepted requests moving slowly at full reported usage without inventing a rate-limit error', async () => {
+        vi.useFakeTimers();
+        const controller = new AdaptiveDeliveryController(100, 5, 0);
+        const starts: number[] = [];
+        const jobs = Array.from({ length: 12 }, () => controller.run(async () => {
+            starts.push(Date.now());
+            controller.observeSuccess({ usagePercent: 100, scope: 'app' });
+            return 'accepted';
+        }));
+        const completed = Promise.allSettled(jobs);
+        await vi.runAllTimersAsync();
+
+        expect((await completed).every(result => result.status === 'fulfilled')).toBe(true);
+        expect(starts).toHaveLength(12);
+        expect(starts.slice(1).every((time, index) => time - starts[index] >= 5000)).toBe(true);
+        expect(controller.concurrency).toBe(1);
+        expect(controller.limited).toBe(false);
+        expect(controller.retryAt).toBe(0);
+        expect(vi.getTimerCount()).toBe(0);
+    });
+
+    it('honors an explicit provider recovery time even when no usage percentage is reported', async () => {
+        vi.useFakeTimers();
+        const controller = new AdaptiveDeliveryController(100, 5, 0);
+        const before = Date.now();
+        controller.observeSuccess({ retryAfterMs: 120_000, scope: 'app' });
+        expect(controller.limited).toBe(true);
+        expect(controller.providerRetryAt).toBe(before + 120_000);
+        await expect(controller.run(async () => 'unexpected')).rejects.toMatchObject({ status: 429 });
+    });
+
+    it('rejects a queued operation cleanly when its allowed callback yields the slice', async () => {
+        const controller = new AdaptiveDeliveryController(100, 1, 0);
+        const yielded = new Error('Slice ended');
+        await expect(controller.run(async () => 'unexpected', () => { throw yielded; })).rejects.toBe(yielded);
+        expect(await controller.run(async () => 'next')).toBe('next');
+    });
+
     it('does not interpret missing headers as instant recovery from recent pressure', async () => {
         vi.useFakeTimers();
         const controller = new AdaptiveDeliveryController(100, 10, 100);

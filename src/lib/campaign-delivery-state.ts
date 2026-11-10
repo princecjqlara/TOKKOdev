@@ -22,6 +22,7 @@ export function shouldContinueCampaignDelivery(slice: DeliverySlice, now = Date.
 export function getCampaignDeliveryState(campaign: Pick<Campaign,
     'status' | 'is_loop' | 'background_delivery_enabled' | 'next_attempt_at' | 'last_error' | 'scheduled_at'
 > & { use_best_time?: boolean }, now = Date.now()) {
+    if (campaign.status === 'draft' && /^Stopped manually\./i.test(campaign.last_error || '')) return 'paused';
     if (campaign.status !== 'sending' && campaign.status !== 'scheduled') return campaign.status;
     if (campaign.status === 'sending' && !campaign.is_loop && !campaign.use_best_time && !campaign.scheduled_at &&
         campaign.background_delivery_enabled === false) return 'paused';

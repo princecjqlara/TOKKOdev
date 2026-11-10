@@ -59,6 +59,15 @@ const TRANSIENT_RETRY_DELAY_MS = 60_000;
 const RATE_LIMIT_RETRY_DELAY_MS = 60_000;
 const OUTBOUND_AUDIT_BATCH_SIZE = 250;
 
+type DeliveryInterruption = { error: string; retryable: boolean; yielded?: boolean };
+type RecipientDeliveryResult = {
+    success: boolean; contactId: string; error?: string; pauseCampaign: boolean;
+    retryable?: boolean; yielded?: boolean;
+};
+class CampaignDeliveryInterruptedError extends Error {
+    constructor(readonly interruption: DeliveryInterruption) { super(interruption.error); }
+}
+
 async function updateCampaignState(supabase: SupabaseLike, campaignId: string,
     changes: Record<string, unknown>, expectedStatus?: string | string[]) {
     const query = supabase.from('campaigns').update(changes).eq('id', campaignId);
@@ -559,15 +568,16 @@ export async function sendCampaignById({
             if (batch.length === 0) break;
 
             const outboundEvents: OutboundMessageEventInput[] = [];
-            let batchPause: { error: string; retryable: boolean } | null = null;
+            let batchPause: DeliveryInterruption | null = null;
+            const getBatchPause = (): DeliveryInterruption | null => batchPause;
             let saveError: unknown;
             let saveFailed = false;
             const checkpointed = new Set<string>();
             const checkpointResults: CampaignRecipientResult[] = [];
             let saveChain = Promise.resolve();
-            const deliverRecipient = async (recipient: ClaimedCampaignRecipient) => {
+            const deliverRecipient = async (recipient: ClaimedCampaignRecipient): Promise<RecipientDeliveryResult> => {
                 if (!batchPause && Date.now() - startTime + DATABASE_REQUEST_TIMEOUT_MS >= MAX_PROCESSING_TIME) {
-                    batchPause = { error: 'Delivery slice ended. Unsent recipients remain queued.', retryable: true };
+                    batchPause = { error: 'Delivery slice ended. Unsent recipients remain queued.', retryable: true, yielded: true };
                 }
                 if (batchPause) return { success: false, contactId: recipient.contact_id,
                     pauseCampaign: true, ...batchPause };
@@ -635,6 +645,7 @@ export async function sendCampaignById({
                     }
 
                     let threadControlRecoveryAttempted = false;
+                    let recipientStarted = false;
                     for (let messageIndex = 0; messageIndex < messagesToSend.length; messageIndex++) {
                         const messagePart = messagesToSend[messageIndex];
                         const messageToSend = messagePart.text;
@@ -677,10 +688,23 @@ export async function sendCampaignById({
                                 }
 
                                 const sendResult = await adaptive!.run(async () => {
+                                    recipientStarted = true;
                                     const result = await sendMessage(...sendArgs);
                                     adaptive!.observeSuccess(result.deliveryFeedback);
                                     return result;
-                                }, () => !batchPause && Date.now() - startTime + DATABASE_REQUEST_TIMEOUT_MS < MAX_PROCESSING_TIME);
+                                }, () => {
+                                    // Finish an already-started multipart recipient across
+                                    // the soft deadline, while deferring new recipients.
+                                    if (batchPause && !(recipientStarted && batchPause.yielded)) {
+                                        throw new CampaignDeliveryInterruptedError(batchPause);
+                                    }
+                                    if (!recipientStarted && Date.now() - startTime + DATABASE_REQUEST_TIMEOUT_MS >= MAX_PROCESSING_TIME) {
+                                        throw new CampaignDeliveryInterruptedError({
+                                            error: 'Delivery slice ended. Unsent recipients remain queued.', retryable: true, yielded: true
+                                        });
+                                    }
+                                    return true;
+                                });
                                 outboundEvents.push({
                                     pageId: campaign.page_id,
                                     contactId: recipient.contact_id,
@@ -694,6 +718,7 @@ export async function sendCampaignById({
                                 });
                                 break;
                             } catch (sendError) {
+                                if (sendError instanceof CampaignDeliveryInterruptedError) throw sendError;
                                 const errorMessage = (sendError as Error).message;
                                 if (
                                     categorizeSendError(sendError) === 'thread_controlled_by_another_app' &&
@@ -772,6 +797,11 @@ export async function sendCampaignById({
                     }
 
                 } catch (error) {
+                    if (error instanceof CampaignDeliveryInterruptedError) {
+                        const currentPause = getBatchPause();
+                        batchPause = currentPause && !currentPause.yielded ? currentPause : error.interruption;
+                        return { success: false, contactId: recipient.contact_id, pauseCampaign: true, ...batchPause };
+                    }
                     deliveryError = (error as Error).message;
                     pauseCampaign = shouldPauseCampaignForSendError(error);
                     if (pauseCampaign) batchPause = { error: deliveryError || 'Delivery temporarily unavailable.', retryable: isRetryableSendError(error) };
@@ -841,7 +871,8 @@ export async function sendCampaignById({
                         ? [{
                             contactId: result.value.contactId,
                             error: result.value.error || 'Recoverable send failure',
-                            retryable: result.value.retryable
+                            retryable: result.value.retryable,
+                            yielded: result.value.yielded === true
                         }]
                         : [];
                 }
@@ -849,7 +880,8 @@ export async function sendCampaignById({
                     ? [{
                         contactId: batch[index].contact_id,
                         error: result.reason instanceof Error ? result.reason.message : 'Recoverable send failure',
-                        retryable: isRetryableSendError(result.reason)
+                        retryable: isRetryableSendError(result.reason),
+                        yielded: false
                     }]
                     : [];
             });
@@ -892,6 +924,10 @@ export async function sendCampaignById({
             lastBatchDurationMs = Date.now() - batchStartedAt;
 
             if (pausedResults.length > 0) {
+                // A normal invocation deadline is a handoff, not a service
+                // failure. Released recipients can continue in the next slice
+                // immediately, without an artificial one-minute error backoff.
+                if (pausedResults.every(result => result.yielded)) break;
                 const progress = await getCampaignDeliveryProgress(supabase, campaignId);
                 const shouldRetryAutomatically = pausedResults.every(result => result.retryable);
                 const pausedStatus = shouldRetryAutomatically
