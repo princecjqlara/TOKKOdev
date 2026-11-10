@@ -182,9 +182,12 @@ export async function sendCampaignById({
     const persistFeedback = async () => {
         if (!pageLease || !adaptive) return;
         const budget = await reportPageDeliveryFeedback(supabase, pageLease.pageId, pageLease.owner, adaptive);
+        // Shared recovery budgets may come from a throttle on another Page.
+        // Adopt them even when its cooldown has already elapsed.
+        adaptive.concurrency = Math.min(adaptive.concurrency, budget.concurrency);
+        adaptive.intervalMs = Math.max(adaptive.intervalMs, budget.intervalMs);
+        adaptive.deferGrowth(budget.growthAfter);
         if (budget.retryAt && Date.parse(budget.retryAt) > Date.now()) {
-            adaptive.concurrency = Math.min(adaptive.concurrency, budget.concurrency);
-            adaptive.intervalMs = Math.max(adaptive.intervalMs, budget.intervalMs);
             adaptive.pause(Date.parse(budget.retryAt) - Date.now());
             pageRateLimited = true;
         }
@@ -503,7 +506,7 @@ export async function sendCampaignById({
             ? Math.max(1, Math.min(Math.floor(sendBatchSize), MAX_PAGE_DELIVERY_CONCURRENCY))
             : MAX_PAGE_DELIVERY_CONCURRENCY;
         const learned = await reportPageDeliveryFeedback(supabase, pageLease.pageId, pageLease.owner);
-        adaptive = new AdaptiveDeliveryController(MAX_SEND_BATCH_SIZE, learned.concurrency, learned.intervalMs);
+        adaptive = new AdaptiveDeliveryController(MAX_SEND_BATCH_SIZE, learned.concurrency, learned.intervalMs, learned.growthAfter);
         if (learned.retryAt && Date.parse(learned.retryAt) > Date.now()) adaptive.pause(Date.parse(learned.retryAt) - Date.now());
         let sendBatchSizeThisRun = adaptive.concurrency;
         const DELAY_BETWEEN_BATCHES = Math.max(0, delayBetweenBatchesMs || 0);

@@ -74,6 +74,18 @@ that soft deadline so a later slice does not replay its completed first part.
 Manually stopped campaigns are displayed as Paused and require an explicit
 resume; they are not mistaken for drafts that have never sent.
 
+For Pages that repeatedly burst after recovering, apply
+`database/migration_campaign_delivery_recovery_pace.sql` and deploy the matching
+sender. Page feedback includes an absolute `growth_after` time, ten minutes after
+the saved cooldown. During this hold, the database rejects optimistic speed
+increases and workers retain their slower budgets even when replies are clean.
+App-level throttles share conservative pacing across Pages. Repeated reports from
+one worker retain the original saved recovery window instead of sliding it
+forward. The migration changes only feedback behavior and preserves recipient
+queues, existing cooldowns, and Page leases. Run
+`node scripts/verify-campaign-recovery-pacing.mjs` for local SQL checks with no
+customer records or outbound requests.
+
 Temporary worker failures, timeouts, expired recipient claims, and unrecognized
 infrastructure interruptions keep campaigns queued for automatic retry after
 one minute. Facebook rate limits keep their shared Page cooldown instead.

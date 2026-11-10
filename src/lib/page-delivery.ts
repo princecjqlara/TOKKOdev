@@ -22,7 +22,10 @@ export async function reportPageDeliveryFeedback(supabase: ReturnType<typeof get
         !Number.isInteger(data.interval_ms) || data.interval_ms < 0 || data.interval_ms > 5000) {
         throw new Error('Page delivery feedback is temporarily unavailable.');
     }
-    return { concurrency: Number(data.concurrency), intervalMs: Number(data.interval_ms), retryAt: data.retry_at as string | null };
+    const growthAfter = data.growth_after == null ? 0 : Date.parse(data.growth_after);
+    if (!Number.isFinite(growthAfter)) throw new Error('Page recovery pace is temporarily unavailable.');
+    return { concurrency: Number(data.concurrency), intervalMs: Number(data.interval_ms),
+        retryAt: data.retry_at as string | null, growthAfter };
 }
 
 export async function acquirePageDelivery(supabase: ReturnType<typeof getSupabaseAdmin>, pageId: string) {

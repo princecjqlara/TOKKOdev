@@ -85,6 +85,7 @@ For large campaigns, deploy the compact delivery queue in this exact order:
 7. Run `database/migration_campaign_delivery_parallel.sql` for the rolling sender. Healthy Pages can use up to 100 active recipient workers, while the application claims at most 500 rows at a time and saves completed results in groups of 50. Older senders retain their lower application limit.
 8. Run `database/migration_campaign_delivery_adaptive.sql` before deploying the quota-aware sender. It persists learned concurrency and message spacing, shares application-wide cooldowns, and starts unknown Pages conservatively without resetting existing recipients or recovery windows.
 9. After deploying the public campaign worker, run `database/migration_campaign_worker_schedule.sql` to continue saved campaigns automatically through the existing database scheduler. It installs `pg_net` and one minute job, dispatches only eligible queues on idle Pages, and needs no scheduler account or credentials. The migration targets the canonical `tokkobeta.vercel.app` deployment; update its URL before using it for a different installation. `node --env-file=.env.local scripts/configure-campaign-scheduler.mjs --preflight` verifies 24 dispatch and recovery checks with rolled-back fixtures; `--apply` backs up the previous named job and installs the verified schedule.
+10. Run `database/migration_campaign_delivery_recovery_pace.sql` before deploying the recovery-aware sender. It retains conservative Page budgets for ten minutes after a saved cooldown, shares recovery pacing after app throttles, and returns the same absolute recovery deadline to later workers. It adds no tables or columns and preserves existing recipients, retry windows, and active leases. Verify its SQL locally with `node scripts/verify-campaign-recovery-pacing.mjs` using the optional PGlite tooling installed below.
 
 Do not run the finalizer before step 2. Older senders calculate progress from terminal queue rows that the finalizer intentionally removes.
 
@@ -212,7 +213,11 @@ still defer delivery. Normal slice deadlines hand off pending work without an
 extra service-error cooldown. Started multipart recipients finish before that
 handoff. Manually stopped campaigns display Paused. The learned pace survives
 worker restarts. It refills each free worker slot and groups audit
-writes into 250-message chunks after saving delivery results. Once a Page
+writes into 250-message chunks after saving delivery results. During recovery,
+workers retain the saved pace instead of ramping up again on the first clean
+responses. Reporting the same throttle repeatedly does not extend its cooldown.
+The recovery hold expires ten minutes after the saved cooldown; subsequent
+clean responses can gradually increase speed again. Once a Page
 reaches five workers, each fetch can supply five contacts per worker, reducing
 database waits as the sender learns its speed. Prefetched contacts still pass
 through the learned concurrency and message spacing. Browser requests

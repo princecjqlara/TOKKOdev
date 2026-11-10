@@ -122,6 +122,29 @@ describe('learning the available Meta sending capacity', () => {
         for (let i = 0; i < 25; i++) controller.observeSuccess();
         expect(controller.concurrency).toBeGreaterThan(reduced);
     });
+
+    it('retains a shared recovery pace across worker restarts despite clean replies', async () => {
+        vi.useFakeTimers();
+        const growthAfter = Date.now() + 10 * 60_000;
+        for (let worker = 0; worker < 3; worker++) {
+            const controller = new AdaptiveDeliveryController(100, 1, 5000, growthAfter);
+            for (let response = 0; response < 20; response++) {
+                await vi.advanceTimersByTimeAsync(5000);
+                controller.observeSuccess({ usagePercent: 5 });
+            }
+            expect(controller.concurrency).toBe(1);
+            expect(controller.intervalMs).toBe(5000);
+            expect(controller.limited).toBe(false);
+        }
+        await vi.advanceTimersByTimeAsync(10 * 60_000);
+        const recovered = new AdaptiveDeliveryController(100, 1, 5000, growthAfter);
+        for (let response = 0; response < 5; response++) {
+            await vi.advanceTimersByTimeAsync(5000);
+            recovered.observeSuccess({ usagePercent: 5 });
+        }
+        expect(recovered.concurrency).toBeGreaterThan(1);
+        expect(recovered.intervalMs).toBeLessThan(5000);
+    });
 });
 
 describe('Meta response feedback', () => {

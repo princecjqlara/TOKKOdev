@@ -36,6 +36,7 @@ function createSupabaseMock(
         deliveryBusy?: boolean;
         deliveryBatchSize?: number;
         deliveryIntervalMs?: number;
+        deliveryGrowthAfter?: string;
         claimError?: unknown;
         claimStalls?: boolean;
         progressStallsOnce?: boolean;
@@ -125,7 +126,8 @@ function createSupabaseMock(
         if (name === 'release_page_campaign_delivery') return { data: null, error: null };
         if (name === 'report_page_campaign_delivery_feedback') return { data: { owned: true,
             concurrency: args.p_concurrency ?? options.deliveryBatchSize ?? 10,
-            interval_ms: args.p_interval_ms ?? options.deliveryIntervalMs ?? 0, retry_at: null }, error: null };
+            interval_ms: args.p_interval_ms ?? options.deliveryIntervalMs ?? 0, retry_at: null,
+            growth_after: options.deliveryGrowthAfter || null }, error: null };
         if (name === 'claim_campaign_recipients') {
             claimRpc(args);
             if (options.claimStalls) return new Promise<never>(() => {});
@@ -588,6 +590,29 @@ describe('sendCampaignById', () => {
         expect(result.sent).toBe(2);
         expect(supabase.claimRpc).toHaveBeenCalledWith(expect.objectContaining({ p_batch_size: 1 }));
         expect(times).toEqual([0, 2000, 4000, 6000]);
+    });
+
+    it('does not ramp a recovering Page back into a burst across consecutive sender slices', async () => {
+        vi.useFakeTimers();
+        const supabase = createSupabaseMock('sending', {
+            deliveryBatchSize: 1, deliveryIntervalMs: 5000,
+            deliveryGrowthAfter: new Date(Date.now() + 10 * 60_000).toISOString(),
+            recipients: Array.from({ length: 50 }, (_, index) => ({
+                id: `r${index}`, contact_id: `c${index}`, contacts: { psid: `p${index}` }
+            }))
+        });
+        vi.mocked(sendMessage).mockResolvedValue({ message_id: 'accepted', deliveryFeedback: { usagePercent: 5 } });
+        for (let run = 0; run < 2; run++) {
+            const pending = sendCampaignById({ campaignId: 'campaign_1', supabase: supabase as never,
+                backgroundOnly: true, maxRecipientsPerRun: 25 });
+            await vi.runAllTimersAsync();
+            expect((await pending).sent).toBe((run + 1) * 25);
+        }
+        const saved = supabase.rpc.mock.calls.filter(([name, args]) =>
+            name === 'report_page_campaign_delivery_feedback' && args.p_concurrency != null);
+        expect(saved.length).toBeGreaterThan(0);
+        for (const [, args] of saved) expect(args).toMatchObject({ p_concurrency: 1, p_interval_ms: 5000 });
+        expect(new Set(vi.mocked(sendMessage).mock.calls.map(call => call[2])).size).toBe(50);
     });
 
     it('ramps a healthy Page within its shared budget without artificial waits', async () => {

@@ -17,13 +17,19 @@ export class AdaptiveDeliveryController {
     private lastGrowth = 0;
     private lastReduction = -Infinity;
     private lastUsage?: { percent: number; at: number };
+    private growthAfter = 0;
     private queue: Job[] = [];
     private timer?: ReturnType<typeof setTimeout>;
 
-    constructor(readonly maximum: number, learned: number, intervalMs: number) {
+    constructor(readonly maximum: number, learned: number, intervalMs: number, growthAfter = 0) {
         this.concurrency = Math.max(1, Math.min(maximum, learned));
         this.intervalMs = Math.max(0, Math.min(5000, intervalMs));
         this.lastGrowth = Date.now();
+        this.deferGrowth(growthAfter);
+    }
+
+    deferGrowth(until: number) {
+        if (Number.isFinite(until)) this.growthAfter = Math.max(this.growthAfter, until);
     }
 
     observeSuccess(feedback?: MetaDeliveryFeedback) {
@@ -51,7 +57,7 @@ export class AdaptiveDeliveryController {
                 this.intervalMs = Math.min(5000, Math.max(50, Math.ceil(this.intervalMs * 1.5)));
                 this.lastReduction = Date.now();
             }
-        } else if (usage < 50 && !this.limited) {
+        } else if (usage < 50 && !this.limited && Date.now() >= this.growthAfter) {
             this.clean++;
             const growthSamples = feedback?.usagePercent !== undefined ? 5 : 25;
             if (this.clean >= growthSamples && Date.now() - this.lastGrowth >= 1000) {
