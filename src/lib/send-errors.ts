@@ -100,9 +100,12 @@ export function categorizeSendError(error: unknown): SendErrorCategory {
     }
 
     if (
+        structured?.code === 551 ||
         normalized.includes('(#551)') ||
         normalized.includes("isn't available right now") ||
-        normalized.includes('is not available right now')
+        normalized.includes('is not available right now') ||
+        normalized.includes('no matching user found') ||
+        normalized.includes('you cannot send messages to this id')
     ) {
         return 'recipient_unavailable';
     }

@@ -141,6 +141,43 @@ describe('learning the available Meta sending capacity', () => {
         expect(concurrency).toBeGreaterThan(1);
     });
 
+    it('learns capacity from recipient rejections without treating them as delivered messages', async () => {
+        vi.useFakeTimers();
+        const controller = new AdaptiveDeliveryController(100, 1, 5000);
+        const starts: number[] = [];
+        const jobs = Array.from({ length: 12 }, () => controller.run(async () => {
+            starts.push(Date.now());
+            throw Object.assign(new Error("(#551) This person isn't available right now."), { status: 400, code: 551 });
+        }));
+        const pending = Promise.allSettled(jobs);
+        await vi.runAllTimersAsync();
+        expect((await pending).every(result => result.status === 'rejected')).toBe(true);
+        expect(controller.concurrency).toBeGreaterThan(1);
+        expect(controller.intervalMs).toBeLessThan(5000);
+        expect(controller.limited).toBe(false);
+        expect(starts[starts.length - 1] - starts[0]).toBeLessThan(55_000);
+    });
+
+    it('honors pressure headers even when Meta rejects an individual recipient', async () => {
+        vi.useFakeTimers();
+        const controller = new AdaptiveDeliveryController(100, 20, 10);
+        await expect(controller.run(async () => {
+            throw Object.assign(new Error("This person isn't available right now."), { status: 400, code: 551,
+                usagePercent: 100, scope: 'app' });
+        })).rejects.toMatchObject({ code: 551 });
+        expect(controller.concurrency).toBe(1);
+        expect(controller.intervalMs).toBe(5000);
+        expect(controller.limited).toBe(false);
+        const delayed = expect(controller.run(async () => {
+            throw Object.assign(new Error("This person isn't available right now."), { status: 400, code: 551,
+                retryAfterMs: 120_000, scope: 'app' });
+        })).rejects.toMatchObject({ code: 551 });
+        await vi.runAllTimersAsync();
+        await delayed;
+        expect(controller.limited).toBe(true);
+        expect(controller.scope).toBe('app');
+    });
+
     it('probes slowly after a recovery hold instead of accelerating on every second of clean replies', async () => {
         vi.useFakeTimers();
         const controller = new AdaptiveDeliveryController(100, 5, 1000, Date.now() - 1);

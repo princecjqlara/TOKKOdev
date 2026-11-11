@@ -99,6 +99,19 @@ every slow receipt checkpoint.
 Slice planning uses the observed cost per recipient, so one paced prefetch does not cause
 the next slice to end early. This sender update requires no additional migration.
 
+For campaigns that start slowly hours after an app-wide cooldown, apply
+`database/migration_campaign_delivery_idle_probe.sql`. When feedback, the last
+throttle, and the saved cooldown have all been stale for thirty minutes, a slow
+Page can start its next worker with five workers and 100ms message spacing.
+Active leases, future cooldowns, and fresh recovery budgets still take precedence.
+The migration installs only acquisition behavior; it does not resume campaigns,
+reset recipients, or change existing Page rows. Validate it with
+`node scripts/verify-campaign-idle-probe.mjs` and install through
+`node --env-file=.env.local scripts/configure-campaign-idle-probe.mjs --preflight`
+followed by `--apply`. The matching sender also learns from recipient rejections,
+such as unavailable accounts, while honoring their quota headers. Those recipients
+remain failed; their responses are capacity evidence rather than delivery evidence.
+
 Temporary worker failures, timeouts, expired recipient claims, and unrecognized
 infrastructure interruptions keep campaigns queued for automatic retry after
 one minute. Facebook rate limits keep their shared Page cooldown instead.

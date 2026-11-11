@@ -80,6 +80,13 @@ export class AdaptiveDeliveryController {
         const details = error as MetaDeliveryFeedback & { code?: number };
         if (category === 'rate_limited') this.pause(details?.retryAfterMs || 60_000,
             [4, 17].includes(details?.code || 0) ? 'app' : details?.scope, Boolean(details?.retryAfterMs));
+        else if (['recipient_unavailable', 'conversation_unavailable', 'outside_messaging_window',
+            'thread_controlled_by_another_app'].includes(category)) {
+            // A recipient rejection is still a completed provider request with
+            // useful quota feedback. Preserve the rejection, but do not make
+            // low-deliverability audiences learn capacity only from successes.
+            this.observeSuccess(details);
+        }
         else if (category === 'transient' && Date.now() - this.lastReduction >= 2000) {
             this.concurrency = Math.max(1, Math.floor(this.concurrency * 0.8));
             this.intervalMs = Math.min(5000, Math.ceil(this.intervalMs * 1.25));

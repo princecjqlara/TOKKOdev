@@ -592,6 +592,32 @@ describe('sendCampaignById', () => {
         expect(times).toEqual([0, 2000, 4000, 6000]);
     });
 
+    it('recovers speed through unavailable recipients while preserving failure counts and avoiding retries', async () => {
+        vi.useFakeTimers();
+        const supabase = createSupabaseMock('sending', {
+            deliveryBatchSize: 1, deliveryIntervalMs: 5000,
+            recipients: Array.from({ length: 30 }, (_, i) => ({
+                id: `r${i}`, contact_id: `c${i}`, contacts: { psid: `p${i}` }
+            }))
+        });
+        vi.mocked(sendMessage).mockRejectedValue(Object.assign(
+            new Error('(#100) No matching user found'), { status: 400, code: 100 }));
+        const started = Date.now();
+        const pending = sendCampaignById({ campaignId: 'campaign_1', supabase: supabase as never,
+            backgroundOnly: true, maxRecipientsPerRun: 30 });
+        await vi.runAllTimersAsync();
+        expect((await pending).body).toMatchObject({ success: true, sent: 0, failed: 30 });
+        expect(sendMessage).toHaveBeenCalledTimes(30);
+        expect(new Set(vi.mocked(sendMessage).mock.calls.map(call => call[2])).size).toBe(30);
+        expect(Date.now() - started).toBeLessThan(145_000);
+        expect(supabase.rpc).toHaveBeenCalledWith('report_page_campaign_delivery_feedback',
+            expect.objectContaining({ p_concurrency: expect.any(Number), p_interval_ms: expect.any(Number), p_rate_limited: false }));
+        const saved = supabase.rpc.mock.calls.filter(([name,args]) =>
+            name === 'report_page_campaign_delivery_feedback' && args.p_concurrency != null);
+        expect(saved[saved.length - 1][1].p_concurrency).toBeGreaterThan(1);
+        expect(saved[saved.length - 1][1].p_interval_ms).toBeLessThan(5000);
+    });
+
     it('prefetches a slow single-worker queue without changing message spacing or replaying recipients', async () => {
         vi.useFakeTimers();
         const supabase = createSupabaseMock('sending', {

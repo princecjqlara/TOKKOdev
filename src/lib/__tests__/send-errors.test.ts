@@ -51,6 +51,9 @@ describe('mergeSendErrors', () => {
         expect(
             categorizeSendError("(#551) This person isn't available right now.")
         ).toBe('recipient_unavailable');
+        expect(categorizeSendError({ code: 551, message: 'Recipient unavailable' })).toBe('recipient_unavailable');
+        expect(categorizeSendError('(#100) No matching user found')).toBe('recipient_unavailable');
+        expect(categorizeSendError('(#100) Parameter error: You cannot send messages to this id')).toBe('recipient_unavailable');
 
         expect(
             categorizeSendError('(#100) The thread owner has archived or deleted this conversation, or the thread does not exist.')

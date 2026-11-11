@@ -86,6 +86,7 @@ For large campaigns, deploy the compact delivery queue in this exact order:
 8. Run `database/migration_campaign_delivery_adaptive.sql` before deploying the quota-aware sender. It persists learned concurrency and message spacing, shares application-wide cooldowns, and starts unknown Pages conservatively without resetting existing recipients or recovery windows.
 9. After deploying the public campaign worker, run `database/migration_campaign_worker_schedule.sql` to continue saved campaigns automatically through the existing database scheduler. It installs `pg_net` and one minute job, dispatches only eligible queues on idle Pages, and needs no scheduler account or credentials. The migration targets the canonical `tokkobeta.vercel.app` deployment; update its URL before using it for a different installation. `node --env-file=.env.local scripts/configure-campaign-scheduler.mjs --preflight` verifies 24 dispatch and recovery checks with rolled-back fixtures; `--apply` backs up the previous named job and installs the verified schedule.
 10. Run `database/migration_campaign_delivery_recovery_pace.sql` before deploying the recovery-aware sender. It retains conservative Page budgets for ten minutes after a saved cooldown, shares recovery pacing after app throttles, and returns the same absolute recovery deadline to later workers. It adds no tables or columns and preserves existing recipients, retry windows, and active leases. Verify its SQL locally with `node scripts/verify-campaign-recovery-pacing.mjs` using the optional PGlite tooling installed below.
+11. Run `database/migration_campaign_delivery_idle_probe.sql` to let slow Pages probe from five workers and 100ms spacing when their feedback, last throttle, and cooldown have all been stale for thirty minutes. Active leases, provider cooldowns, and fresh recovery budgets remain enforced. Healthy learned speeds remain unchanged. Verify locally with `node scripts/verify-campaign-idle-probe.mjs`; `node --env-file=.env.local scripts/configure-campaign-idle-probe.mjs --preflight` checks the live function with rolled-back fixtures, and `--apply` backs up the existing definition before installing it.
 
 Do not run the finalizer before step 2. Older senders calculate progress from terminal queue rows that the finalizer intentionally removes.
 
@@ -219,6 +220,10 @@ responses. Reporting the same throttle repeatedly does not extend its cooldown.
 The recovery hold expires ten minutes after the saved cooldown; subsequent
 clean responses can gradually increase speed again. Slow workers collect enough
 clean responses to recover within short browser slices even without usage headers.
+Recipient-specific rejections also supply quota feedback and capacity samples;
+they remain failed recipients and are never counted as deliveries. Slow pacing
+with no fresh feedback, throttle, or cooldown for thirty minutes starts the next
+worker from conservative defaults instead of retaining an old five-second delay.
 Recovery probes increase speed at most once every fifteen seconds after the hold,
 avoiding a rapid return to the previous burst. Each fetch can supply five contacts
 per worker even at one active worker, reducing database waits at low speeds.
