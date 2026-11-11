@@ -17,6 +17,15 @@ afterEach(() => {
 });
 
 describe('complete Facebook send deadlines', () => {
+    it.each([true, false])('preserves Meta is_transient=%s even on HTTP 400', async isTransient => {
+        vi.stubGlobal('fetch', vi.fn().mockResolvedValue(createJsonResponse(false, {
+            error: { message: 'Provider processing failed', code: 100, is_transient: isTransient }
+        }, 400)));
+        await expect(sendMessage('page', 'token', 'psid', 'Hello')).rejects.toMatchObject({
+            status: 400, code: 100, isTransient
+        });
+    });
+
     it.each([
         ['message', () => sendMessage('page', 'token', 'psid', 'Hello')],
         ['utility', () => sendUtilityMessage('page', 'token', 'psid', 'general_msg_v1', 'en_US', 'Hello')],

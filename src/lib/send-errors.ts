@@ -20,6 +20,7 @@ type StructuredSendError = {
     code?: number;
     subcode?: number;
     requiresReauth?: boolean;
+    isTransient?: boolean;
 };
 
 function getStructuredSendError(error: unknown): StructuredSendError | null {
@@ -120,6 +121,7 @@ export function categorizeSendError(error: unknown): SendErrorCategory {
     }
 
     if (
+        structured?.isTransient === true ||
         structured?.status === 408 ||
         (typeof structured?.status === 'number' && structured.status >= 500) ||
         ['AbortError', 'TimeoutError'].includes(structured?.name || '') ||
@@ -133,6 +135,7 @@ export function categorizeSendError(error: unknown): SendErrorCategory {
         normalized.includes('temporarily unavailable') ||
         normalized.includes('try again') ||
         normalized.includes('server error') ||
+        normalized.includes('unexpected internal error') ||
         normalized.includes('econnreset') ||
         normalized.includes('socket hang up')
     ) {

@@ -42,14 +42,15 @@ export async function recordOutboundMessageEvent(
     await recordOutboundMessageEvents(supabase, [event]);
 }
 
+/** Returns false when optional storage failed, so bulk callers can stop probing this slice. */
 export async function recordOutboundMessageEvents(
     supabase: SupabaseLike,
     events: OutboundMessageEventInput[]
-): Promise<void> {
+): Promise<boolean> {
     const validEvents = [...new Map(events
         .filter(event => event.messageId?.trim())
         .map(event => [event.messageId, event])).values()];
-    if (validEvents.length === 0) return;
+    if (validEvents.length === 0) return true;
 
     try {
         const { error } = await databaseRequest<{ error: { message?: string } | null }>(supabase
@@ -69,8 +70,11 @@ export async function recordOutboundMessageEvents(
 
         if (error) {
             warnOnce(error.message);
+            return false;
         }
+        return true;
     } catch (error) {
         warnOnce(error);
+        return false;
     }
 }

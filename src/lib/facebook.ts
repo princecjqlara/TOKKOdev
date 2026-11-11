@@ -18,6 +18,7 @@ type FacebookGraphErrorBody = {
         message?: string;
         type?: string;
         code?: number;
+        is_transient?: boolean;
         error_subcode?: number;
         error_user_msg?: string;
         error_data?: {
@@ -39,6 +40,7 @@ export class FacebookGraphApiError extends Error {
     subcode?: number;
     type?: string;
     requiresReauth: boolean;
+    isTransient: boolean;
     raw: unknown;
 
     constructor(
@@ -49,6 +51,7 @@ export class FacebookGraphApiError extends Error {
             subcode?: number;
             type?: string;
             requiresReauth?: boolean;
+            isTransient?: boolean;
             raw?: unknown;
         }
     ) {
@@ -59,6 +62,7 @@ export class FacebookGraphApiError extends Error {
         this.subcode = options.subcode;
         this.type = options.type;
         this.requiresReauth = Boolean(options.requiresReauth);
+        this.isTransient = options.isTransient === true;
         this.raw = options.raw;
     }
 }
@@ -118,6 +122,7 @@ async function readFacebookError(response: Response, endpoint: string, parsedBod
             subcode: error?.error_subcode,
             type: error?.type,
             requiresReauth,
+            isTransient: error?.is_transient === true,
             raw: body
         }
     ), readMetaDeliveryFeedback(response.headers));

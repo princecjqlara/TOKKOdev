@@ -255,12 +255,24 @@ not send messages or write customer records.
 
 The sender saves recipient completion before optional message attribution. Queue
 operations and attribution have database deadlines, and Facebook send deadlines
-include response bodies. A failed campaign-state write is reported instead of
+include response bodies. If attribution storage fails, the rest of that delivery
+slice skips optional attribution writes instead of waiting through the same
+database failure after every batch. The next slice tries storage again. Recipient
+receipts, counters, provider cooldowns, and retries remain required; attribution
+labels can be missing during its storage outage without replaying accepted sends.
+Meta's explicit `is_transient` flag is retained when parsing Graph errors,
+including HTTP `400` responses. The observed `(#-1) Unexpected internal error`
+also retries as a provider failure. Exhausted immediate retries preserve the
+recipient for a later invocation instead of recording a permanent failure.
+Specific authorization, template, recipient, and messaging-window errors retain
+their existing handling. See [Meta's SDK error parsing](https://github.com/meta/facebook-python-business-sdk/blob/main/facebook_business/exceptions.py)
+for its handling of the provider's transient flag.
+A failed campaign-state write is reported instead of
 being treated as success. A temporary session-service failure returns `503` from
 campaign and tracked-bulk endpoints and preserves the login recovery flow.
 
 Large audiences progress through bounded slices; they are not unlimited single
-requests. Delivery still requires working scheduler credentials, usable Page
+requests. Delivery still requires a working scheduler, usable Page
 tokens, approved templates where configured, and Meta availability. The queue
 prevents completed recipient rows from being reclaimed. An uncertain network
 acknowledgment from an external messaging service cannot establish exactly-once

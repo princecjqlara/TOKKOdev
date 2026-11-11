@@ -474,6 +474,40 @@ describe('sendCampaignById', () => {
         expect(vi.getTimerCount()).toBe(0);
     });
 
+    it.each(['timeout', 'error'])('does not repeatedly stall a healthy bulk send after optional attribution fails: %s', async failure => {
+        vi.useFakeTimers();
+        const supabase = createSupabaseMock('draft', { deliveryBatchSize: 100, recipients:
+            Array.from({ length: 1000 }, (_, i) => ({ id: `r${i}`, contact_id: `c${i}`, contacts: { psid: `p${i}` } }))
+        });
+        supabase.outboundUpsert.mockImplementation(() => failure === 'timeout'
+            ? new Promise(() => {}) : Promise.resolve({ error: { message: 'Attribution storage unavailable' } }));
+        vi.mocked(sendMessage).mockImplementation(async (_page, _token, psid) => ({ message_id: `accepted-${psid}` }));
+        const started = Date.now();
+        const pending = sendCampaignById({ campaignId: 'campaign_1', supabase: supabase as never, maxProcessingTimeMs: 45_000 });
+        await vi.runAllTimersAsync();
+        console.info(JSON.stringify({ scenario: `bulk-attribution-${failure}`, recipients: 1000,
+            simulatedElapsedMs: Date.now() - started, attributionWrites: supabase.outboundUpsert.mock.calls.length }));
+        expect((await pending).body).toMatchObject({ success: true, sent: 1000, failed: 0 });
+        expect(supabase.outboundUpsert).toHaveBeenCalledTimes(1);
+        expect(Date.now() - started).toBeLessThanOrEqual(DATABASE_REQUEST_TIMEOUT_MS);
+        expect(sendMessage).toHaveBeenCalledTimes(1000);
+        expect(vi.getTimerCount()).toBe(0);
+    });
+
+    it('tries attribution again on the next slice without replaying completed recipients', async () => {
+        const supabase = createSupabaseMock('draft', { recipients: [1, 2].map(i => ({
+            id: `r${i}`, contact_id: `c${i}`, contacts: { psid: `p${i}` }
+        })) });
+        supabase.outboundUpsert.mockResolvedValueOnce({ error: { message: 'Attribution temporarily unavailable' } });
+        vi.mocked(sendMessage).mockImplementation(async (_page, _token, psid) => ({ message_id: `accepted-${psid}` }));
+        const options = { campaignId: 'campaign_1', supabase: supabase as never, maxRecipientsPerRun: 1 };
+        expect((await sendCampaignById(options)).body).toMatchObject({ success: true, sent: 1, remaining: 1 });
+        expect((await sendCampaignById(options)).body).toMatchObject({ success: true, sent: 2, failed: 0 });
+        expect(supabase.outboundUpsert).toHaveBeenCalledTimes(2);
+        expect(supabase.outboundUpsert.mock.calls[1][0][0]).toMatchObject({ message_id: 'accepted-p2', contact_id: 'c2' });
+        expect(vi.mocked(sendMessage).mock.calls.map(call => call[2])).toEqual(['p1', 'p2']);
+    });
+
     it('resumes after a stalled progress read without resending persisted results', async () => {
         vi.useFakeTimers();
         const supabase = createSupabaseMock('draft', { progressStallsOnce: true,
@@ -1184,7 +1218,11 @@ describe('sendCampaignById', () => {
         expect(sendMessage).toHaveBeenCalledTimes(25);
     });
 
-    it('retries transient send failures before marking a recipient failed', async () => {
+    it.each([
+        new Error('fetch failed'),
+        Object.assign(new Error('(#-1) Unexpected internal error'), { status: 400, code: -1 }),
+        Object.assign(new Error('Provider processing failed'), { status: 400, code: 100, isTransient: true })
+    ])('retries transient send failures before marking a recipient failed: %j', async error => {
         const supabase = createSupabaseMock('draft', {
             recipients: [{
                 id: 'recipient_1',
@@ -1196,7 +1234,7 @@ describe('sendCampaignById', () => {
             }]
         });
         vi.mocked(sendMessage)
-            .mockRejectedValueOnce(new Error('fetch failed'))
+            .mockRejectedValueOnce(error)
             .mockResolvedValueOnce({ message_id: 'mid_retry' });
 
         const result = await sendCampaignById({
@@ -1215,7 +1253,7 @@ describe('sendCampaignById', () => {
         }));
     });
 
-    it('keeps retrying across repeated failed runs and sends completed recipients only once', async () => {
+    it.each(['fetch failed', '(#-1) Unexpected internal error'])('keeps retrying across repeated failed runs and sends completed recipients only once: %s', async message => {
         vi.useFakeTimers();
         const supabase = createSupabaseMock('draft', { recipients: [
             { id: 'done', contact_id: 'done', contacts: { psid: 'done' } },
@@ -1223,7 +1261,7 @@ describe('sendCampaignById', () => {
         ] });
         let attempts = 0;
         vi.mocked(sendMessage).mockImplementation(async (_page, _token, psid) => {
-            if (psid === 'retry' && ++attempts < 9) throw new Error('fetch failed');
+            if (psid === 'retry' && ++attempts < 9) throw new Error(message);
             return { message_id: `accepted-${psid}` };
         });
         const options = { campaignId: 'campaign_1', supabase: supabase as never, sendRetryDelayMs: 0 };

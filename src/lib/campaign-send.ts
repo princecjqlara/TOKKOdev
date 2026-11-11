@@ -198,9 +198,18 @@ export async function sendCampaignById({
         }
     };
     const pendingOutboundEvents: OutboundMessageEventInput[] = [];
+    let attributionUnavailable = false;
     const flushOutboundEvents = async (includePartial = false) => {
         while (pendingOutboundEvents.length >= OUTBOUND_AUDIT_BATCH_SIZE || includePartial && pendingOutboundEvents.length) {
-            await recordOutboundMessageEvents(supabase, pendingOutboundEvents.splice(0, OUTBOUND_AUDIT_BATCH_SIZE));
+            const recorded = await recordOutboundMessageEvents(supabase, pendingOutboundEvents.splice(0, OUTBOUND_AUDIT_BATCH_SIZE));
+            if (!recorded) {
+                // Attribution is optional and already best effort. Avoid
+                // paying another database timeout after every healthy batch.
+                // A new delivery invocation probes storage again.
+                attributionUnavailable = true;
+                pendingOutboundEvents.length = 0;
+                return;
+            }
         }
     };
     try {
@@ -925,7 +934,7 @@ export async function sendCampaignById({
 
             // Persist delivery results before optional attribution. An unavailable
             // audit table must not leave accepted sends eligible for replay.
-            pendingOutboundEvents.push(...outboundEvents);
+            if (!attributionUnavailable) pendingOutboundEvents.push(...outboundEvents);
             if (saveFailed) throw saveError;
             if (pendingOutboundEvents.length >= OUTBOUND_AUDIT_BATCH_SIZE) await flushOutboundEvents();
 

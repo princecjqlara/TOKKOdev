@@ -119,6 +119,22 @@ describe('mergeSendErrors', () => {
         ).toBe(false);
     });
 
+    it.each([
+        '(#-1) Unexpected internal error',
+        { status: 400, code: -1, message: 'Unexpected internal error' },
+        { status: 400, code: 100, isTransient: true, message: 'Provider processing failed' }
+    ])('keeps Meta internal and explicitly transient failures retryable: %j', error => {
+        expect(categorizeSendError(error)).toBe('transient');
+        expect(isRetryableSendError(error)).toBe(true);
+        expect(shouldPauseCampaignForSendError(error)).toBe(true);
+    });
+
+    it('keeps specific permanent errors ahead of an inconsistent transient flag', () => {
+        expect(categorizeSendError({ code: 190, isTransient: true })).toBe('authentication_required');
+        expect(categorizeSendError({ code: 551, isTransient: true })).toBe('recipient_unavailable');
+        expect(categorizeSendError({ code: 100, isTransient: false, message: 'Invalid parameter' })).toBe('other');
+    });
+
     it('rejects Meta-forbidden utility parameter characters before sending', () => {
         expect(getUtilityTemplateParameterValidationError('Promo #1 💇')).toContain('Unsupported utility template parameter');
         expect(getUtilityTemplateParameterValidationError('Save $500 or 20%')).toContain('Unsupported utility template parameter');
