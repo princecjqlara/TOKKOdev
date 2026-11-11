@@ -29,6 +29,7 @@ export class FacebookGraphApiError extends Error {
     retryAfterMs?: number;
     usagePercent?: number;
     scope?: 'page' | 'app';
+    retryScope?: 'page' | 'app';
     status: number;
     code?: number;
     subcode?: number;

@@ -203,6 +203,8 @@ remain visible when they require a repair. The minute database job or external
 campaign scheduler is required to continue sending after the browser closes.
 
 The sender learns each Page's available capacity, up to 100 active recipients.
+See [Meta rate limits and pacing](docs/meta-rate-limits.md) for the distinction
+between Facebook user, app, Page, business-use-case, and conversation limits.
 It starts unknown Pages at five workers with 100ms message spacing, increases
 speed after sustained clean responses, and reduces both concurrency and message
 rate when Meta usage rises. It reads `X-App-Usage`, `X-Page-Usage`,

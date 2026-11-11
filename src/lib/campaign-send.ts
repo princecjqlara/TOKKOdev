@@ -23,6 +23,7 @@ import type { TemplateMediaType } from './facebook-templates';
 import { recordOutboundMessageEvents, type OutboundMessageEventInput } from './outbound-message-events';
 import { acquirePageDelivery, releasePageDelivery, reportPageDeliveryFeedback, waitForPageDeliveryBatch, MAX_PAGE_DELIVERY_CONCURRENCY } from './page-delivery';
 import { AdaptiveDeliveryController } from './adaptive-delivery';
+import { getMetaThrottleScope, type MetaDeliveryFeedback } from './meta-delivery-feedback';
 import { databaseRequest, DATABASE_REQUEST_TIMEOUT_MS } from './database-request';
 
 type SupabaseLike = ReturnType<typeof getSupabaseAdmin>;
@@ -1073,10 +1074,10 @@ export async function sendCampaignById({
     } catch (error) {
         if (categorizeSendError(error) === 'rate_limited') {
             pageRateLimited = true;
-            const meta = error as { retryAfterMs?: number; scope?: 'page' | 'app'; code?: number };
+            const meta = error as MetaDeliveryFeedback & { code?: number };
             if (pageLease && !adaptive) adaptive = new AdaptiveDeliveryController(MAX_PAGE_DELIVERY_CONCURRENCY, pageLease.batchSize, 100);
             adaptive?.pause(meta.retryAfterMs || RATE_LIMIT_RETRY_DELAY_MS,
-                [4, 17].includes(meta.code || 0) ? 'app' : meta.scope, Boolean(meta.retryAfterMs));
+                getMetaThrottleScope(meta), Boolean(meta.retryAfterMs));
         }
         console.error('Error sending campaign:', error);
         const databaseError = error && typeof error === 'object' ? error as { code?: string; message?: string } : {};

@@ -731,6 +731,22 @@ describe('sendCampaignById', () => {
         expect(sendMessage).toHaveBeenCalledTimes(1);
     });
 
+    it('does not save an app-wide cooldown when a Page connection hits a Facebook user limit', async () => {
+        const supabase = createSupabaseMock('sending', { recipients: [
+            { id: 'r', contact_id: 'c', contacts: { psid: 'psid' } }
+        ] });
+        vi.mocked(sendMessage).mockRejectedValueOnce(Object.assign(new Error('User request limit reached'), {
+            code: 17, status: 429, scope: 'app', retryAfterMs: 120_000
+        }));
+        const result = await sendCampaignById({ campaignId: 'campaign_1', supabase: supabase as never, backgroundOnly: true });
+        expect(result.body).toMatchObject({ retryable: true, sent: 0, failed: 0, remaining: 1 });
+        const reports = supabase.rpc.mock.calls.filter(([name,args]) =>
+            name === 'report_page_campaign_delivery_feedback' && args.p_rate_limited);
+        expect(reports.length).toBeGreaterThan(0);
+        for (const [,args] of reports) expect(args.p_scope).toBe('page');
+        expect(sendMessage).toHaveBeenCalledTimes(1);
+    });
+
     it('reduces the learned budget when successful replies report rising quota usage', async () => {
         const supabase = createSupabaseMock('draft', { deliveryBatchSize: 20, recipients: [
             { id: 'r', contact_id: 'c', contacts: { psid: 'psid' } }

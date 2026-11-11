@@ -1,5 +1,5 @@
 import { categorizeSendError } from './send-errors';
-import type { MetaDeliveryFeedback } from './meta-delivery-feedback';
+import { getMetaThrottleScope, type MetaDeliveryFeedback } from './meta-delivery-feedback';
 
 type Job = { start: () => void; reject: (error: unknown) => void; allowed?: () => boolean };
 
@@ -37,7 +37,7 @@ export class AdaptiveDeliveryController {
         const usage = feedback?.usagePercent ??
             (this.lastUsage && Date.now() - this.lastUsage.at < 30_000 ? this.lastUsage.percent : 0);
         if (feedback?.retryAfterMs && feedback.retryAfterMs > 0) {
-            this.pause(feedback.retryAfterMs, feedback.scope, true); return;
+            this.pause(feedback.retryAfterMs, getMetaThrottleScope(feedback), true); return;
         }
         if (usage >= 100) {
             // An accepted send with a usage header is not a rejected request.
@@ -79,7 +79,7 @@ export class AdaptiveDeliveryController {
         const category = categorizeSendError(error);
         const details = error as MetaDeliveryFeedback & { code?: number };
         if (category === 'rate_limited') this.pause(details?.retryAfterMs || 60_000,
-            [4, 17].includes(details?.code || 0) ? 'app' : details?.scope, Boolean(details?.retryAfterMs));
+            getMetaThrottleScope(details), Boolean(details?.retryAfterMs));
         else if (['recipient_unavailable', 'conversation_unavailable', 'outside_messaging_window',
             'thread_controlled_by_another_app'].includes(category)) {
             // A recipient rejection is still a completed provider request with

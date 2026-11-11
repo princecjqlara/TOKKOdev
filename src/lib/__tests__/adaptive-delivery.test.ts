@@ -104,6 +104,39 @@ describe('learning the available Meta sending capacity', () => {
         await expect(controller.run(async () => 'unexpected')).rejects.toMatchObject({ status: 429 });
     });
 
+    it.each([17, 32, 613])('keeps throttle code %i local to its connection instead of inferring an app limit from usage', async code => {
+        const controller = new AdaptiveDeliveryController(100, 10, 100);
+        await expect(controller.run(async () => {
+            throw Object.assign(new Error('Connection request limit reached'), { code, status: 429,
+                retryAfterMs: 120_000, usagePercent: 90, scope: 'app' });
+        })).rejects.toMatchObject({ code });
+        expect(controller.limited).toBe(true);
+        expect(controller.scope).toBe('page');
+    });
+
+    it('keeps a business-use-case recovery estimate local when app usage is the higher percentage', () => {
+        const controller = new AdaptiveDeliveryController(100, 10, 100);
+        const feedback = readMetaDeliveryFeedback(new Headers({
+            'x-app-usage': JSON.stringify({ call_count: 90 }),
+            'x-business-use-case-usage': JSON.stringify({ business: [{ type: 'messenger', call_count: 20,
+                estimated_time_to_regain_access: 3 }] })
+        }));
+        controller.observeSuccess(feedback);
+        expect(controller.limited).toBe(true);
+        expect(controller.scope).toBe('page');
+        expect(controller.providerRetryAt).toBeGreaterThanOrEqual(Date.now() + 179_000);
+    });
+
+    it('does not turn a request Retry-After into an app-wide delay from an unrelated usage percentage', () => {
+        const feedback = readMetaDeliveryFeedback(new Headers({
+            'x-app-usage': JSON.stringify({ call_count: 80 }), 'retry-after': '120'
+        }));
+        const controller = new AdaptiveDeliveryController(100, 10, 100);
+        controller.observeSuccess(feedback);
+        expect(controller.limited).toBe(true);
+        expect(controller.scope).toBe('page');
+    });
+
     it('rejects a queued operation cleanly when its allowed callback yields the slice', async () => {
         const controller = new AdaptiveDeliveryController(100, 1, 0);
         const yielded = new Error('Slice ended');
