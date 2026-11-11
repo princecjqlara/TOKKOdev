@@ -1,6 +1,6 @@
 # Sync and sign-in recovery
 
-Automatic sync depends on the external scheduler. Configure every `/api/cron/*`
+Periodic sync triggers depend on the external scheduler. Configure every `/api/cron/*`
 job as a `GET` request to its URL. Worker endpoints are intentionally public and
 require no sign-in, Authorization header, random key, or `CRON_SECRET` environment
 variable. Existing scheduler headers and an old environment value are ignored.
@@ -20,6 +20,26 @@ contacts. Run `scripts/configure-messaging-auto-tag-scheduler.mjs --preflight`
 with the database environment loaded before `--apply`; both modes verify
 dispatch rules with rolled-back fixtures and no real HTTP calls. The deployed
 standalone worker must be available first. Tag polling never sends messages.
+
+Saved imports and conversation exports can continue through
+`database/migration_saved_data_worker_schedule.sql` after durable imports,
+shared quotas, and the database scheduler are installed. Its
+`tokko-saved-data-workers` minute job calls `/api/cron/sync` and `/api/cron/exports`
+only when their saved queues have work that has not advanced for five minutes.
+It dispatches at most one request per worker per tick. Import claims enforce
+both Page and shared Meta cooldowns; export claims preserve their expiry,
+retry, and six-minute stale-claim rules. Completed and failed exports stay
+finished, and blocked imports require reconnecting the Page. The fallback
+does not independently initiate a periodic full sync when the saved queue is
+empty; the import worker retains its existing daily refresh behavior when run.
+Loop campaigns and follow-ups still require the external scheduler.
+
+Verify both deployed data workers, then use
+`node --env-file=.env.local scripts/configure-saved-data-workers.mjs --preflight`
+before `--apply`. The script backs up the prior job and import claim definition,
+checks the real SQL plan, and tests dispatch and claim rules with temporary
+fixtures and a stub HTTP function. Neither mode invokes a worker. Inspect HTTP
+responses and saved import/export counters as well as the cron execution status.
 
 Campaign delivery can continue independently through the existing database
 scheduler. Apply `database/migration_campaign_worker_schedule.sql` after deploying

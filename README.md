@@ -185,6 +185,16 @@ workers per minute for Pages with no attempt for five minutes, respecting
 leases, cooldowns, and the recent inbound window. It sends no Facebook messages.
 See [Messenger auto-tag behavior](docs/messaging-auto-tag.md) for verification.
 
+Saved contact imports and conversation exports also have a database fallback in
+`database/migration_saved_data_worker_schedule.sql`. After durable imports and
+shared quotas are installed, verify the deployed `/api/cron/sync` and
+`/api/cron/exports` workers, then run
+`node --env-file=.env.local scripts/configure-saved-data-workers.mjs --preflight`
+and `--apply`. The named minute job queues at most one request for each worker
+when a saved job has been idle for five minutes. It respects leases, retry
+windows, import Meta cooldowns, and export expiry. Healthy primary polling
+leaves it idle. This fallback does not send Facebook messages or run follow-ups.
+
 Configure the other background jobs in [cron-job.org](https://cron-job.org) to call
 the deployed API routes:
 
@@ -201,9 +211,9 @@ no sign-in, Authorization header, random key, or `CRON_SECRET` environment varia
 is required. Existing scheduler headers and an old `CRON_SECRET` value are ignored.
 Deploy this version before switching an older installation to public workers.
 Check each job's execution history and re-enable jobs disabled after repeated
-failures. A failed or disabled external scheduler still stops background sync
-and follow-ups; installed database fallback jobs keep campaigns and enabled
-Messenger tag scans moving.
+failures. Periodic sync triggers, loop campaigns, and follow-ups still require
+the external scheduler. Installed database fallback jobs keep saved campaigns,
+imports, exports, and enabled Messenger tag scans moving.
 
 Bulk sends save their background continuation before returning the prepared
 campaign. Both sending screens retry temporary network failures, gateway
