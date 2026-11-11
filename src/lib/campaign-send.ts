@@ -21,9 +21,10 @@ import type { ClaimedCampaignRecipient, CampaignRecipientResult } from './campai
 import { mapConcurrentSettled } from './concurrent-work';
 import type { TemplateMediaType } from './facebook-templates';
 import { recordOutboundMessageEvents, type OutboundMessageEventInput } from './outbound-message-events';
-import { acquirePageDelivery, releasePageDelivery, reportPageDeliveryFeedback, waitForPageDeliveryBatch, MAX_PAGE_DELIVERY_CONCURRENCY } from './page-delivery';
+import { acquirePageDelivery, releasePageDelivery, reportPageDeliveryFeedback, requestCampaignDeliveryContinuation,
+    waitForPageDeliveryBatch, MAX_PAGE_DELIVERY_CONCURRENCY } from './page-delivery';
 import { AdaptiveDeliveryController } from './adaptive-delivery';
-import { getMetaThrottleScope, type MetaDeliveryFeedback } from './meta-delivery-feedback';
+import { getMetaThrottleScope, getMetaThrottleKey, type MetaDeliveryFeedback } from './meta-delivery-feedback';
 import { databaseRequest, DATABASE_REQUEST_TIMEOUT_MS } from './database-request';
 
 type SupabaseLike = ReturnType<typeof getSupabaseAdmin>;
@@ -154,6 +155,7 @@ export async function sendCampaignById({
     let continuationSaved = false;
     let stoppedResult: SendCampaignByIdResult | undefined;
     let adaptive: AdaptiveDeliveryController | undefined;
+    let continuePageId: string | undefined;
     let lastFeedbackAt = 0;
     const resolveStateConflict = async (): Promise<SendCampaignByIdResult> => {
         // Delivery receipts and other workers also update updated_at. A failed
@@ -345,7 +347,7 @@ export async function sendCampaignById({
             const activated = await updateCampaignIfUnchanged(supabase, campaignId, {
                 status: dueAt ? 'scheduled' : 'sending',
                 background_delivery_enabled: !dueAt && !campaign.is_loop,
-                next_attempt_at: delivery.retryAt,
+                ...(delivery.reason === 'busy' ? {} : { next_attempt_at: delivery.retryAt }),
                 updated_at: new Date().toISOString()
             }, expectedState);
             if (!activated) return await resolveStateConflict();
@@ -1021,6 +1023,7 @@ export async function sendCampaignById({
             if (!updated) return await resolveStateConflict();
 
             if (progress.remaining > 0) {
+                if (processedThisRun > 0 && !campaign.is_loop) continuePageId = campaign.page_id;
                 return {
                     status: 200,
                     body: {
@@ -1077,7 +1080,7 @@ export async function sendCampaignById({
             const meta = error as MetaDeliveryFeedback & { code?: number };
             if (pageLease && !adaptive) adaptive = new AdaptiveDeliveryController(MAX_PAGE_DELIVERY_CONCURRENCY, pageLease.batchSize, 100);
             adaptive?.pause(meta.retryAfterMs || RATE_LIMIT_RETRY_DELAY_MS,
-                getMetaThrottleScope(meta), Boolean(meta.retryAfterMs));
+                getMetaThrottleScope(meta), Boolean(meta.retryAfterMs), getMetaThrottleKey(meta));
         }
         console.error('Error sending campaign:', error);
         const databaseError = error && typeof error === 'object' ? error as { code?: string; message?: string } : {};
@@ -1134,6 +1137,10 @@ export async function sendCampaignById({
             catch (feedbackError) { console.error('Page delivery feedback could not be saved:', feedbackError); }
             try { await releasePageDelivery(supabase, pageLease.pageId, pageLease.owner, pageRateLimited); }
             catch (releaseError) { console.error('Page delivery lease release failed; the lease will expire:', releaseError); }
+        }
+        if (continuePageId && !pageRateLimited) {
+            try { await requestCampaignDeliveryContinuation(supabase, continuePageId); }
+            catch { console.warn('Campaign handoff could not be queued; the regular scheduler will retry.'); }
         }
     }
 }

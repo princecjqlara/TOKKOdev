@@ -82,7 +82,14 @@ export async function runCampaignDelivery(
                 return progress;
             }
 
-            if (temporary || data?.queued) {
+            if (response.ok && data?.success === true && data.queued) {
+                // A healthy worker owns the Page. Waiting for it is ordinary
+                // coordination, not a sequence of service failures.
+                failures = 0;
+                const retryAt = Date.parse(data.nextAttemptAt || '');
+                delayMs = Math.max(RETRY_DELAY_MS, Number.isFinite(retryAt) ? retryAt - Date.now() : 0);
+                progress = { ...progress, retryable: true };
+            } else if (temporary || data?.queued) {
                 failures++;
                 delayMs = Math.min(MAX_RETRY_DELAY_MS, RETRY_DELAY_MS * 2 ** Math.min(failures - 1, 5));
                 const retryAt = Date.parse(data?.nextAttemptAt || '');

@@ -112,6 +112,23 @@ followed by `--apply`. The matching sender also learns from recipient rejections
 such as unavailable accounts, while honoring their quota headers. Those recipients
 remain failed; their responses are capacity evidence rather than delivery evidence.
 
+The shared-quota sender requires `migration_campaign_shared_quotas.sql` and
+`migration_campaign_continuous_handoff.sql`. Verify and install both through
+`scripts/configure-campaign-shared-quotas.mjs` with `--preflight` before `--apply`.
+Add `--refresh-identities` to verify existing Page token owners using Meta's
+read-only debugger. A failed verification leaves ownership unknown instead of
+guessing from account memberships; an expired connection requires reconnecting
+that Page. Business quota membership is learned from that Page's own response
+headers. See [Meta rate limits](meta-rate-limits.md) for scope and recovery rules.
+
+After a productive slice, the sender saves receipts, releases its lease, and
+requests a durable successor. The request is deduplicated and checks recipient
+eligibility, manual Stop, schedules, retry windows, Page leases, and shared
+cooldowns. Empty claims do not create a handoff loop. If dispatch fails, the minute
+cron still recovers the saved queue. `acquire_page_campaign_delivery_v2` distinguishes
+ordinary worker contention from a provider cooldown: a busy wait is returned to
+the caller without saving it as a campaign-wide retry delay.
+
 Temporary worker failures, timeouts, expired recipient claims, and unrecognized
 infrastructure interruptions keep campaigns queued for automatic retry after
 one minute. Facebook rate limits keep their shared Page cooldown instead.

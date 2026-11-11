@@ -122,7 +122,10 @@ function createSupabaseMock(
     const finishBatchRpc = vi.fn();
     let stallProgress = options.progressStallsOnce;
     const rpc = vi.fn(async (name: string, args: Record<string, any>) => {
-        if (name === 'acquire_page_campaign_delivery') return { data: [{ acquired: !options.deliveryBusy, retry_at: options.deliveryBusy ? '2026-10-13T00:01:00Z' : null, batch_size: options.deliveryBatchSize || 10 }], error: null };
+        if (name === 'acquire_page_campaign_delivery_v2') return { data: [{ acquired: !options.deliveryBusy,
+            reason: options.deliveryBusy ? 'busy' : null,
+            retry_at: options.deliveryBusy ? '2026-10-13T00:01:00Z' : null, batch_size: options.deliveryBatchSize || 10 }], error: null };
+        if (name === 'request_campaign_delivery_continuation') return { data: 1, error: null };
         if (name === 'release_page_campaign_delivery') return { data: null, error: null };
         if (name === 'report_page_campaign_delivery_feedback') return { data: { owned: true,
             concurrency: args.p_concurrency ?? options.deliveryBatchSize ?? 10,
@@ -269,7 +272,7 @@ describe('sendCampaignById', () => {
         const rpc = supabase.rpc.getMockImplementation()!;
         let advanced = false;
         supabase.rpc.mockImplementation(async (name, args) => {
-            if (name === 'acquire_page_campaign_delivery' && !advanced) {
+            if (name === 'acquire_page_campaign_delivery_v2' && !advanced) {
                 advanced = true;
                 // Another worker completes a recipient after this request's
                 // campaign read and before its conditional activation write.
@@ -307,7 +310,7 @@ describe('sendCampaignById', () => {
         const supabase = createSupabaseMock('sending', { remainingPendingCount: 200 });
         const rpc = supabase.rpc.getMockImplementation()!;
         supabase.rpc.mockImplementation(async (name, args) => {
-            if (name === 'acquire_page_campaign_delivery') {
+            if (name === 'acquire_page_campaign_delivery_v2') {
                 Object.assign(supabase.campaignRecord, { status, background_delivery_enabled: false,
                     updated_at: '2026-11-09T00:00:01.000Z' });
             }
@@ -327,7 +330,7 @@ describe('sendCampaignById', () => {
         const supabase = createSupabaseMock('sending', { remainingPendingCount: 200 });
         const rpc = supabase.rpc.getMockImplementation()!;
         supabase.rpc.mockImplementation(async (name, args) => {
-            if (name === 'acquire_page_campaign_delivery') {
+            if (name === 'acquire_page_campaign_delivery_v2') {
                 Object.assign(supabase.campaignRecord, { status: 'completed', sent_count: 190, failed_count: 10,
                     updated_at: '2026-11-09T00:00:01.000Z' });
             }
@@ -555,10 +558,48 @@ describe('sendCampaignById', () => {
         expect(result.body).toMatchObject({ queued: true, remaining: 200, processed: 0 });
         expect(supabase.claimRpc).not.toHaveBeenCalled();
         expect(supabase.campaignUpdate).toHaveBeenCalledWith(expect.objectContaining({
-            status: 'sending', background_delivery_enabled: true,
-            next_attempt_at: '2026-10-13T00:01:00Z'
+            status: 'sending', background_delivery_enabled: true
         }));
+        expect(supabase.campaignRecord.next_attempt_at).toBeNull();
         expect(sendMessage).not.toHaveBeenCalled();
+    });
+
+    it('does not erase a concurrent provider cooldown while waiting for a busy Page', async () => {
+        const supabase=createSupabaseMock('sending',{deliveryBusy:true,remainingPendingCount:10});
+        const original=supabase.rpc.getMockImplementation()!;
+        const cooldown=new Date(Date.now()+120_000).toISOString();
+        supabase.rpc.mockImplementation(async(name,args)=>{
+            if(name==='acquire_page_campaign_delivery_v2')supabase.campaignRecord.next_attempt_at=cooldown;
+            return original(name,args);
+        });
+        await sendCampaignById({campaignId:'campaign_1',supabase:supabase as never,backgroundOnly:true});
+        expect(supabase.campaignRecord.next_attempt_at).toBe(cooldown);
+        expect(sendMessage).not.toHaveBeenCalled();
+    });
+
+    it('queues a successor only after saving productive progress and releasing the Page', async () => {
+        const supabase=createSupabaseMock('sending',{recipients:[1,2].map(i=>({id:`r${i}`,contact_id:`c${i}`,contacts:{psid:`p${i}`}}))});
+        vi.mocked(sendMessage).mockResolvedValue({message_id:'accepted'});
+        const result=await sendCampaignById({campaignId:'campaign_1',supabase:supabase as never,backgroundOnly:true,maxRecipientsPerRun:1});
+        expect(result.body).toMatchObject({success:true,partial:true,sent:1,remaining:1});
+        const calls=supabase.rpc.mock.calls;
+        const released=calls.findIndex(([name])=>name==='release_page_campaign_delivery');
+        const continued=calls.findIndex(([name])=>name==='request_campaign_delivery_continuation');
+        expect(released).toBeGreaterThan(-1);expect(continued).toBeGreaterThan(released);
+        expect(calls[continued][1]).toEqual({p_page_id:'page_1'});
+    });
+
+    it('retains a healthy resumable slice when queuing the successor temporarily fails', async () => {
+        const supabase=createSupabaseMock('sending',{recipients:[1,2].map(i=>({id:`r${i}`,contact_id:`c${i}`,contacts:{psid:`p${i}`}}))});
+        const original=supabase.rpc.getMockImplementation()!;
+        supabase.rpc.mockImplementation(async(name,args)=>name==='request_campaign_delivery_continuation'
+            ? {data:null,error:{message:'Queue unavailable'}} : original(name,args));
+        vi.mocked(sendMessage).mockResolvedValue({message_id:'accepted'});
+        const result=await sendCampaignById({campaignId:'campaign_1',supabase:supabase as never,backgroundOnly:true,maxRecipientsPerRun:1});
+        expect(result.body).toMatchObject({success:true,partial:true,sent:1,remaining:1});
+        expect(supabase.campaignRecord.background_delivery_enabled).toBe(true);
+        expect(supabase.campaignRecord.next_attempt_at).toBeNull();
+        expect(sendMessage).toHaveBeenCalledTimes(1);
     });
 
     it('preserves due-only delivery when a scheduled campaign waits for the Page', async () => {
@@ -743,7 +784,7 @@ describe('sendCampaignById', () => {
         const reports = supabase.rpc.mock.calls.filter(([name,args]) =>
             name === 'report_page_campaign_delivery_feedback' && args.p_rate_limited);
         expect(reports.length).toBeGreaterThan(0);
-        for (const [,args] of reports) expect(args.p_scope).toBe('page');
+        for (const [,args] of reports) expect(args.p_scope).toBe('user');
         expect(sendMessage).toHaveBeenCalledTimes(1);
     });
 
@@ -1775,7 +1816,7 @@ describe('sendCampaignById', () => {
         const rpc = supabase.rpc.getMockImplementation()!;
         supabase.rpc.mockImplementation(async (name, args) => {
             const result = await rpc(name, args);
-            if (name === 'acquire_page_campaign_delivery') {
+            if (name === 'acquire_page_campaign_delivery_v2') {
                 supabase.campaignRecord.status = 'draft';
                 supabase.campaignRecord.background_delivery_enabled = false;
             }

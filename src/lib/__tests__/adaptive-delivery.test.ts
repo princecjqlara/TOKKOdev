@@ -104,14 +104,14 @@ describe('learning the available Meta sending capacity', () => {
         await expect(controller.run(async () => 'unexpected')).rejects.toMatchObject({ status: 429 });
     });
 
-    it.each([17, 32, 613])('keeps throttle code %i local to its connection instead of inferring an app limit from usage', async code => {
+    it.each([17, 32, 613])('uses the scope of throttle code %i instead of inferring an app limit from usage', async code => {
         const controller = new AdaptiveDeliveryController(100, 10, 100);
         await expect(controller.run(async () => {
             throw Object.assign(new Error('Connection request limit reached'), { code, status: 429,
                 retryAfterMs: 120_000, usagePercent: 90, scope: 'app' });
         })).rejects.toMatchObject({ code });
         expect(controller.limited).toBe(true);
-        expect(controller.scope).toBe('page');
+        expect(controller.scope).toBe(code === 17 ? 'user' : 'page');
     });
 
     it('keeps a business-use-case recovery estimate local when app usage is the higher percentage', () => {
@@ -248,6 +248,25 @@ describe('learning the available Meta sending capacity', () => {
 });
 
 describe('Meta response feedback', () => {
+    it('keeps observed business objects and use cases separate from unrelated quota headers', () => {
+        const feedback = readMetaDeliveryFeedback(new Headers({
+            'x-business-use-case-usage': JSON.stringify({ '123': [
+                { type: 'messenger', call_count: 75, estimated_time_to_regain_access: 2 },
+                { type: 'ads_management', call_count: 100, estimated_time_to_regain_access: 60 }
+            ], '456': [{ type: 'pages', call_count: 30 }] })
+        }));
+        expect(feedback).toMatchObject({ usagePercent: 75, scope: 'business', scopeKey: '123:messenger',
+            retryAfterMs: 120_000, businessKeys: ['123:messenger', '456:pages'] });
+    });
+
+    it('retains the recovery object even when another business has higher usage', () => {
+        const feedback = readMetaDeliveryFeedback(new Headers({ 'x-business-use-case-usage': JSON.stringify({
+            '123': [{ type: 'messenger', call_count: 95 }],
+            '456': [{ type: 'messenger', call_count: 20, estimated_time_to_regain_access: 3 }]
+        }) }));
+        expect(feedback).toMatchObject({ scope: 'business', scopeKey: '123:messenger',
+            retryScope: 'business', retryScopeKey: '456:messenger', retryAfterMs: 180_000 });
+    });
     it('reads nested business usage, app usage and the provider recovery interval', () => {
         const headers = new Headers({
             'x-app-usage': JSON.stringify({ call_count: 40, total_time: 10 }),

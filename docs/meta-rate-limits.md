@@ -32,18 +32,44 @@ only way messaging or conversation reads can be affected.
 - Code `613` identifies a custom limit whose meaning depends on the API.
 
 Tokko retains one learned pace and one active campaign sender per Page. Confirmed
-app throttles share a cooldown. User, Pages API, and custom errors stay local to
-the saved Page connection instead of being broadened solely because an app-usage
-header is also present. Recovery-estimate scope is kept separate from the scope
-of the largest reported usage percentage.
+app throttles share a cooldown. Code `17` shares a cooldown only across Pages with
+the same verified Facebook token owner. Business-use-case recovery is shared only
+across Pages whose own Meta responses identified the same object and use-case type.
+Recovery-estimate scope is kept separate from the scope of the largest reported
+usage percentage, and simultaneous limits retain independent provider deadlines.
 
-The current coordination model does not persist the verified Facebook user or
-Meta business object behind every saved Page token. Consequently it does not
-fully aggregate a user/business quota across multiple related Pages. It must not
-infer token ownership from the Tokko employee who pressed Send or from overlapping
-Page memberships. Token metadata can identify the originating Facebook user when
-that information is available. Unknown ownership remains scoped to the affected
-Page connection, and further provider throttles are still honored.
+Token ownership is verified at connection time or through Meta's token debugger,
+and bound to a SHA-256 fingerprint of the saved token. Rotating that token makes
+the old owner proof inapplicable. Tokko never infers ownership from the employee
+who pressed Send or from overlapping memberships. Business observations expire
+after 24 hours. Unverified connections retain local Page cooldowns.
 
-Deploy the sender update to activate the corrected error/estimate interpretation.
-This change needs no database migration and does not clear saved cooldowns.
+During a shared recovery hold, only one related Page probes that quota at a time;
+unrelated Pages continue independently. The system shares cooldown and recovery
+budgets, not a guessed fixed messages-per-second allowance for each Facebook user.
+Live provider feedback remains authoritative. Other operations or external apps
+may also contribute to those quotas.
+
+At the actual Send API boundary, text starts are spaced by at least four
+milliseconds and audio/video starts by at least 100 milliseconds. This prevents
+fast responses from turning concurrency into bursts above the documented endpoint
+ceilings. This gate is local to the runtime; the campaign Page lease prevents
+overlapping campaign senders in different runtimes. Provider quota feedback can
+require a slower pace. Pacing waits remain inside the request's send deadline.
+
+Apply `migration_campaign_shared_quotas.sql` and
+`migration_campaign_continuous_handoff.sql` before deploying the matching sender.
+Use `node scripts/verify-campaign-shared-quotas.mjs` for local SQL verification,
+then `node --env-file=.env.local scripts/configure-campaign-shared-quotas.mjs
+--preflight --refresh-identities` and the corresponding `--apply` command to install
+the functions and verify existing token owners. The installer backs up the prior
+definitions and rolls back isolated fixtures without sending customer messages.
+
+Productive slices queue a successor after saving receipts and releasing their
+lease. Dispatch is deduplicated and requires eligible pending or expired-claim
+work. Manual Stop, schedules, retries, and provider cooldowns remain enforced.
+The minute scheduler remains a fallback if a handoff cannot be queued. A busy
+worker wait is not saved as a campaign retry delay or escalated into exponential
+browser backoff.
+On Vercel, an in-progress browser send is registered with `waitUntil` so receipt
+saves and its successor handoff can finish after the browser disconnects.

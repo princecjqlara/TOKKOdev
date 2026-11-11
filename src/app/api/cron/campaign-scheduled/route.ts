@@ -5,6 +5,12 @@ import { waitUntil } from '@vercel/functions';
 export const dynamic = 'force-dynamic';
 export const maxDuration = 300;
 
+// Read-only deployment verification; never dispatches a sender.
+export function OPTIONS() {
+    return new NextResponse(null, { status: 204,
+        headers: { 'X-Tokko-Campaign-Worker-Version': '2026-11-11-shared-quotas' } });
+}
+
 // GET /api/cron/campaign-scheduled - Continue saved immediate and scheduled sends.
 export async function GET(_request: NextRequest) {
     if (process.env.VERCEL === '1') {

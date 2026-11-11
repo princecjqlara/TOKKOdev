@@ -21,6 +21,8 @@ const campaignState = async () => (await db.query(`SELECT id,status,background_d
 try {
     await db.connect(); await db.query('BEGIN');
     await db.query("SET LOCAL statement_timeout='12s'; SET LOCAL lock_timeout='3s'");
+    if (apply) check((await db.query("SELECT to_regprocedure('public.acquire_page_campaign_delivery_local(uuid,uuid)') IS NOT NULL installed")).rows[0].installed,
+        false, 'Shared quota coordination is already installed; use configure-campaign-shared-quotas.mjs instead of replacing its wrapper');
     check((await db.query("SELECT pg_try_advisory_xact_lock(hashtextextended('tokko-campaign-idle-probe-install',0)) acquired")).rows[0].acquired,
         true, 'Only one installation can proceed');
     const beforeDefinition = (await db.query('SELECT pg_get_functiondef($1::regprocedure) definition', [signature])).rows[0].definition;

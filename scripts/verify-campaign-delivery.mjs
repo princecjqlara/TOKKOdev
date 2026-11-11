@@ -37,9 +37,21 @@ try {
     for (const table of ['pages', 'contacts', 'contact_tags', 'campaigns', 'campaign_recipients', 'campaign_delivery_failures']) {
         await db.query(`CREATE TABLE ${schema}.${table} (LIKE public.${table} INCLUDING ALL)`);
     }
+    // Shared-quota wrappers must use isolated metadata too; never consult the
+    // production app/business cooldowns while testing synthetic queue rows.
+    if (await scalar("SELECT to_regprocedure('public.acquire_page_campaign_delivery_local(uuid,uuid)') IS NOT NULL value")) {
+        for (const table of ['campaign_page_quota_identity','campaign_page_business_quotas','campaign_shared_quota_cooldowns']) {
+            await db.query(`CREATE TABLE ${schema}.${table} (LIKE app_private.${table} INCLUDING ALL)`);
+        }
+        for (const dependency of ['app_private.campaign_page_quota_keys(uuid)','public.acquire_page_campaign_delivery_local(uuid,uuid)']) {
+            const source=(await db.query('SELECT pg_get_functiondef($1::regprocedure) definition',[dependency])).rows[0].definition;
+            await db.query(source.replaceAll('public.',`${schema}.`).replaceAll('app_private.',`${schema}.`)
+                .replaceAll("search_path TO 'public'",`search_path TO '${schema}'`));
+        }
+    }
     for (const signature of signatures) {
         const source = (await db.query('SELECT pg_get_functiondef($1::regprocedure) definition', [`public.${signature}`])).rows[0].definition;
-        const isolated = source.replaceAll('public.', `${schema}.`)
+        const isolated = source.replaceAll('public.', `${schema}.`).replaceAll('app_private.',`${schema}.`)
             .replaceAll("search_path TO 'public'", `search_path TO '${schema}'`)
             .replace(/SET statement_timeout TO '[^']*'/g, "SET statement_timeout TO '15s'");
         assert.ok(!isolated.includes('public.'), 'Functions must use only the isolated schema');

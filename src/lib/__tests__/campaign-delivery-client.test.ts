@@ -90,6 +90,17 @@ describe('automatic bulk delivery continuation', () => {
         expect(JSON.parse(fetch.mock.calls[1][1].body).backgroundOnly).toBe(true);
     });
 
+    it('does not exponentially back off when successful requests keep waiting for a healthy worker', async () => {
+        const fetch = vi.fn();
+        for (let i=0;i<10;i++) fetch.mockResolvedValueOnce(Response.json({ success: true, queued: true, remaining: 3 }));
+        fetch.mockResolvedValue(Response.json(done));vi.stubGlobal('fetch',fetch);
+        const pending=runCampaignDelivery('saved');
+        await vi.advanceTimersByTimeAsync(20_000);
+        expect(fetch).toHaveBeenCalledTimes(11);
+        expect(await pending).toMatchObject(done);
+        expect(vi.getTimerCount()).toBe(0);
+    });
+
     it('honors a manual Stop after a temporary failure', async () => {
         const fetch = vi.fn().mockResolvedValueOnce(Response.json({ ...slice, queued: true, retryable: true }))
             .mockResolvedValue(Response.json({ success: true, paused: true, retryable: false, remaining: 1 }));

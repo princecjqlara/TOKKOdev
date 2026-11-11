@@ -1,10 +1,12 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { NextRequest } from 'next/server';
 
 const mocks = vi.hoisted(() => ({
     getServerSession: vi.fn(),
-    sendCampaignById: vi.fn()
+    sendCampaignById: vi.fn(),
+    waitUntil: vi.fn()
 }));
+vi.mock('@vercel/functions', () => ({waitUntil:mocks.waitUntil}));
 
 vi.mock('next-auth', () => ({
     getServerSession: mocks.getServerSession
@@ -21,6 +23,7 @@ vi.mock('@/lib/campaign-send', () => ({
 import { POST } from './route';
 
 describe('POST /api/campaigns/[campaignId]/send', () => {
+    afterEach(()=>{ vi.unstubAllEnvs(); });
     beforeEach(() => {
         vi.clearAllMocks();
         mocks.getServerSession.mockResolvedValue({ user: { id: 'user_1' } });
@@ -36,6 +39,17 @@ describe('POST /api/campaigns/[campaignId]/send', () => {
             { params: Promise.resolve({ campaignId: 'campaign_1' }) });
         expect(response.status).toBe(503);
         expect(mocks.sendCampaignById).not.toHaveBeenCalled();
+    });
+
+    it('keeps the same bounded send alive on Vercel while returning its normal response', async () => {
+        vi.stubEnv('VERCEL','1');
+        const response=await POST(new Request('http://localhost/api/campaigns/campaign_1/send',{
+            method:'POST',body:'{}'
+        }) as NextRequest,{params:Promise.resolve({campaignId:'campaign_1'})});
+        expect(response.status).toBe(200);
+        expect(mocks.sendCampaignById).toHaveBeenCalledTimes(1);
+        expect(mocks.waitUntil).toHaveBeenCalledTimes(1);
+        await expect(mocks.waitUntil.mock.calls[0][0]).resolves.toBeUndefined();
     });
 
     it('enforces a bounded resumable send slice regardless of client timing input', async () => {

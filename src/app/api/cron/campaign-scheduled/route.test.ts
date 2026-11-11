@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { DATABASE_REQUEST_TIMEOUT_MS } from '@/lib/database-request';
 import type { NextRequest } from 'next/server';
+import { OPTIONS } from './route';
 
 const mocks = vi.hoisted(() => ({
     getSupabaseAdmin: vi.fn(),
@@ -16,6 +17,12 @@ vi.mock('@/lib/supabase', () => ({
 vi.mock('@/lib/campaign-send', () => ({
     sendCampaignById: mocks.sendCampaignById
 }));
+
+it('identifies the deployed worker through a read-only preflight', () => {
+    const response=OPTIONS();
+    expect(response.status).toBe(204);
+    expect(response.headers.get('X-Tokko-Campaign-Worker-Version')).toBe('2026-11-11-shared-quotas');
+});
 
 type CampaignRow = {
     id: string;

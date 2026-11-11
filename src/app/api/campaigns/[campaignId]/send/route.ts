@@ -3,6 +3,7 @@ import { getSessionFromRequest } from '@/lib/get-session';
 import { accountErrorResponse } from '@/lib/account-security';
 import { sendCampaignById } from '@/lib/campaign-send';
 import type { TemplateMediaType } from '@/lib/facebook-templates';
+import { waitUntil } from '@vercel/functions';
 
 // Increase timeout for sending campaigns (up to 5 minutes)
 export const maxDuration = 300;
@@ -61,11 +62,22 @@ export async function POST(
         templateMediaHeaders
     };
 
-    let result = await sendCampaignById(sendOptions);
-    if (result.status === 503 && result.body.retryable === true && result.body.paused !== true) {
-        await new Promise(resolve => setTimeout(resolve, DATABASE_BUSY_RETRY_DELAY_MS));
-        result = await sendCampaignById(sendOptions);
+    const delivery = (async () => {
+        let result = await sendCampaignById(sendOptions);
+        if (result.status === 503 && result.body.retryable === true && result.body.paused !== true) {
+            await new Promise(resolve => setTimeout(resolve, DATABASE_BUSY_RETRY_DELAY_MS));
+            result = await sendCampaignById(sendOptions);
+        }
+        return result;
+    })();
+    if (process.env.VERCEL === '1') {
+        // Keep receipt persistence and the successor handoff alive if the
+        // browser disconnects while this bounded slice is already running.
+        waitUntil(delivery.then(() => {}).catch(() => {
+            console.error('Campaign request ended unexpectedly; its saved queue remains recoverable.');
+        }));
     }
+    const result = await delivery;
 
     return NextResponse.json(result.body, { status: result.status });
 }

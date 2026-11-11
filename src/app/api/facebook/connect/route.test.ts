@@ -8,9 +8,11 @@ const mocks = vi.hoisted(() => ({
     subscribePageToAppWebhook: vi.fn(),
     getPageTemplates: vi.fn(),
     createUtilityTemplate: vi.fn(),
-    verifiedFacebookPages: vi.fn()
+    verifiedFacebookPages: vi.fn(),
+    recordPageCampaignQuotaIdentity: vi.fn()
 }));
 vi.mock('@/lib/page-managers', () => ({ verifiedFacebookPages: mocks.verifiedFacebookPages }));
+vi.mock('@/lib/page-delivery', () => ({ recordPageCampaignQuotaIdentity: mocks.recordPageCampaignQuotaIdentity }));
 
 vi.mock('@/lib/get-session', () => ({
     getSessionFromRequest: mocks.getSessionFromRequest
@@ -100,6 +102,7 @@ describe('POST /api/facebook/connect', () => {
     beforeEach(() => {
         vi.clearAllMocks();
         mocks.getPageTemplates.mockResolvedValue([]);
+        mocks.recordPageCampaignQuotaIdentity.mockResolvedValue(undefined);
         mocks.verifiedFacebookPages.mockResolvedValue([{ id: 'fb_page_1', name: 'My Page', access_token: 'page_access_token_1', tasks: ['MANAGE'] }]);
     });
 
@@ -130,6 +133,15 @@ describe('POST /api/facebook/connect', () => {
         expect(supabase.userPagesUpsert.mock.invocationCallOrder[0]).toBeLessThan(
             mocks.subscribePageToAppWebhook.mock.invocationCallOrder[0]
         );
+    });
+
+    it('binds refreshed token ownership to the server-verified Facebook subject', async () => {
+        const supabase=createSupabaseMock();mocks.getSupabaseAdmin.mockReturnValue(supabase);
+        mocks.getSessionFromRequest.mockResolvedValue({user:{id:'employee_1',facebookId:'123'}});
+        mocks.subscribePageToAppWebhook.mockResolvedValue(undefined);
+        const response=await POST(createRequest({facebookId:'999'}));
+        expect(response.status).toBe(200);
+        expect(mocks.recordPageCampaignQuotaIdentity).toHaveBeenCalledWith(supabase,'page_row_1','page_access_token_1','123');
     });
 
     it('rejects a client-supplied token when Facebook management is not verified', async () => {

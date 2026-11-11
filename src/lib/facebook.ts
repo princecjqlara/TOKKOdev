@@ -4,7 +4,8 @@ import { isFacebookReauthMessage } from './facebook-errors';
 import type { TemplateMediaType } from './facebook-templates';
 import { getUtilityTemplateParameterValidationError } from './send-errors';
 import { requestWithTimeout } from './request-timeout';
-import { readMetaDeliveryFeedback, type MetaDeliveryFeedback } from './meta-delivery-feedback';
+import { readMetaDeliveryFeedback, type MetaDeliveryFeedback, type MetaQuotaScope } from './meta-delivery-feedback';
+import { waitForFacebookSendSlot } from './facebook-send-pacing';
 
 // Re-export templates from dedicated file
 export { UTILITY_TEMPLATES } from './facebook-templates';
@@ -28,8 +29,11 @@ type FacebookGraphErrorBody = {
 export class FacebookGraphApiError extends Error {
     retryAfterMs?: number;
     usagePercent?: number;
-    scope?: 'page' | 'app';
-    retryScope?: 'page' | 'app';
+    scope?: MetaQuotaScope;
+    scopeKey?: string;
+    retryScope?: MetaQuotaScope;
+    retryScopeKey?: string;
+    businessKeys?: string[];
     status: number;
     code?: number;
     subcode?: number;
@@ -119,8 +123,11 @@ async function readFacebookError(response: Response, endpoint: string, parsedBod
     ), readMetaDeliveryFeedback(response.headers));
 }
 
-async function fetchFacebookJson(input: string, init: RequestInit, timeoutMs: number, message: string, signal?: AbortSignal) {
+async function fetchFacebookJson(input: string, init: RequestInit, timeoutMs: number, message: string, signal?: AbortSignal,
+    beforeFetch?: () => Promise<void>) {
     return requestWithTimeout(async requestSignal => {
+        if (beforeFetch) await beforeFetch();
+        requestSignal.throwIfAborted();
         const response = await fetch(input, { ...init, signal: requestSignal });
         const body = await response.json().catch(error => {
             if (response.ok) throw error;
@@ -586,7 +593,8 @@ export async function sendMessage(
         `${FACEBOOK_GRAPH_URL}/me/messages?access_token=${pageAccessToken}`,
         { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(bodyPayload) },
         FACEBOOK_SEND_TIMEOUT_MS,
-        `Facebook send timed out after ${FACEBOOK_SEND_TIMEOUT_MS / 1000} seconds`
+        `Facebook send timed out after ${FACEBOOK_SEND_TIMEOUT_MS / 1000} seconds`,
+        undefined, () => waitForFacebookSendSlot(pageId, templateMediaHeader?.type === 'video')
     );
 
     if (!response.ok) {
@@ -642,7 +650,8 @@ export async function sendMessengerMediaAttachment(
         `${FACEBOOK_GRAPH_URL}/me/messages?access_token=${pageAccessToken}`,
         { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(bodyPayload) },
         FACEBOOK_SEND_TIMEOUT_MS,
-        `Facebook media send timed out after ${FACEBOOK_SEND_TIMEOUT_MS / 1000} seconds`
+        `Facebook media send timed out after ${FACEBOOK_SEND_TIMEOUT_MS / 1000} seconds`,
+        undefined, () => waitForFacebookSendSlot(pageId, media.type === 'video' || media.type === 'audio')
     );
 
     if (!response.ok) {
@@ -1043,7 +1052,8 @@ export async function sendUtilityMessage(
             })
         },
         FACEBOOK_SEND_TIMEOUT_MS,
-        `Facebook utility send timed out after ${FACEBOOK_SEND_TIMEOUT_MS / 1000} seconds`
+        `Facebook utility send timed out after ${FACEBOOK_SEND_TIMEOUT_MS / 1000} seconds`,
+        undefined, () => waitForFacebookSendSlot(pageId, mediaHeader?.type === 'video')
     );
 
     if (!response.ok) {

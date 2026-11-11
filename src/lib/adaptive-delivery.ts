@@ -1,5 +1,5 @@
 import { categorizeSendError } from './send-errors';
-import { getMetaThrottleScope, type MetaDeliveryFeedback } from './meta-delivery-feedback';
+import { getMetaThrottleScope, getMetaThrottleKey, type MetaDeliveryFeedback, type MetaQuotaScope } from './meta-delivery-feedback';
 
 type Job = { start: () => void; reject: (error: unknown) => void; allowed?: () => boolean };
 
@@ -10,7 +10,10 @@ export class AdaptiveDeliveryController {
     retryAt = 0;
     providerRetryAt = 0;
     limited = false;
-    scope: 'page' | 'app' = 'page';
+    scope: MetaQuotaScope = 'page';
+    scopeKey?: string;
+    readonly businessKeys = new Set<string>();
+    readonly quotaTargets = new Map<string, { scope: MetaQuotaScope; key?: string; providerRetryAt: number }>();
     private active = 0;
     private nextStart = 0;
     private clean = 0;
@@ -33,11 +36,12 @@ export class AdaptiveDeliveryController {
     }
 
     observeSuccess(feedback?: MetaDeliveryFeedback) {
+        for (const key of feedback?.businessKeys || []) if (/^\d+:(messenger|pages)$/.test(key)) this.businessKeys.add(key);
         if (feedback?.usagePercent !== undefined) this.lastUsage = { percent: feedback.usagePercent, at: Date.now() };
         const usage = feedback?.usagePercent ??
             (this.lastUsage && Date.now() - this.lastUsage.at < 30_000 ? this.lastUsage.percent : 0);
         if (feedback?.retryAfterMs && feedback.retryAfterMs > 0) {
-            this.pause(feedback.retryAfterMs, getMetaThrottleScope(feedback), true); return;
+            this.pause(feedback.retryAfterMs, getMetaThrottleScope(feedback), true, getMetaThrottleKey(feedback)); return;
         }
         if (usage >= 100) {
             // An accepted send with a usage header is not a rejected request.
@@ -78,8 +82,9 @@ export class AdaptiveDeliveryController {
     private observeError(error: unknown) {
         const category = categorizeSendError(error);
         const details = error as MetaDeliveryFeedback & { code?: number };
+        for (const key of details?.businessKeys || []) if (/^\d+:(messenger|pages)$/.test(key)) this.businessKeys.add(key);
         if (category === 'rate_limited') this.pause(details?.retryAfterMs || 60_000,
-            getMetaThrottleScope(details), Boolean(details?.retryAfterMs));
+            getMetaThrottleScope(details), Boolean(details?.retryAfterMs), getMetaThrottleKey(details));
         else if (['recipient_unavailable', 'conversation_unavailable', 'outside_messaging_window',
             'thread_controlled_by_another_app'].includes(category)) {
             // A recipient rejection is still a completed provider request with
@@ -94,13 +99,20 @@ export class AdaptiveDeliveryController {
         }
     }
 
-    pause(milliseconds: number, scope: 'page' | 'app' = 'page', providerSpecified = true) {
+    pause(milliseconds: number, scope: MetaQuotaScope = 'page', providerSpecified = true, scopeKey?: string) {
+        const targetId = `${scope}:${scopeKey || ''}`;
+        const previousTarget = this.quotaTargets.get(targetId);
+        this.quotaTargets.set(targetId, { scope, key: scopeKey, providerRetryAt: Math.max(
+            previousTarget?.providerRetryAt || 0, providerSpecified ? Date.now() + milliseconds : 0) });
         if (!this.limited) {
             this.concurrency = Math.max(1, Math.floor(this.concurrency / 2));
             this.intervalMs = Math.min(5000, Math.max(100, this.intervalMs * 2));
         }
+        if (!this.limited || scope === 'app' || this.scope === 'page') {
+            this.scope = scope;
+            this.scopeKey = scopeKey;
+        }
         this.limited = true;
-        if (scope === 'app') this.scope = 'app';
         this.retryAt = Math.max(this.retryAt, Date.now() + milliseconds);
         if (providerSpecified) this.providerRetryAt = Math.max(this.providerRetryAt, Date.now() + milliseconds);
         this.pump();

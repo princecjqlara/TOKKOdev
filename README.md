@@ -87,6 +87,7 @@ For large campaigns, deploy the compact delivery queue in this exact order:
 9. After deploying the public campaign worker, run `database/migration_campaign_worker_schedule.sql` to continue saved campaigns automatically through the existing database scheduler. It installs `pg_net` and one minute job, dispatches only eligible queues on idle Pages, and needs no scheduler account or credentials. The migration targets the canonical `tokkobeta.vercel.app` deployment; update its URL before using it for a different installation. `node --env-file=.env.local scripts/configure-campaign-scheduler.mjs --preflight` verifies 24 dispatch and recovery checks with rolled-back fixtures; `--apply` backs up the previous named job and installs the verified schedule.
 10. Run `database/migration_campaign_delivery_recovery_pace.sql` before deploying the recovery-aware sender. It retains conservative Page budgets for ten minutes after a saved cooldown, shares recovery pacing after app throttles, and returns the same absolute recovery deadline to later workers. It adds no tables or columns and preserves existing recipients, retry windows, and active leases. Verify its SQL locally with `node scripts/verify-campaign-recovery-pacing.mjs` using the optional PGlite tooling installed below.
 11. Run `database/migration_campaign_delivery_idle_probe.sql` to let slow Pages probe from five workers and 100ms spacing when their feedback, last throttle, and cooldown have all been stale for thirty minutes. Active leases, provider cooldowns, and fresh recovery budgets remain enforced. Healthy learned speeds remain unchanged. Verify locally with `node scripts/verify-campaign-idle-probe.mjs`; `node --env-file=.env.local scripts/configure-campaign-idle-probe.mjs --preflight` checks the live function with rolled-back fixtures, and `--apply` backs up the existing definition before installing it.
+12. Before deploying the shared-quota sender, run `node scripts/verify-campaign-shared-quotas.mjs`, then `node --env-file=.env.local scripts/configure-campaign-shared-quotas.mjs --preflight --refresh-identities` and the corresponding `--apply --refresh-identities` command. It installs `migration_campaign_shared_quotas.sql` and `migration_campaign_continuous_handoff.sql`, verifies token ownership through Meta, and keeps prior pacing definitions behind service-only wrappers. User and business cooldowns affect verified related Pages, while unrelated Pages continue independently. Productive slices queue a successor without waiting for the minute cron. Do not reapply older acquisition/feedback migrations over these wrappers. The worker URL defaults to the canonical `tokkobeta.vercel.app` deployment; configure `app_private.campaign_worker_configuration` for a different installation.
 
 Do not run the finalizer before step 2. Older senders calculate progress from terminal queue rows that the finalizer intentionally removes.
 
@@ -238,6 +239,11 @@ keeps its delivery work alive for up to 210 seconds using `waitUntil`, within
 the configured five-minute function lifetime. Other hosts keep the short
 synchronous worker response. Up to four different Pages can make progress in
 one cron run; a shared lease prevents overlapping senders for the same Page.
+Productive slices save receipts and release their lease before queuing a successor
+through the database. Dispatch skips Stop, future schedules, cooldowns, active
+workers, and queues containing only fresh claims; repeated handoffs are deduplicated.
+The minute scheduler remains a fallback. Normal worker contention does not save
+an extra campaign retry delay or increase the browser's service-error backoff.
 Recipient claims, manual Stop, and shared Meta
 recovery windows still apply. A later scheduler tick resumes any remaining work.
 

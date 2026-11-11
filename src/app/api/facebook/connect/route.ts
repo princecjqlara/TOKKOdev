@@ -8,6 +8,7 @@ import type { UtilityTemplate } from '@/lib/facebook';
 import { verifiedFacebookPages } from '@/lib/page-managers';
 import { AccessError } from '@/lib/account-security';
 import { hasFacebookManagementTask, hasFacebookMessagingTask } from '@/lib/facebook-page-capabilities';
+import { recordPageCampaignQuotaIdentity } from '@/lib/page-delivery';
 
 type WebhookRefreshWarning = {
     code: 'WEBHOOK_SUBSCRIPTION_FAILED';
@@ -69,6 +70,11 @@ export async function POST(request: NextRequest) {
             'Facebook recognizes your Page access but did not provide a Page connection token. Refresh Facebook permissions, select this Page, and approve Tokko’s requested Page permissions.');
         const name = facebookPage.name;
         const accessToken = facebookPage.access_token;
+        const rememberQuotaIdentity = async (pageId: string) => {
+            if (!session.user?.facebookId) return;
+            try { await recordPageCampaignQuotaIdentity(supabase, pageId, accessToken, session.user.facebookId); }
+            catch { console.warn('Page connected; quota identity metadata will need a refresh.'); }
+        };
 
         if (!fbPageId || !name || !accessToken) {
             return NextResponse.json(
@@ -106,6 +112,7 @@ export async function POST(request: NextRequest) {
             if (grantError) throw grantError;
             let warning: WebhookRefreshWarning | null = null;
             if (created) {
+                await rememberQuotaIdentity(sharedPage.id);
                 try {
                     await subscribePageToAppWebhook(fbPageId, accessToken, ['messages', 'messaging_postbacks', 'message_echoes']);
                 } catch {
@@ -126,6 +133,7 @@ export async function POST(request: NextRequest) {
         if (pageError) throw pageError;
         if (!page) throw new Error('Could not resolve the shared Facebook Page');
         const pageId = page.id;
+        await rememberQuotaIdentity(pageId);
 
         // Link user to page
         const { error: linkError } = await supabase
