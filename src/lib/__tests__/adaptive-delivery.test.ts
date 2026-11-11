@@ -123,6 +123,36 @@ describe('learning the available Meta sending capacity', () => {
         expect(controller.concurrency).toBeGreaterThan(reduced);
     });
 
+    it('recovers slow pacing within short worker slices when Meta omits usage headers', async () => {
+        vi.useFakeTimers();
+        let concurrency = 1, intervalMs = 5000;
+        // Each browser slice has less than 45 seconds for sending. Requiring
+        // 25 successes at five-second spacing loses every sample on restart.
+        for (let slice = 0; slice < 3; slice++) {
+            const controller = new AdaptiveDeliveryController(100, concurrency, intervalMs);
+            for (let response = 0; response < 6; response++) {
+                await vi.advanceTimersByTimeAsync(intervalMs);
+                controller.observeSuccess();
+            }
+            expect(controller.intervalMs).toBeLessThan(intervalMs);
+            concurrency = controller.concurrency;
+            intervalMs = controller.intervalMs;
+        }
+        expect(concurrency).toBeGreaterThan(1);
+    });
+
+    it('probes slowly after a recovery hold instead of accelerating on every second of clean replies', async () => {
+        vi.useFakeTimers();
+        const controller = new AdaptiveDeliveryController(100, 5, 1000, Date.now() - 1);
+        for (let second = 0; second < 60; second++) {
+            await vi.advanceTimersByTimeAsync(1000);
+            for (let response = 0; response < 25; response++) controller.observeSuccess({ usagePercent: 5 });
+        }
+        expect(controller.concurrency).toBeGreaterThan(5);
+        expect(controller.concurrency).toBeLessThanOrEqual(10);
+        expect(controller.intervalMs).toBeGreaterThanOrEqual(400);
+    });
+
     it('retains a shared recovery pace across worker restarts despite clean replies', async () => {
         vi.useFakeTimers();
         const growthAfter = Date.now() + 10 * 60_000;

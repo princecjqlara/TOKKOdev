@@ -153,6 +153,7 @@ export async function sendCampaignById({
     let continuationSaved = false;
     let stoppedResult: SendCampaignByIdResult | undefined;
     let adaptive: AdaptiveDeliveryController | undefined;
+    let lastFeedbackAt = 0;
     const resolveStateConflict = async (): Promise<SendCampaignByIdResult> => {
         // Delivery receipts and other workers also update updated_at. A failed
         // conditional write is not proof that the user pressed Stop.
@@ -182,6 +183,7 @@ export async function sendCampaignById({
     const persistFeedback = async () => {
         if (!pageLease || !adaptive) return;
         const budget = await reportPageDeliveryFeedback(supabase, pageLease.pageId, pageLease.owner, adaptive);
+        lastFeedbackAt = Date.now();
         // Shared recovery budgets may come from a throttle on another Page.
         // Adopt them even when its cooldown has already elapsed.
         adaptive.concurrency = Math.min(adaptive.concurrency, budget.concurrency);
@@ -506,6 +508,7 @@ export async function sendCampaignById({
             ? Math.max(1, Math.min(Math.floor(sendBatchSize), MAX_PAGE_DELIVERY_CONCURRENCY))
             : MAX_PAGE_DELIVERY_CONCURRENCY;
         const learned = await reportPageDeliveryFeedback(supabase, pageLease.pageId, pageLease.owner);
+        lastFeedbackAt = Date.now();
         adaptive = new AdaptiveDeliveryController(MAX_SEND_BATCH_SIZE, learned.concurrency, learned.intervalMs, learned.growthAfter);
         if (learned.retryAt && Date.parse(learned.retryAt) > Date.now()) adaptive.pause(Date.parse(learned.retryAt) - Date.now());
         let sendBatchSizeThisRun = adaptive.concurrency;
@@ -518,14 +521,14 @@ export async function sendCampaignById({
                 ? Math.max(1, Math.floor(maxRecipientsPerRun))
                 : Number.MAX_SAFE_INTEGER;
         const useAiMessages = campaign.use_ai_message || campaign.is_loop;
-        // Account for the observed cost of sending and saving a batch before
-        // claiming more recipients near the invocation's deadline.
-        let lastBatchDurationMs = 0;
+        // Estimate one recipient's cost, not the duration of an entire paced
+        // prefetch. Unstarted recipients can yield at the soft deadline.
+        let estimatedRecipientDurationMs = 0;
 
         console.log(`Starting campaign ${campaignId} with atomic batches up to ${MAX_SEND_BATCH_SIZE}`);
 
         while (processedThisRun < MAX_RECIPIENTS &&
-            Date.now() - startTime + lastBatchDurationMs + DATABASE_REQUEST_TIMEOUT_MS < MAX_PROCESSING_TIME) {
+            Date.now() - startTime + estimatedRecipientDurationMs + DATABASE_REQUEST_TIMEOUT_MS < MAX_PROCESSING_TIME) {
             const batchStartedAt = Date.now();
             const { data: currentCampaign, error: currentCampaignError } = await databaseRequest(supabase
                 .from('campaigns')
@@ -559,7 +562,7 @@ export async function sendCampaignById({
 
             // Prefetch work while learning speed too. The adaptive gate still
             // controls actual message starts; fetching need not idle the workers.
-            const claimSize = sendBatchSizeThisRun >= 5 ? Math.min(500, sendBatchSizeThisRun * 5) : sendBatchSizeThisRun;
+            const claimSize = MAX_SEND_BATCH_SIZE === 1 ? 1 : Math.min(500, sendBatchSizeThisRun * 5);
             const batch = await claimCampaignRecipients({
                 supabase,
                 campaignId,
@@ -577,6 +580,7 @@ export async function sendCampaignById({
             let saveFailed = false;
             const checkpointed = new Set<string>();
             const checkpointResults: CampaignRecipientResult[] = [];
+            let lastCheckpointAt = Date.now();
             let saveChain = Promise.resolve();
             const deliverRecipient = async (recipient: ClaimedCampaignRecipient): Promise<RecipientDeliveryResult> => {
                 if (!batchPause && Date.now() - startTime + DATABASE_REQUEST_TIMEOUT_MS >= MAX_PROCESSING_TIME) {
@@ -827,8 +831,11 @@ export async function sendCampaignById({
                 if (result.status !== 'fulfilled' || result.value.pauseCampaign || saveFailed) return;
                 checkpointResults.push({ contact_id: result.value.contactId, success: result.value.success,
                     error_message: result.value.success ? null : result.value.error || 'Unknown delivery error' });
-                if (checkpointResults.length < 50) return;
+                // Slow Pages also need durable progress and a timely Stop
+                // check; waiting for 50 receipts can take several minutes.
+                if (checkpointResults.length < 50 && Date.now() - lastCheckpointAt < 5000) return;
                 const receipts = checkpointResults.splice(0, 50);
+                lastCheckpointAt = Date.now();
                 saveChain = saveChain.then(async () => {
                     if (saveFailed) return;
                     try {
@@ -840,7 +847,12 @@ export async function sendCampaignById({
                             .select('status').eq('id', campaignId).single());
                         if (error) { batchPause = { error: error.message, retryable: isRetryableInfrastructureError(error) }; }
                         else if (current?.status !== 'sending') batchPause = { error: 'Campaign stopped. Unsent recipients remain saved.', retryable: false };
-                        await persistFeedback();
+                        // Small time-based checkpoints already save receipts
+                        // and check Stop. Avoid a third database round trip on
+                        // each one while the Page is sending slowly.
+                        if (receipts.length === 50 || adaptive!.limited || Date.now() - lastFeedbackAt >= 30_000) {
+                            await persistFeedback();
+                        }
                     } catch (error) {
                         saveError = error; saveFailed = true;
                         batchPause = { error: 'Saving delivery progress is temporarily unavailable.', retryable: true };
@@ -849,7 +861,8 @@ export async function sendCampaignById({
                 await saveChain;
             });
             await saveChain;
-            if (saveFailed) throw saveError;
+            // A checkpoint also writes feedback and checks Stop. If either
+            // fails, drain and persist accepted in-flight sends before exiting.
             const completionResults = batchResults.flatMap((result, index) => {
                 if (result.status === 'fulfilled') {
                     if (result.value.pauseCampaign || checkpointed.has(result.value.contactId)) return [];
@@ -910,6 +923,7 @@ export async function sendCampaignById({
             // Persist delivery results before optional attribution. An unavailable
             // audit table must not leave accepted sends eligible for replay.
             pendingOutboundEvents.push(...outboundEvents);
+            if (saveFailed) throw saveError;
             if (pendingOutboundEvents.length >= OUTBOUND_AUDIT_BATCH_SIZE) await flushOutboundEvents();
 
             for (const result of batchResults) {
@@ -924,7 +938,8 @@ export async function sendCampaignById({
                 }
             }
             processedThisRun += completionResults.length + checkpointed.size;
-            lastBatchDurationMs = Date.now() - batchStartedAt;
+            estimatedRecipientDurationMs = Math.ceil((Date.now() - batchStartedAt) /
+                Math.max(1, completionResults.length + checkpointed.size));
 
             if (pausedResults.length > 0) {
                 // A normal invocation deadline is a handoff, not a service
@@ -983,7 +998,7 @@ export async function sendCampaignById({
             sendBatchSizeThisRun = adaptive.concurrency;
 
             if (processedThisRun < MAX_RECIPIENTS && DELAY_BETWEEN_BATCHES > 0 &&
-                Date.now() - startTime + DELAY_BETWEEN_BATCHES + lastBatchDurationMs + DATABASE_REQUEST_TIMEOUT_MS < MAX_PROCESSING_TIME) {
+                Date.now() - startTime + DELAY_BETWEEN_BATCHES + estimatedRecipientDurationMs + DATABASE_REQUEST_TIMEOUT_MS < MAX_PROCESSING_TIME) {
                 await waitForPageDeliveryBatch(DELAY_BETWEEN_BATCHES);
             }
         }

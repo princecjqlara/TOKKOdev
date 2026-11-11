@@ -86,6 +86,19 @@ queues, existing cooldowns, and Page leases. Run
 `node scripts/verify-campaign-recovery-pacing.mjs` for local SQL checks with no
 customer records or outbound requests.
 
+Deploy the updated sender to recover speed within short browser slices when Meta
+omits usage headers. The clean-response target scales with message spacing instead
+of requiring 25 successful replies before every worker restart. After the saved
+recovery hold, speed increases at most once every fifteen seconds. Slow Pages
+prefetch up to five recipients per active worker while preserving message spacing,
+and checkpoint available results and check Stop about every five seconds.
+Small checkpoints refresh pacing feedback at most once every thirty seconds
+unless Meta limits delivery; full 50-recipient checkpoints and final handoffs
+still save feedback immediately. This avoids adding a feedback round trip to
+every slow receipt checkpoint.
+Slice planning uses the observed cost per recipient, so one paced prefetch does not cause
+the next slice to end early. This sender update requires no additional migration.
+
 Temporary worker failures, timeouts, expired recipient claims, and unrecognized
 infrastructure interruptions keep campaigns queued for automatic retry after
 one minute. Facebook rate limits keep their shared Page cooldown instead.
@@ -101,6 +114,10 @@ queued. Slow timeouts defer to another invocation, and rate limits wait for
 their Page cooldown. Saving an accepted batch retries up to three times for
 returned database errors, transport exceptions, or request deadlines. Those save
 retries reuse the same claim and results without issuing another Facebook send.
+If a checkpoint or pacing-feedback write fails while other sends are in flight,
+the worker drains those sends and attempts to save every remaining accepted
+receipt before returning a retryable error. A feedback failure must not discard
+delivery receipts that would otherwise become eligible again after claim expiry.
 Manual Stop is rechecked before an immediate send retry begins.
 
 Use the deployment that actually serves the live domain when inspecting settings.

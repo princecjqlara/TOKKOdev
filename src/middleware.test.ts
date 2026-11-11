@@ -4,7 +4,8 @@ import { middleware } from './middleware';
 afterEach(() => { vi.unstubAllEnvs(); });
 describe('API origins and public workers', () => {
     it.each([undefined, 'legacy-worker-secret'])('allows scheduled workers without headers when CRON_SECRET is %s', secret => {
-        vi.stubEnv('CRON_SECRET', secret);
+        vi.stubEnv('CRON_SECRET', secret ?? '');
+        if (secret === undefined) delete process.env.CRON_SECRET;
         const workers = ['campaign-scheduled', 'campaign-loop', 'sync', 'follow-up-automations',
             'exports', 'messaging-auto-tag', 'subaccounts', 'account-mail'];
         for (const worker of workers) {

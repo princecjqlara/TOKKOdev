@@ -217,9 +217,13 @@ writes into 250-message chunks after saving delivery results. During recovery,
 workers retain the saved pace instead of ramping up again on the first clean
 responses. Reporting the same throttle repeatedly does not extend its cooldown.
 The recovery hold expires ten minutes after the saved cooldown; subsequent
-clean responses can gradually increase speed again. Once a Page
-reaches five workers, each fetch can supply five contacts per worker, reducing
-database waits as the sender learns its speed. Prefetched contacts still pass
+clean responses can gradually increase speed again. Slow workers collect enough
+clean responses to recover within short browser slices even without usage headers.
+Recovery probes increase speed at most once every fifteen seconds after the hold,
+avoiding a rapid return to the previous burst. Each fetch can supply five contacts
+per worker even at one active worker, reducing database waits at low speeds.
+Slow queues save available receipts and check Stop about every five seconds;
+healthy queues retain their 50-recipient checkpoints. Prefetched contacts still pass
 through the learned concurrency and message spacing. Browser requests
 process as many recipients as fit in their 45-second slice instead of stopping
 at 500. On Vercel, the campaign cron acknowledges the scheduler immediately and

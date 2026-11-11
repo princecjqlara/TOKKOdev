@@ -9,7 +9,8 @@ afterEach(() => { vi.unstubAllEnvs(); });
 
 describe('public messaging auto-tag worker', () => {
     it.each([undefined, 'legacy-worker-secret'])('runs without scheduler credentials when CRON_SECRET is %s', async secret => {
-        vi.stubEnv('CRON_SECRET', secret);
+        vi.stubEnv('CRON_SECRET', secret ?? '');
+        if (secret === undefined) delete process.env.CRON_SECRET;
         mocks.process.mockResolvedValue({ pages: 1, conversations: 10, tagged: 2 });
 
         const response = await GET();

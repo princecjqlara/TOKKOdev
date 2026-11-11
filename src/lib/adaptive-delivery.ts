@@ -59,8 +59,14 @@ export class AdaptiveDeliveryController {
             }
         } else if (usage < 50 && !this.limited && Date.now() >= this.growthAfter) {
             this.clean++;
-            const growthSamples = feedback?.usagePercent !== undefined ? 5 : 25;
-            if (this.clean >= growthSamples && Date.now() - this.lastGrowth >= 1000) {
+            // Slow workers may restart before collecting 25 responses. Require
+            // a bounded period of clean sending so short slices can recover too.
+            const growthSamples = feedback?.usagePercent !== undefined ? 5
+                : Math.max(3, Math.min(25, Math.ceil(15_000 / Math.max(1, this.intervalMs))));
+            // A cooldown ending is not evidence of restored capacity. Probe
+            // gradually after recovery, including when quota headers are absent.
+            const growthInterval = this.growthAfter > 0 || feedback?.usagePercent === undefined ? 15_000 : 1000;
+            if (this.clean >= growthSamples && Date.now() - this.lastGrowth >= growthInterval) {
                 this.concurrency = Math.min(this.maximum, this.concurrency + Math.max(1, Math.floor(this.concurrency / 4)));
                 this.intervalMs = this.intervalMs <= 5 ? 0 : Math.floor(this.intervalMs * 0.8);
                 this.clean = 0; this.lastGrowth = Date.now();
