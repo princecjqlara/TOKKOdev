@@ -176,6 +176,15 @@ retry windows, cooldowns, and scheduled recipient times. Existing cron-job.org
 campaign calls can coexist through the same delivery leases, but are optional
 for campaign continuation once the database job is enabled.
 
+Enabled Messenger lead tags can also recover when the external scheduler stops.
+After worker coordination and shared quotas, install
+`database/migration_messaging_auto_tag_schedule.sql` using
+`node --env-file=.env.local scripts/configure-messaging-auto-tag-scheduler.mjs --preflight`
+and then `--apply`. The database fallback queues at most three standalone tag
+workers per minute for Pages with no attempt for five minutes, respecting
+leases, cooldowns, and the recent inbound window. It sends no Facebook messages.
+See [Messenger auto-tag behavior](docs/messaging-auto-tag.md) for verification.
+
 Configure the other background jobs in [cron-job.org](https://cron-job.org) to call
 the deployed API routes:
 
@@ -192,8 +201,9 @@ no sign-in, Authorization header, random key, or `CRON_SECRET` environment varia
 is required. Existing scheduler headers and an old `CRON_SECRET` value are ignored.
 Deploy this version before switching an older installation to public workers.
 Check each job's execution history and re-enable jobs disabled after repeated
-failures. A failed or disabled scheduler stops background sync, campaign
-continuation, and follow-ups.
+failures. A failed or disabled external scheduler still stops background sync
+and follow-ups; installed database fallback jobs keep campaigns and enabled
+Messenger tag scans moving.
 
 Bulk sends save their background continuation before returning the prepared
 campaign. Both sending screens retry temporary network failures, gateway

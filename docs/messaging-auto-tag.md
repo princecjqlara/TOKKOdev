@@ -25,13 +25,31 @@ requests. It cannot override a disabled Page setting.
 
 The existing cron-jobs.org minute job calls
 `/api/cron/follow-up-automations`. That same scheduler invocation starts
-auto-tag polling alongside follow-ups; no additional scheduler job or request
-to `/api/cron/messaging-auto-tag` is needed. Follow-up failures cannot skip the
+auto-tag polling alongside follow-ups. Follow-up failures cannot skip the
 tag worker, and individual Page failures do not stop other Pages. The response
 includes `messagingAutoTag.pages`, `conversations`, `tagged`, and `errors` for
 checking progress. Campaign continuation starts alongside follow-ups through
 the shared campaign worker. Slow or failed follow-ups cannot skip campaign
 recovery, and no nested HTTP request is needed to resume saved recipients.
+
+The database fallback in `migration_messaging_auto_tag_schedule.sql` also keeps
+enabled tag scans moving when that external scheduler stops calling the app.
+Its `tokko-messaging-auto-tag` minute job calls the standalone tag worker for
+at most three Pages whose last attempt is at least five minutes old. Healthy
+primary polling leaves the fallback idle. Disabled settings, active leases,
+Page and shared Meta cooldowns, and the seven-day inbound window remain in
+force. It reads Messenger history and saves internal tags without sending
+Facebook messages. Individual worker claims still enforce the one-minute Page
+interval and prevent overlapping scans.
+
+Apply it after Page worker coordination and campaign shared quotas. Verify the
+deployed standalone worker first, then run
+`node --env-file=.env.local scripts/configure-messaging-auto-tag-scheduler.mjs --preflight`.
+The script checks the real SQL plan and dispatch rules with rolled-back
+fixtures and a stub HTTP function. `--apply` backs up the existing named job
+before committing the verified schedule. Neither script mode calls Facebook.
+Check both `cron.job_run_details` and `net._http_response`, then confirm
+`pages.messaging_auto_tag_attempted_at` and the saved scan cursor advance.
 
 The scheduler claims each enabled Page at most once a minute and skips
 Pages with no eligible contacts. Each slice reads at most ten recently updated
@@ -68,5 +86,6 @@ Missing tags are repaired with `ensure_page_default_tags`.
 verifies the migration and rolls back fixtures. `--apply` backs up definitions
 and metadata before committing the repair. The optional standalone diagnostic
 endpoint `/api/cron/messaging-auto-tag` is public and accepts a plain `GET`
-request without credentials. Regular polling uses the existing follow-up scheduler instead.
+request without credentials. Regular polling uses the existing follow-up scheduler,
+with the database job as a fallback after five minutes without a Page attempt.
 Rejected Facebook Page tokens require reconnecting the affected Page.

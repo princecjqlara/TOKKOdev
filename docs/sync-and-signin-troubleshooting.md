@@ -11,6 +11,16 @@ credentials. Check job execution history and re-enable jobs disabled after
 repeated failures. The existing follow-up job also advances Messenger tag scans
 and campaigns.
 
+Enabled Messenger tag scans also have a database fallback after applying
+`database/migration_messaging_auto_tag_schedule.sql` (after worker coordination
+and shared quotas). `tokko-messaging-auto-tag` checks every minute and queues
+at most three standalone tag workers for Pages without an attempt for five
+minutes. It respects leases, cooldowns, enabled settings, and recent inbound
+contacts. Run `scripts/configure-messaging-auto-tag-scheduler.mjs --preflight`
+with the database environment loaded before `--apply`; both modes verify
+dispatch rules with rolled-back fixtures and no real HTTP calls. The deployed
+standalone worker must be available first. Tag polling never sends messages.
+
 Campaign delivery can continue independently through the existing database
 scheduler. Apply `database/migration_campaign_worker_schedule.sql` after deploying
 the public worker. The `tokko-campaign-delivery` job checks every minute and

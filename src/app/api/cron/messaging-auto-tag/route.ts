@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import { processOneMessagingAutoTagPage } from '@/lib/messaging-auto-tag-worker';
 
 export const dynamic = 'force-dynamic';
+export const maxDuration = 30;
 
 export async function GET() {
     try {
