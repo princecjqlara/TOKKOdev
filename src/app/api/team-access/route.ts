@@ -78,7 +78,12 @@ export async function POST(request: NextRequest) {
             p_expiry_set: expiresAt !== undefined, p_expires_at: expiresAt ?? null,
             p_lifetime_days: days, p_delete_after_expiry: deleteAfterExpiry ?? null
         });
-        if (error?.code === '42501') throw new AccessError(403, passwordHash ? 'An initial password can only be set for a new account or your own pending invitation. Choose Assign an existing account to grant Page access.' : 'You can only set expiry for email accounts you created. Leave expiry off to assign an existing account.');
+        if (error?.code === '42501') {
+            if (['Original Facebook parent account required', 'Facebook Page administrator required'].includes(error.message)) {
+                throw new AccessError(403, 'Page administration access could not be verified. Refresh Page access and try again. If this continues, ask the Tokko administrator to update team account permissions.');
+            }
+            throw new AccessError(403, passwordHash ? 'An initial password can only be set for a new account or your own pending invitation. Choose Assign an existing account to grant Page access.' : 'You can only set expiry for email accounts you created. Leave expiry off to assign an existing account.');
+        }
         if (error?.code === '22023') throw new AccessError(400, error.message?.includes('Existing active account required') ? 'Choose an active existing account, or create a new account first.' : 'Account details changed or the account has expired. Refresh, renew its expiry if needed, and try again.');
         if (error) throw error;
         let delivered = true;

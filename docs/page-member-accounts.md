@@ -68,7 +68,7 @@ Apply migrations in this order, in transactions:
 7. `database/migration_subaccount_cleanup_schedule.sql`.
 8. `database/migration_subaccount_first_login_profile.sql`.
 9. `database/migration_facebook_messaging_access.sql` (records the historical messaging-access rule).
-10. `database/migration_parent_connected_page_assignment.sql` (allows original parents to assign every connected Page, including messaging connections).
+10. `database/migration_parent_connected_page_assignment.sql` (allows original parents to assign every connected Page, including messaging connections). Verify the installed functions with `node --env-file=.env.local scripts/configure-team-page-assignment.mjs --preflight`, then install with `--apply`. The installer backs up the prior authority function and verifies account creation with rolled-back fixtures before committing.
 
 The scheduler migration installs `tokko-expired-subaccounts` in `pg_cron` when that extension is available. Otherwise configure a plain `GET /api/cron/subaccounts` every minute, with no credentials. This worker is independent of account email delivery. Inspect its `deleted` and `failed` counts and private access-audit records if cleanup fails.
 
@@ -85,6 +85,14 @@ All 42 original users and 158 memberships were preserved. Activation passed 29 c
 An already open Team screen must refresh Page access to reload readiness and enable **Create account / assign access**. Creating with an initial password and assigning existing accounts work without an email sender; email invitation and recovery depend on sender configuration. Live Facebook OAuth and mail delivery still require hands-on verification. The connected Vercel CLI account only has access to `bigclicklara-2607s-projects`; deployment to the live team and live environment settings cannot currently be verified. This activation is a database change and does not require redeploying the Team screen.
 
 The Team screen shows password creation and existing-account assignment without an email-setup banner. The optional email-invitation method and resend action appear when the sender is configured. If mail becomes unavailable during a Page-access refresh, the form returns to initial-password setup. A parent can also set an initial password for their own pending invitation without sending email; other parents cannot overwrite that pending account's credentials. These interface changes require deploying the current application code.
+
+### Connected-Page assignment repair, 2026-11-13
+
+The configured database still had the historical `facebook_messaging` exclusion in `tokko_assert_manager`, and migration `20261108_001` was missing. This rejected subaccount creation for 18 Page connections across nine original parent accounts with SQL error `42501`. The API incorrectly described that authority failure as an attempt to replace an existing password.
+
+Applied the connected-Page assignment migration using `scripts/configure-team-page-assignment.mjs --apply` after a successful preflight. Both runs passed 27 checks using the installed functions, covering permanent and temporary password accounts, overlapping Page assignments, existing-account assignment, sign-in eligibility, first-login requirements, retries, revocation, and permission denials. All fixture records were rolled back; all 31 users, 21 Pages, and 63 memberships were preserved. The previous function is backed up under the ignored `.vercel/backups` directory. This database repair takes effect immediately. The API now distinguishes Page authority failures from password conflicts; that error-message improvement requires deploying the application code.
+
+A subsequent 28-check verification confirmed that creation succeeds through the installed functions before applying any migration again, including accounts without expiry. These accounts retain `expires_at = NULL` and `delete_after_expiry = FALSE`; the API passes no lifetime or deletion override when the temporary-account option is off.
 
 ## Verification
 

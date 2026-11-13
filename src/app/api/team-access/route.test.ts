@@ -86,12 +86,13 @@ describe('manager-only account and Page assignment endpoints', () => {
         expect((await PATCH(request('PATCH',{userId:account,pageId:page,expiresAt:null,deleteAfterExpiry:false}))).status).toBe(200);
         expect(rpc).toHaveBeenLastCalledWith('tokko_set_subaccount_lifetime',expect.objectContaining({p_expiry_set:true,p_expires_at:null,p_delete_after_expiry:false}));
     });
-    it('creates a password account without requiring or sending email and keeps credentials out of its response', async () => {
+    it('creates a permanent password account without expiry or email delivery and keeps credentials out of its response', async () => {
         const rpc = vi.fn().mockResolvedValue({ data: { passwordCreated: true, pending: false }, error: null }); mocks.db.mockReturnValue({ rpc });
         mocks.mailConfig.mockImplementation(() => { throw new AccessError(503, 'Mail unavailable'); });
         const response = await POST(request('POST', { name: 'Member', email: 'member@example.com', pageIds: [page], setupMethod: 'password', password: 'An initial password 123!' }));
         expect(response.status).toBe(200);
-        expect(rpc).toHaveBeenCalledWith('tokko_save_subaccount', expect.objectContaining({ p_setup_method: 'password', p_password: 'scrypt-v1$server-generated-hash', p_expiry_set: false }));
+        expect(rpc).toHaveBeenCalledWith('tokko_save_subaccount', expect.objectContaining({ p_setup_method: 'password', p_password: 'scrypt-v1$server-generated-hash',
+            p_expiry_set: false, p_expires_at: null, p_lifetime_days: null, p_delete_after_expiry: null }));
         expect(rpc.mock.calls[0][1].p_encrypted).toBe('');
         expect(mocks.mailConfig).not.toHaveBeenCalled(); expect(mocks.mail).not.toHaveBeenCalled();
         expect(JSON.stringify(await response.json())).not.toMatch(/initial password 123|scrypt-v1|p_hash|p_password/);
@@ -116,6 +117,14 @@ describe('manager-only account and Page assignment endpoints', () => {
         rpc.mockClear();
         expect((await POST(request('POST', { ...body, password: '' }))).status).toBe(400);
         expect(rpc).not.toHaveBeenCalled();
+    });
+    it.each(['Original Facebook parent account required', 'Facebook Page administrator required'])('reports Page authority failures without blaming the chosen password: %s', async message => {
+        mocks.db.mockReturnValue({ rpc: vi.fn().mockResolvedValue({ data: null, error: { code: '42501', message } }) });
+        const response = await POST(request('POST', { name: 'Member', email: 'member@example.com', pageIds: [page], setupMethod: 'password', password: 'A member password 123!' }));
+        expect(response.status).toBe(403);
+        const body = await response.json();
+        expect(body.message).toContain('Refresh Page access');
+        expect(body.message).not.toContain('Assign an existing account');
     });
     it('assigns an existing account without mail or password changes and refuses unknown accounts', async () => {
         const rpc = vi.fn().mockResolvedValue({ data: { pending: false }, error: null }); mocks.db.mockReturnValue({ rpc });
