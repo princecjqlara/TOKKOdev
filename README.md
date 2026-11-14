@@ -146,6 +146,8 @@ resets, follow [private account administration](docs/system-admin.md). This uses
 separate server credentials and requires `database/migration_system_admin.sql`.
 Hosts without administrator environment variables can use the protected database
 configuration in `database/migration_system_admin_login.sql` through that guide.
+Apply `database/migration_system_admin_management.sql` before deploying admin
+account deletion, status/lifetime controls, and the additional account filters.
 
 For original Facebook parent users and their email/password team subaccounts, follow [the account rollout guide](docs/page-member-accounts.md). Subaccounts support overlapping multi-Page access and optional scheduled deletion. Apply the account migrations before application code, configure scheduled workers, and finalize shared-database isolation before enabling production subaccounts. Email delivery is optional for parent-created initial-password accounts.
 

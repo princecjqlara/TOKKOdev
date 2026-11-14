@@ -24,16 +24,16 @@ try {
         CREATE TABLE app_private.schema_migrations(version TEXT PRIMARY KEY,description TEXT);
         CREATE TABLE users(id UUID PRIMARY KEY,email TEXT,name TEXT,facebook_id TEXT,phone_number TEXT,
             created_at TIMESTAMPTZ DEFAULT now(),updated_at TIMESTAMPTZ DEFAULT now(),
-            is_active BOOLEAN DEFAULT TRUE,account_kind TEXT DEFAULT 'email',created_by UUID REFERENCES users(id),
+            is_active BOOLEAN DEFAULT TRUE,account_kind TEXT DEFAULT 'email',created_by UUID REFERENCES users(id) ON DELETE SET NULL,
             expires_at TIMESTAMPTZ,delete_after_expiry BOOLEAN DEFAULT FALSE,password_hash TEXT,password_changed_at TIMESTAMPTZ,
             email_login_enabled BOOLEAN DEFAULT TRUE,email_verified_at TIMESTAMPTZ DEFAULT now(),session_version INTEGER DEFAULT 0);
         CREATE TABLE pages(id UUID PRIMARY KEY,name TEXT,fb_page_id TEXT,access_token TEXT);
-        CREATE TABLE user_pages(user_id UUID REFERENCES users(id),page_id UUID REFERENCES pages(id),
-            created_at TIMESTAMPTZ DEFAULT now(),grant_source TEXT,granted_by UUID REFERENCES users(id));
-        CREATE TABLE tokko_auth_identities(user_id UUID REFERENCES users(id));
-        CREATE TABLE tokko_account_tokens(id UUID PRIMARY KEY,user_id UUID REFERENCES users(id),consumed_at TIMESTAMPTZ);
-        CREATE TABLE tokko_account_mail(token_id UUID REFERENCES tokko_account_tokens(id),status TEXT,encrypted_token TEXT,lease_until TIMESTAMPTZ,claim_token UUID);
-        CREATE TABLE tokko_access_audit(user_id UUID REFERENCES users(id),action TEXT);
+        CREATE TABLE user_pages(user_id UUID REFERENCES users(id) ON DELETE CASCADE,page_id UUID REFERENCES pages(id),
+            created_at TIMESTAMPTZ DEFAULT now(),grant_source TEXT,granted_by UUID REFERENCES users(id) ON DELETE SET NULL);
+        CREATE TABLE tokko_auth_identities(user_id UUID REFERENCES users(id) ON DELETE CASCADE);
+        CREATE TABLE tokko_account_tokens(id UUID PRIMARY KEY,user_id UUID REFERENCES users(id) ON DELETE CASCADE,consumed_at TIMESTAMPTZ);
+        CREATE TABLE tokko_account_mail(token_id UUID REFERENCES tokko_account_tokens(id) ON DELETE CASCADE,status TEXT,encrypted_token TEXT,lease_until TIMESTAMPTZ,claim_token UUID);
+        CREATE TABLE tokko_access_audit(user_id UUID REFERENCES users(id) ON DELETE SET NULL,action TEXT);
         ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT EXECUTE ON FUNCTIONS TO anon,authenticated;`);
     const migration = await readFile('database/migration_system_admin.sql', 'utf8');
     await db.exec(migration);
@@ -134,5 +134,111 @@ try {
     check(await scalar('SELECT revision value FROM app_private.system_admin_config'), revision);
     check((await overview()).total, 8);
     check(/admin@example.test|scrypt-v1/.test(JSON.stringify(await overview())), false);
+    const managementMigration = await readFile('database/migration_system_admin_management.sql', 'utf8');
+    await db.exec(managementMigration);
+    const managed = async (overrides = {}) => {
+        const params = { search: '', type: 'all', lifetime: 'all', status: 'all', page: 1, page_size: 25, parent: null,
+            page_id: null, assignment: 'all', expires_within: null, deletion: 'all', password: 'all', sort: 'newest', ...overrides };
+        return scalar('SELECT tokko_admin_accounts_v2($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13) value', Object.values(params));
+    };
+    const managedAll = await managed();
+    check(managedAll.total, 8); check(managedAll.filterOptions.pages.length, 2);
+    check(managedAll.filterOptions.creators.map(row => row.id), [parent]);
+    check(managedAll.accounts.find(row => row.id === parent).canDelete, false);
+    check(managedAll.accounts.find(row => row.id === secondParent).canDelete, true);
+    check(managedAll.accounts.find(row => row.id === pending).canEnable, false);
+    check(managedAll.accounts.find(row => row.id === temporary).canScheduleDeletion, true);
+    check(managedAll.accounts.find(row => row.id === linked).canScheduleDeletion, false);
+    check((await managed({ page_id: pageA })).total, 3);
+    check((await managed({ assignment: 'assigned' })).total, 3);
+    check((await managed({ assignment: 'unassigned' })).total, 5);
+    check((await managed({ expires_within: 7 })).accounts.map(row => row.id), [temporary]);
+    check((await managed({ deletion: 'scheduled' })).accounts.map(row => row.id), [temporary]);
+    check((await managed({ password: 'unset' })).total, 2);
+    check((await managed({ password: 'set' })).total, 6);
+    check((await managed({ parent, page_id: pageA, lifetime: 'temporary', deletion: 'scheduled', password: 'set', expires_within: 30 })).total, 1);
+    check((await managed({ sort: 'name' })).accounts[0].name, 'Disabled');
+    check((await managed({ sort: 'expiry' })).accounts[0].id, expired);
+    const oldestDate = new Date(Date.now() - 100 * 86400_000).toISOString();
+    await db.query('UPDATE users SET created_at=$1 WHERE id=$2', [oldestDate, parent]);
+    check((await managed({ sort: 'oldest' })).accounts[0].id, parent);
+    const sortedOne = await managed({ sort: 'name', page_size: 3 });
+    const sortedTwo = await managed({ sort: 'name', page_size: 3, page: 2 });
+    check(sortedTwo.accounts.some(row => sortedOne.accounts.some(first => row.id === first.id)), false);
+    for (const bad of [{ assignment: 'invalid' }, { expires_within: 0 }, { deletion: null }, { password: 'clear' }, { sort: 'random' }]) {
+        await assert.rejects(managed(bad)); checks++;
+    }
+    const signatures = ['tokko_admin_accounts_v2(text,text,text,text,integer,integer,uuid,uuid,text,integer,text,text,text)',
+        'tokko_admin_set_account_active(uuid,boolean,text)', 'tokko_admin_set_account_lifetime(uuid,boolean,timestamptz,integer,boolean,text)', 'tokko_admin_delete_account(uuid,text,text)'];
+    for (const role of ['anon', 'authenticated']) for (const signature of signatures) {
+        check(await scalar("SELECT has_function_privilege($1,$2,'EXECUTE') value", [role, signature]), false);
+    }
+    const active = (id, enabled) => scalar('SELECT tokko_admin_set_account_active($1,$2,$3) value', [id, enabled, 'admin@example.test']);
+    const lifetime = (id, expirySet, deadline, days, autoDelete) => scalar('SELECT tokko_admin_set_account_lifetime($1,$2,$3,$4,$5,$6) value', [id, expirySet, deadline, days, autoDelete, 'admin@example.test']);
+    const remove = (id, confirmation) => scalar('SELECT tokko_admin_delete_account($1,$2,$3) value', [id, confirmation, 'admin@example.test']);
+    check(await active(temporary, false), true);
+    check(await scalar('SELECT session_version value FROM users WHERE id=$1', [temporary]), 2);
+    check(await scalar('SELECT is_active value FROM users WHERE id=$1', [temporary]), false);
+    check(await active(temporary, true), true);
+    check(await scalar('SELECT session_version value FROM users WHERE id=$1', [temporary]), 3);
+    check(await active(temporary, true), true);
+    check(await scalar('SELECT session_version value FROM users WHERE id=$1', [temporary]), 3);
+    await assert.rejects(active(pending, true)); checks++;
+    check(await lifetime(temporary, false, null, 14, true), true);
+    check((await managed({ expires_within: 7 })).total, 0);
+    check((await managed({ expires_within: 30 })).accounts[0].id, temporary);
+    check(await lifetime(temporary, true, null, null, false), true);
+    check(await scalar('SELECT expires_at IS NULL AND NOT delete_after_expiry value FROM users WHERE id=$1', [temporary]), true);
+    await assert.rejects(lifetime(parent, false, null, 7, true)); checks++;
+    await assert.rejects(lifetime(temporary, false, null, 0, false)); checks++;
+    await active(temporary, false);
+    check(await lifetime(temporary, false, null, 7, false), true);
+    check(await scalar('SELECT is_active value FROM users WHERE id=$1', [temporary]), false);
+    const systemId = await scalar("SELECT id value FROM users WHERE account_kind='system' LIMIT 1");
+    check(await active(systemId, true), false);
+    check(await lifetime(systemId, true, null, null, false), false);
+    check(await remove(systemId, systemId), false);
+    await assert.rejects(remove(parent, 'owner@example.test')); checks++;
+    await assert.rejects(remove(temporary, 'wrong@example.test')); checks++;
+    check(await scalar('SELECT count(*)::integer value FROM users WHERE id=$1', [temporary]), 1);
+    await db.exec(`CREATE TABLE conversation_export_jobs(id UUID PRIMARY KEY,created_by UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE);
+        CREATE TABLE contact_bot_permission_events(actor_id UUID NOT NULL REFERENCES users(id));
+        CREATE TABLE campaigns(created_by UUID REFERENCES users(id));
+        CREATE TABLE businesses(created_by UUID REFERENCES users(id));
+        CREATE TABLE tags(id UUID PRIMARY KEY,owner_type TEXT,owner_id UUID);
+        CREATE TABLE protected_records(user_id UUID REFERENCES users(id));`);
+    const tempExport = randomUUID(), parentExport = randomUUID(), personalTag = randomUUID(), sharedTag = randomUUID();
+    await db.query('INSERT INTO conversation_export_jobs VALUES($1,$2),($3,$4)', [tempExport, temporary, parentExport, secondParent]);
+    await db.query('INSERT INTO contact_bot_permission_events VALUES($1)', [temporary]);
+    await db.query('INSERT INTO campaigns VALUES($1)', [temporary]);
+    await db.query('INSERT INTO businesses VALUES($1)', [temporary]);
+    await db.query("INSERT INTO tags VALUES($1,'user',$2),($3,'page',$4)", [personalTag, temporary, sharedTag, pageA]);
+    await db.query("INSERT INTO user_pages(user_id,page_id,grant_source,granted_by) VALUES($1,$2,'delegated',$3)", [permanent, pageA, temporary]);
+    const marker = '00000000-0000-4000-8000-000000000001';
+    check(await remove(temporary, ' TEMPORARY@example.test '), true);
+    check(await scalar('SELECT count(*)::integer value FROM users WHERE id=$1', [temporary]), 0);
+    check(await scalar('SELECT count(*)::integer value FROM tokko_account_tokens WHERE user_id=$1', [temporary]), 0);
+    check(await scalar('SELECT count(*)::integer value FROM tokko_account_mail'), 0);
+    check(await scalar('SELECT created_by value FROM conversation_export_jobs WHERE id=$1', [tempExport]), parent);
+    check(await scalar('SELECT actor_id value FROM contact_bot_permission_events'), marker);
+    check(await scalar('SELECT created_by value FROM campaigns'), null);
+    check(await scalar('SELECT created_by value FROM businesses'), null);
+    check(await scalar('SELECT count(*)::integer value FROM pages'), 2);
+    check(await scalar('SELECT count(*)::integer value FROM user_pages WHERE user_id=$1', [permanent]), 1);
+    check(await scalar('SELECT granted_by value FROM user_pages WHERE user_id=$1', [permanent]), null);
+    check(await scalar('SELECT count(*)::integer value FROM tags WHERE id=$1', [personalTag]), 0);
+    check(await scalar('SELECT count(*)::integer value FROM tags WHERE id=$1', [sharedTag]), 1);
+    check(await scalar("SELECT count(*)::integer value FROM tokko_access_audit WHERE user_id IS NULL AND action=$1", [`system_admin_account_deleted:${temporary}:admin@example.test`]), 1);
+    check(await remove(secondParent, 'other@example.test'), true);
+    check(await scalar('SELECT created_by value FROM conversation_export_jobs WHERE id=$1', [parentExport]), marker);
+    await db.query('INSERT INTO protected_records VALUES($1)', [permanent]);
+    await db.query('INSERT INTO businesses VALUES($1)', [permanent]);
+    await assert.rejects(remove(permanent, 'permanent@example.test')); checks++;
+    check(await scalar('SELECT count(*)::integer value FROM users WHERE id=$1', [permanent]), 1);
+    check(await scalar('SELECT count(*)::integer value FROM businesses WHERE created_by=$1', [permanent]), 1);
+    check(await scalar("SELECT count(*)::integer value FROM tokko_access_audit WHERE action=$1", [`system_admin_account_deleted:${permanent}:admin@example.test`]), 0);
+    check(await scalar('SELECT revision value FROM app_private.system_admin_config'), revision);
+    await db.exec(managementMigration);
+    check((await managed()).total, 6);
     console.log(JSON.stringify({ checks, productionWrites: 0, result: 'passed' }));
 } finally { await db.close(); }

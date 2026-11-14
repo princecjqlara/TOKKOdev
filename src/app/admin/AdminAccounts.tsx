@@ -5,6 +5,7 @@ import { signOut } from 'next-auth/react';
 import { ChevronDown, ChevronUp, LogOut, RefreshCw, Search, ShieldCheck, X } from 'lucide-react';
 import PasswordInput from '@/components/PasswordInput';
 import type { AdminAccount, AdminAccountsResponse, AdminIdentity } from '@/lib/admin-accounts';
+import AdminAccountActions from './AdminAccountActions';
 
 function date(value: string | null) {
     return value ? new Date(value).toLocaleString() : '—';
@@ -78,6 +79,7 @@ function AccountDetails({ account, onReset }: { account: AdminAccount; onReset: 
                 <button type="button" className="btn-wireframe text-sm" disabled={busy} onClick={() => { setResetOpen(false); setPassword(''); setConfirmation(''); }}>Cancel</button></div>
         </form>}
         {error && <p role="alert" className="text-sm text-red-700">{error}</p>}
+        <AdminAccountActions account={account} onChanged={onReset} />
     </div>;
 }
 
@@ -88,7 +90,15 @@ export default function AdminAccounts() {
     const [type, setType] = useState('all');
     const [lifetime, setLifetime] = useState('all');
     const [status, setStatus] = useState('all');
-    const [parent, setParent] = useState<AdminIdentity | null>(null);
+    const [parent, setParent] = useState('');
+    const [pageId, setPageId] = useState('');
+    const [assignment, setAssignment] = useState('all');
+    const [expiresWithin, setExpiresWithin] = useState('');
+    const [deletion, setDeletion] = useState('all');
+    const [passwordFilter, setPasswordFilter] = useState('all');
+    const [sort, setSort] = useState('newest');
+    const [moreFilters, setMoreFilters] = useState(false);
+    const [filterOptions, setFilterOptions] = useState<AdminAccountsResponse['filterOptions']>({ creators: [], pages: [] });
     const [page, setPage] = useState(1);
     const [expanded, setExpanded] = useState<string | null>(null);
     const [refresh, setRefresh] = useState(0);
@@ -99,21 +109,34 @@ export default function AdminAccounts() {
     useEffect(() => {
         const controller = new AbortController();
         setLoading(true); setError('');
-        const params = new URLSearchParams({ search: query, type, lifetime, status, page: String(page) });
-        if (parent) params.set('parent', parent.id);
+        const params = new URLSearchParams({ search: query, type, lifetime, status, page: String(page), assignment, deletion, password: passwordFilter, sort });
+        if (parent) params.set('parent', parent);
+        if (pageId) params.set('pageId', pageId);
+        if (expiresWithin) params.set('expiresWithin', expiresWithin);
         void (async () => {
             try {
                 const response = await fetch(`/api/admin/accounts?${params}`, { signal: controller.signal, cache: 'no-store' });
                 if (response.status === 401 || response.status === 403) { window.location.replace('/admin/login'); return; }
                 const result = await response.json();
                 if (!response.ok) throw new Error(result.message || 'Accounts could not be loaded.');
-                if (!controller.signal.aborted) setData(result);
+                if (!controller.signal.aborted) {
+                    if (page > 1 && result.accounts.length === 0 && result.total <= (page - 1) * result.pageSize) {
+                        setPage(Math.max(1, Math.ceil(result.total / result.pageSize))); return;
+                    }
+                    setData(result); setFilterOptions(result.filterOptions);
+                }
             } catch (error) {
                 if (!controller.signal.aborted) { setData(null); setError(error instanceof Error ? error.message : 'Accounts could not be loaded.'); }
             } finally { if (!controller.signal.aborted) setLoading(false); }
         })();
         return () => controller.abort();
-    }, [query, type, lifetime, status, parent, page, refresh]);
+    }, [query, type, lifetime, status, parent, page, refresh, pageId, assignment, expiresWithin, deletion, passwordFilter, sort]);
+
+    function changeFilter(setter: (value: string) => void, value: string) { setter(value); setPage(1); setExpanded(null); }
+    function clearFilters() {
+        setSearch(''); setQuery(''); setType('all'); setLifetime('all'); setStatus('all'); setParent(''); setPageId('');
+        setAssignment('all'); setExpiresWithin(''); setDeletion('all'); setPasswordFilter('all'); setSort('newest'); setPage(1); setExpanded(null);
+    }
 
     const totalPages = Math.max(1, Math.ceil((data?.total || 0) / (data?.pageSize || 25)));
     const summary = data?.summary;
@@ -141,9 +164,29 @@ export default function AdminAccounts() {
                     <option value="all">All durations</option><option value="permanent">Permanent</option><option value="temporary">With expiry</option></select></label>
                 <label className="text-xs font-semibold">Status<select value={status} className="input-wireframe mt-1" onChange={e => { setStatus(e.target.value); setPage(1); setExpanded(null); }}>
                     <option value="all">All statuses</option><option value="active">Active</option><option value="pending">Pending</option><option value="disabled">Disabled</option><option value="expired">Expired</option></select></label>
+                <label className="text-xs font-semibold">Sort by<select value={sort} className="input-wireframe mt-1" onChange={event => changeFilter(setSort, event.target.value)}>
+                    <option value="newest">Newest first</option><option value="oldest">Oldest first</option><option value="name">Name A–Z</option><option value="expiry">Expiry date, soonest first</option></select></label>
+                <button type="button" className="btn-wireframe text-sm" aria-expanded={moreFilters} aria-controls="admin-more-filters" onClick={() => setMoreFilters(value => !value)}>{moreFilters ? 'Hide extra filters' : 'More filters'}</button>
+                <button type="button" className="btn-wireframe text-sm" onClick={clearFilters}>Clear filters</button>
+                {moreFilters && <div id="admin-more-filters" className="w-full grid gap-3 sm:grid-cols-2 lg:grid-cols-3 border border-gray-300 bg-gray-50 p-4">
+                    <label className="text-xs font-semibold">Created by<select value={parent} className="input-wireframe mt-1" onChange={event => changeFilter(setParent, event.target.value)}>
+                        <option value="">All creators</option>{filterOptions.creators.map(creator => <option key={creator.id} value={creator.id}>{identity(creator)}</option>)}</select></label>
+                    <label className="text-xs font-semibold">Assigned Page<select value={pageId} className="input-wireframe mt-1" onChange={event => changeFilter(setPageId, event.target.value)}>
+                        <option value="">All Pages</option>{filterOptions.pages.map(assignedPage => <option key={assignedPage.id} value={assignedPage.id}>{assignedPage.name}</option>)}</select></label>
+                    <label className="text-xs font-semibold">Page assignments<select value={assignment} className="input-wireframe mt-1" onChange={event => changeFilter(setAssignment, event.target.value)}>
+                        <option value="all">Any assignment status</option><option value="assigned">Has assigned Pages</option><option value="unassigned">No assigned Pages</option></select></label>
+                    <label className="text-xs font-semibold">Upcoming expiry<select value={expiresWithin} className="input-wireframe mt-1" onChange={event => changeFilter(setExpiresWithin, event.target.value)}>
+                        <option value="">Any expiry date</option><option value="7">Within 7 days</option><option value="30">Within 30 days</option><option value="90">Within 90 days</option></select></label>
+                    <label className="text-xs font-semibold">Automatic deletion<select value={deletion} className="input-wireframe mt-1" onChange={event => changeFilter(setDeletion, event.target.value)}>
+                        <option value="all">All deletion settings</option><option value="scheduled">Deletion scheduled</option><option value="keep">No scheduled deletion</option></select></label>
+                    <label className="text-xs font-semibold">Password setup<select value={passwordFilter} className="input-wireframe mt-1" onChange={event => changeFilter(setPasswordFilter, event.target.value)}>
+                        <option value="all">Any password status</option><option value="set">Password configured</option><option value="unset">No password configured</option></select></label>
+                </div>}
             </form>
-            {parent && <div className="flex flex-wrap items-center gap-3 border border-black bg-gray-50 p-3 text-sm"><p>Subaccounts created by <strong>{identity(parent)}</strong></p>
-                <button className="underline inline-flex items-center gap-1" onClick={() => { setParent(null); setPage(1); setExpanded(null); }}><X className="w-4 h-4" />Clear parent filter</button></div>}
+            {(parent || pageId || assignment !== 'all' || expiresWithin || deletion !== 'all' || passwordFilter !== 'all') && <div className="flex flex-wrap items-center gap-3 border border-black bg-gray-50 p-3 text-sm">
+                {parent && <p>Created by <strong>{identity(filterOptions.creators.find(creator => creator.id === parent) || null)}</strong></p>}
+                <p>Extra filters are active.</p><button className="underline inline-flex items-center gap-1" onClick={() => setMoreFilters(true)}>Show filters</button>
+                <button className="underline inline-flex items-center gap-1" onClick={clearFilters}><X className="w-4 h-4" />Clear all filters</button></div>}
             <p className="text-xs text-gray-600">Times use your browser timezone. Days remaining round up to the next whole day. Permanent accounts have no expiry.</p>
             {error && <div role="alert" className="border border-red-300 bg-red-50 p-4 text-sm text-red-800">{error} <button className="underline ml-2" onClick={() => setRefresh(value => value + 1)}>Retry</button></div>}
             {notice && <p role="status" className="border border-green-300 bg-green-50 p-4 text-sm text-green-800">{notice}</p>}
@@ -165,7 +208,7 @@ export default function AdminAccounts() {
                                 <button className="btn-wireframe text-xs" aria-expanded={expanded === account.id} aria-controls={`account-${account.id}`} onClick={() => setExpanded(expanded === account.id ? null : account.id)}>
                                     Details {expanded === account.id ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}</button>
                                 {account.subaccountCount > 0 && <button className="btn-wireframe text-xs" onClick={() => {
-                                    setParent({ id: account.id, name: account.name, email: account.email }); setPage(1); setType('all'); setLifetime('all'); setStatus('all'); setQuery(''); setSearch(''); setExpanded(null);
+                                    clearFilters(); setParent(account.id); setMoreFilters(true);
                                 }}>{account.subaccountCount} subaccounts</button>}
                             </div>
                         </div>

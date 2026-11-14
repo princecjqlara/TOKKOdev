@@ -37,6 +37,9 @@ even if its email matches the administrator email.
    and password hash to `app_private.system_admin_config`. It backs up any
    previous configuration to the ignored `.vercel/backups/` directory. It needs
    `DATABASE_POOLER_URL_5432` or `DATABASE_URL` and does not change workspace users.
+   Run `database/migration_system_admin_management.sql` before deploying the
+   account management actions and extra filters. This adds service-only functions
+   and preserves existing accounts and assignments.
    Deploy the updated application after installing this configuration.
 
    Alternatively, set both variables in the host's **server** environment.
@@ -65,14 +68,46 @@ The overview shows parent accounts and subaccounts, email, phone, creator,
 creation date, assigned Pages and assignment grantors, child account counts,
 account status, password setup state, and password change time. Search by name,
 email, creator, account ID, or Page name/Facebook ID. Filter by account type,
-status, permanent access, or access with an expiry. Choose a parent's subaccount
-count to inspect its children. Results are paginated at 25 accounts.
+status, permanent access, or access with an expiry. **More filters** adds creator,
+assigned Page, accounts with or without assignments, expiry within 7/30/90 days,
+scheduled deletion, and password setup. Sort by newest, oldest, name, or expiry.
+All filters apply on the server before pagination. **Clear filters** resets the
+entire selection. Choose a parent's subaccount count to inspect its children.
+Results are paginated at 25 accounts.
 
 Account details show the expiry deadline, remaining days, days from creation to
 the current deadline, and whether deletion is scheduled. Days are rounded up;
 an expired account has zero days remaining. An account with no expiry is shown
 as permanent. Removing an expired temporary account is still handled by the
 existing subaccount cleanup worker.
+
+## Account management
+
+Expand **Details** to use these administrator actions:
+
+- **Disable / Enable account** changes sign-in availability and increments its
+  session version, revoking existing sessions. Enabling does not bypass pending
+  password setup or remove an expiry. Page assignments remain in place.
+- **Change access duration** makes an account permanent, renews it for 1–3,650
+  days from now, or sets a specific future deadline. Email subaccounts can also
+  schedule or cancel automatic deletion. Changing expiry does not reactivate a
+  disabled account. Independent Facebook accounts cannot be scheduled for deletion.
+- **Delete account** requires typing its email (or ID when it has no email).
+  Parents with subaccounts cannot be deleted until those subaccounts are handled.
+  System accounts are protected, and the separate administrator login never
+  appears as a deletable workspace account.
+
+Deletion removes the user's credentials, reset/setup links, pending account mail,
+personal tags, and Page assignments. Shared Pages, contacts, Page tags, campaigns,
+businesses, and history remain. Exports move to the parent where available, or
+to a disabled system marker; non-null audit authors use that same marker. A
+deletion audit retains the deleted user ID and administrator email. Cleanup and
+deletion run in one transaction: a blocked related record rolls the whole action
+back. No account is deleted merely by applying the migration.
+
+Deleting a Facebook parent does not revoke its permissions in Facebook, so a
+later Facebook sign-in may create a new workspace account. Disable the account
+to keep its existing Facebook identity blocked from signing in.
 
 Passwords remain one-way hashed and cannot be retrieved. The administrator can
 set a new password for an activated email subaccount. The change runs in one

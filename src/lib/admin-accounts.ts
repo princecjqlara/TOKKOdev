@@ -16,6 +16,9 @@ export type AdminAccount = AdminIdentity & {
     hasPassword: boolean;
     passwordChangedAt: string | null;
     canResetPassword: boolean;
+    canEnable: boolean;
+    canDelete: boolean;
+    canScheduleDeletion: boolean;
     subaccountCount: number;
     pages: { id: string; name: string; facebookId: string; assignedAt: string;
         source: string; assignedBy: AdminIdentity | null }[];
@@ -26,4 +29,5 @@ export type AdminAccountsResponse = {
     page: number;
     pageSize: number;
     summary: { accounts: number; parents: number; subaccounts: number; permanent: number; temporary: number; expired: number };
+    filterOptions: { creators: AdminIdentity[]; pages: { id: string; name: string }[] };
 };
