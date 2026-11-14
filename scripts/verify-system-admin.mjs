@@ -104,5 +104,35 @@ try {
     await assert.rejects(overview(['', 'admin', 'all', 'all', 1, 25, null])); checks++;
     await db.exec(migration);
     check((await overview()).total, 8);
+    const loginMigration = await readFile('database/migration_system_admin_login.sql', 'utf8');
+    await db.exec(loginMigration);
+    check(await scalar('SELECT count(*)::integer value FROM tokko_system_admin_credentials()'), 0);
+    for (const role of ['anon', 'authenticated']) {
+        check(await scalar("SELECT has_function_privilege($1,'tokko_system_admin_credentials()','EXECUTE') value", [role]), false);
+        check(await scalar("SELECT has_table_privilege($1,'app_private.system_admin_config','SELECT,INSERT,UPDATE,DELETE,TRUNCATE') value", [role]), false);
+    }
+    check(await scalar("SELECT relrowsecurity value FROM pg_class WHERE oid='app_private.system_admin_config'::regclass"), true);
+    await db.query('INSERT INTO app_private.system_admin_config(email,password_hash) VALUES($1,$2)', ['admin@example.test', hash]);
+    check(await scalar('SELECT count(*)::integer value FROM tokko_system_admin_credentials()'), 0);
+    await db.query('UPDATE app_private.system_admin_config SET enabled=TRUE');
+    await db.exec('SET ROLE service_role');
+    const credentials = (await db.query('SELECT * FROM tokko_system_admin_credentials()')).rows[0];
+    check(credentials.email, 'admin@example.test'); check(credentials.password_hash, hash);
+    await db.exec('RESET ROLE');
+    await db.query('UPDATE app_private.system_admin_config SET enabled=FALSE');
+    check(await scalar('SELECT count(*)::integer value FROM tokko_system_admin_credentials()'), 0);
+    await db.query('UPDATE app_private.system_admin_config SET enabled=TRUE');
+    const revision = await scalar('SELECT revision value FROM app_private.system_admin_config');
+    check(revision !== credentials.revision, true);
+    for (const role of ['anon', 'authenticated']) {
+        await db.exec(`SET ROLE ${role}`);
+        await assert.rejects(db.query('SELECT * FROM public.tokko_system_admin_credentials()')); checks++;
+        await assert.rejects(db.query('SELECT * FROM app_private.system_admin_config')); checks++;
+        await db.exec('RESET ROLE');
+    }
+    await db.exec(loginMigration);
+    check(await scalar('SELECT revision value FROM app_private.system_admin_config'), revision);
+    check((await overview()).total, 8);
+    check(/admin@example.test|scrypt-v1/.test(JSON.stringify(await overview())), false);
     console.log(JSON.stringify({ checks, productionWrites: 0, result: 'passed' }));
 } finally { await db.close(); }

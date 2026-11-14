@@ -50,6 +50,15 @@ describe('administrator session boundaries', () => {
             account: { provider: 'credentials' }, user: { id: 'member', sessionVersion: 2 } } as any);
         expect(token.provider).toBe('credentials'); expect(token.adminCredentialVersion).toBeUndefined(); expect(token.adminAuthenticatedAt).toBeUndefined();
     });
+    it('denies access during an asynchronous administrator configuration outage', async () => {
+        mocks.adminActive.mockRejectedValueOnce(new Error('private database details'));
+        const session = await authOptions.callbacks!.session!({ session: { user: {} },
+            token: { provider: 'system-admin', adminCredentialVersion: 'version', adminAuthenticatedAt: Date.now() } } as any);
+        expect(session).toMatchObject({ isSystemAdmin: false, accountActive: false, authenticationError: 'service_unavailable' });
+        expect(JSON.stringify(session)).not.toContain('private database details');
+        mocks.session.mockResolvedValue(session);
+        await expect(requireSystemAdmin()).rejects.toMatchObject({ status: 503 });
+    });
     it('denies missing or mismatched admin sessions', async () => {
         mocks.session.mockResolvedValue(null);
         await expect(requireSystemAdmin()).rejects.toMatchObject({ status: 401 });

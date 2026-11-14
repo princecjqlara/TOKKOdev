@@ -92,10 +92,17 @@ export const authOptions: NextAuthOptions = {
         },
         async session({ session, token }) {
             if (token.provider === SYSTEM_ADMIN_PROVIDER) {
-                const active = systemAdminSessionActive(token.adminCredentialVersion, token.adminAuthenticatedAt);
+                let active = false;
+                let authenticationError: Session['authenticationError'];
+                try {
+                    active = await systemAdminSessionActive(token.adminCredentialVersion, token.adminAuthenticatedAt);
+                    if (!active) authenticationError = 'account_unavailable';
+                } catch {
+                    authenticationError = 'service_unavailable';
+                }
                 return { expires: session.expires, user: { name: 'System administrator', email: active ? token.email : null,
                     provider: active ? SYSTEM_ADMIN_PROVIDER : undefined }, isSystemAdmin: active, accountActive: active,
-                    signInProvider: SYSTEM_ADMIN_PROVIDER, authenticationError: active ? undefined : 'account_unavailable' };
+                    signInProvider: SYSTEM_ADMIN_PROVIDER, authenticationError };
             }
             const provider = token.provider || (token.facebookId ? 'facebook' : 'credentials');
             let active; let authenticationError: Session['authenticationError'] = token.authenticationError;
