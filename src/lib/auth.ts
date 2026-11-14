@@ -9,6 +9,7 @@ import { needsSubaccountProfile } from './subaccount-profile';
 import { accountRequest } from './account-request';
 import { databaseErrorDetails } from './database-request';
 import { AccessError } from './account-security';
+import { authenticateSystemAdmin, SYSTEM_ADMIN_PROVIDER, systemAdminSessionActive } from './system-admin-auth';
 
 export const authOptions: NextAuthOptions = {
     providers: [
@@ -29,11 +30,31 @@ export const authOptions: NextAuthOptions = {
                     throw new Error('AccountServiceUnavailable');
                 }
             }
+        }),
+        CredentialsProvider({
+            id: SYSTEM_ADMIN_PROVIDER,
+            name: 'Administrator',
+            credentials: { email: { label: 'Email', type: 'email' }, password: { label: 'Password', type: 'password' } },
+            async authorize(credentials, request) {
+                try {
+                    const ip = String(request.headers?.['x-forwarded-for'] || 'unknown').split(',')[0].trim();
+                    return await authenticateSystemAdmin(credentials, ip);
+                } catch (error) {
+                    if (error instanceof AccessError && error.status === 429) throw new Error('AccountRateLimited');
+                    throw new Error('AccountServiceUnavailable');
+                }
+            }
         })
     ],
     callbacks: {
         async jwt({ token, account, user }) {
             if (account && user) {
+                if (account.provider === SYSTEM_ADMIN_PROVIDER) {
+                    // Never carry a workspace identity or Facebook token into an admin session.
+                    return { sub: user.id, name: user.name, email: user.email, provider: SYSTEM_ADMIN_PROVIDER,
+                        adminCredentialVersion: user.adminCredentialVersion, adminAuthenticatedAt: Date.now() };
+                }
+                delete token.adminCredentialVersion; delete token.adminAuthenticatedAt;
                 if (account.provider === 'credentials') {
                     token.id = user.id; token.sessionVersion = user.sessionVersion; token.provider = 'credentials';
                     delete token.accessToken; delete token.facebookId;
@@ -70,6 +91,12 @@ export const authOptions: NextAuthOptions = {
             return token;
         },
         async session({ session, token }) {
+            if (token.provider === SYSTEM_ADMIN_PROVIDER) {
+                const active = systemAdminSessionActive(token.adminCredentialVersion, token.adminAuthenticatedAt);
+                return { expires: session.expires, user: { name: 'System administrator', email: active ? token.email : null,
+                    provider: active ? SYSTEM_ADMIN_PROVIDER : undefined }, isSystemAdmin: active, accountActive: active,
+                    signInProvider: SYSTEM_ADMIN_PROVIDER, authenticationError: active ? undefined : 'account_unavailable' };
+            }
             const provider = token.provider || (token.facebookId ? 'facebook' : 'credentials');
             let active; let authenticationError: Session['authenticationError'] = token.authenticationError;
             try {
@@ -80,7 +107,7 @@ export const authOptions: NextAuthOptions = {
                 console.error('[AUTH_SESSION] Account check failed', databaseErrorDetails(error));
             }
             const requiresProfileCompletion = Boolean(active && needsSubaccountProfile(active));
-            return { ...session, user: { ...session.user, id: active && !requiresProfileCompletion ? token.id : undefined,
+            return { ...session, isSystemAdmin: false, user: { ...session.user, id: active && !requiresProfileCompletion ? token.id : undefined,
                 name: active?.name ?? session.user?.name,
                 facebookId: active && provider === 'facebook' ? token.facebookId : undefined,
                 provider: active ? provider : undefined }, accountActive: Boolean(active),
@@ -96,8 +123,9 @@ export const authOptions: NextAuthOptions = {
 };
 
 declare module 'next-auth' {
-    interface User { sessionVersion?: number; }
+    interface User { sessionVersion?: number; adminCredentialVersion?: string; }
     interface Session {
+        isSystemAdmin?: boolean;
         accountActive?: boolean;
         requiresProfileCompletion?: boolean;
         requiresFacebookVerification?: boolean;
@@ -111,5 +139,5 @@ declare module 'next-auth' {
     }
 }
 declare module 'next-auth/jwt' {
-    interface JWT { id?: string; accessToken?: string; facebookId?: string; provider?: string; sessionVersion?: number; pendingFacebookLinkAt?: number; authenticationError?: 'account_unavailable' | 'subaccount_credentials_required'; }
+    interface JWT { id?: string; accessToken?: string; facebookId?: string; provider?: string; sessionVersion?: number; pendingFacebookLinkAt?: number; authenticationError?: 'account_unavailable' | 'subaccount_credentials_required'; adminCredentialVersion?: string; adminAuthenticatedAt?: number; }
 }
