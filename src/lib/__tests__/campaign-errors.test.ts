@@ -26,14 +26,16 @@ describe('normalizeCampaignRecipientErrors', () => {
                 contactId: 'c1',
                 contactName: 'Alice',
                 contactPsid: 'p1',
-                error: 'Oops'
+                error: 'Oops',
+                diagnostic: { kind: 'unknown', category: 'other', source: 'unknown' }
             },
             {
                 id: '2',
                 contactId: 'c2',
                 contactName: null,
                 contactPsid: 'p2',
-                error: 'Unknown error'
+                error: 'Unknown error',
+                diagnostic: { kind: 'unknown', category: 'other', source: 'unknown' }
             }
         ]);
     });

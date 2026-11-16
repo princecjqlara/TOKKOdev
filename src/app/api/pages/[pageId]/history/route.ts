@@ -226,7 +226,11 @@ export async function GET(
                     loop: Boolean(campaign.is_loop),
                     aiPersonalized: Boolean(campaign.use_ai_message),
                     recipientHistoryPurgedAt: campaign.recipient_history_purged_at || null,
-                    lastUpdatedAt: campaign.updated_at
+                    lastUpdatedAt: campaign.updated_at,
+                    failureCounts: campaign.failure_counts || {},
+                    lastError: campaign.last_error || null,
+                    lastErrorDiagnostic: campaign.last_error_diagnostic || null,
+                    nextAttemptAt: campaign.next_attempt_at || null
                 }
             };
         });

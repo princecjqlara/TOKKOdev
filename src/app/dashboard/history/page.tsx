@@ -21,6 +21,8 @@ import {
 import Pagination from '@/components/Pagination';
 import type { Page } from '@/types';
 import { getCampaignRecoveryUrl } from '@/lib/campaign-recovery';
+import CampaignResults from '@/components/CampaignResults';
+import type { DeliveryDiagnostic } from '@/lib/delivery-diagnostics';
 
 type ActivityActor = {
     id: string;
@@ -64,14 +66,11 @@ type HistoryResponse = {
 
 type RecipientError = {
     id: string;
-    contact_id: string;
-    contact_name: string | null;
-    psid: string | null;
-    status: string;
-    error_message: string;
-    error_code?: number | null;
-    error_type?: string | null;
-    error_subcode?: number | null;
+    contactId: string;
+    contactName: string | null;
+    contactPsid: string | null;
+    error: string;
+    diagnostic?: DeliveryDiagnostic;
 };
 
 const numberFormatter = new Intl.NumberFormat();
@@ -425,10 +424,18 @@ function ActivityRows({ item, expanded, onToggle, errors, errorTotal, errorsLoad
                             <Detail label="Completed" value={formatDateTime(item.completedAt)} />
                             <Detail label="Scheduled" value={formatDateTime(item.scheduledAt)} />
                         </div>
+                        {item.source === 'campaign' && <CampaignResults campaign={{
+                            total_recipients: item.targetCount, sent_count: item.successCount, failed_count: item.failureCount,
+                            is_loop: Boolean(item.details.loop),
+                            failure_counts: item.details.failureCounts as Record<string, number> | undefined,
+                            last_error: item.details.lastError as string | null,
+                            last_error_diagnostic: item.details.lastErrorDiagnostic as DeliveryDiagnostic | null,
+                            next_attempt_at: item.details.nextAttemptAt as string | null
+                        }} />}
                         <div>
                             <p className="text-[10px] font-bold uppercase tracking-wider mb-2">Recorded details</p>
                             <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-px bg-black border border-black">
-                                {Object.entries(item.details).map(([key, value]) => <Detail key={key} label={humanize(key)} value={detailValue(value)} boxed />)}
+                                {Object.entries(item.details).filter(([key]) => !['failureCounts', 'lastErrorDiagnostic', 'lastError', 'nextAttemptAt'].includes(key)).map(([key, value]) => <Detail key={key} label={humanize(key)} value={detailValue(value)} boxed />)}
                             </div>
                         </div>
                         {item.source === 'campaign' && item.failureCount > 0 && recipientHistoryPurgedAt && (
@@ -443,7 +450,7 @@ function ActivityRows({ item, expanded, onToggle, errors, errorTotal, errorsLoad
                                 </button>
                                 {errors && <div className="mt-3 border border-black bg-white overflow-x-auto">
                                     <table className="table-wireframe w-full min-w-[700px]"><thead><tr><th>Contact</th><th>PSID</th><th>Error</th><th>Code</th></tr></thead>
-                                        <tbody>{errors.map((entry) => <tr key={entry.id}><td className="font-bold">{entry.contact_name || 'Unknown contact'}</td><td className="font-mono text-xs">{entry.psid || '—'}</td><td className="text-xs text-red-800">{entry.error_message}</td><td className="font-mono text-xs">{entry.error_code || '—'}{entry.error_subcode ? ` / ${entry.error_subcode}` : ''}</td></tr>)}</tbody>
+                                        <tbody>{errors.map((entry) => <tr key={entry.id}><td className="font-bold">{entry.contactName || 'Unknown contact'}</td><td className="font-mono text-xs">{entry.contactPsid || '—'}</td><td className="text-xs text-red-800">{entry.error}</td><td className="font-mono text-xs">{entry.diagnostic?.code ?? '—'}{entry.diagnostic?.subcode !== undefined ? ` / ${entry.diagnostic.subcode}` : ''}</td></tr>)}</tbody>
                                     </table>
                                     {errorTotal > errors.length && <p className="p-2 font-mono text-[10px] border-t border-black">Showing {errors.length} of {errorTotal} failures. Open Campaigns for full pagination and retry controls.</p>}
                                 </div>}

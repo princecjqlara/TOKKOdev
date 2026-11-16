@@ -1,6 +1,7 @@
 import { sendCampaignById } from './campaign-send';
 import { getSupabaseAdmin } from './supabase';
 import { databaseRequest } from './database-request';
+import { diagnoseDeliveryError } from './delivery-diagnostics';
 
 const STALE_SENDING_AFTER_MS = 10 * 60 * 1000;
 // Each campaign gets a bounded slice. Run the independent slices together
@@ -275,6 +276,7 @@ export async function processCampaignQueue({ extendedRun = false }: { extendedRu
                         .update({
                             status: 'scheduled',
                             scheduled_at: nextRun.toISOString(),
+                            started_at: null,
                             sent_count: 0,
                             failed_count: 0,
                             updated_at: new Date().toISOString()
@@ -300,6 +302,7 @@ export async function processCampaignQueue({ extendedRun = false }: { extendedRu
                         status: isImmediateResume ? 'sending' : 'scheduled',
                         next_attempt_at: retryAt,
                         last_error: message,
+                        last_error_diagnostic: { ...diagnoseDeliveryError(campaignError, 'backend'), message },
                         updated_at: new Date().toISOString()
                     })
                     .eq('id', campaign.id)

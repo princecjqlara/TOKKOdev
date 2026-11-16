@@ -54,6 +54,7 @@ describe('GET /api/campaigns Page isolation', () => {
             in(column: string, ids: string[]): ListingQuery;
             eq(column: string, id: string): ListingQuery;
             order(): ListingQuery;
+            or(filter: string): ListingQuery;
             range(start: number, end: number): Promise<{ data: typeof records; count: number; error: null }>;
         };
         const query: ListingQuery = {
@@ -61,6 +62,7 @@ describe('GET /api/campaigns Page isolation', () => {
             in: vi.fn((_column: string, ids: string[]) => { records = records.filter(row => ids.includes(row.page_id)); return query; }),
             eq: vi.fn((column: string, id: string) => { records = records.filter(row => row[column as 'page_id' | 'id'] === id); return query; }),
             order: vi.fn(() => query),
+            or: vi.fn(() => query),
             range: vi.fn(async (start: number, end: number) => ({ data: records.slice(start, end + 1), count: records.length, error: null }))
         };
         const from = vi.fn((table: string) => {
@@ -69,7 +71,7 @@ describe('GET /api/campaigns Page isolation', () => {
             throw Error(`Unexpected table: ${table}`);
         });
         mocks.getSupabaseAdmin.mockReturnValue({ from });
-        return { from };
+        return { from, query };
     }
 
     it.each(['', 'page_1', 'page_2'])('returns only the requested assigned Pages: %s', async pageId => {
@@ -78,6 +80,15 @@ describe('GET /api/campaigns Page isolation', () => {
         expect(response.status).toBe(200);
         const expected = [{ id: 'campaign_1', page_id: 'page_1' }, { id: 'campaign_2', page_id: 'page_2' }].filter(row => !pageId || row.page_id === pageId);
         expect(await response.json()).toMatchObject({ items: expected, total: expected.length });
+    });
+
+    it('scopes the latest bulk report to assigned Pages and excludes untouched drafts', async () => {
+        const { query } = listingDatabase();
+        const response = await GET(new NextRequest('http://localhost/api/campaigns?pageId=page_2&pageSize=1&latestBulk=true'));
+        expect(response.status).toBe(200);
+        expect(await response.json()).toMatchObject({ items: [{ id: 'campaign_2', page_id: 'page_2' }] });
+        expect(query.or).toHaveBeenCalledWith('sent_count.gt.0,failed_count.gt.0,started_at.not.is.null,status.in.(sending,completed,cancelled)');
+        expect(query.order).toHaveBeenCalledWith('started_at', { ascending: false, nullsFirst: false });
     });
 
     it.each([{ pageIds: [] }, { pageIds: ['page_1'] }])('rejects a specific unassigned Page without returning other Pages: %j', async ({ pageIds }) => {

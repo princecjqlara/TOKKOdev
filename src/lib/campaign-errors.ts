@@ -1,8 +1,11 @@
+import { readDeliveryDiagnostic, type DeliveryDiagnostic } from './delivery-diagnostics';
+
 export type CampaignRecipientErrorRow = {
     id: string;
     contact_id: string;
     status: string;
     error_message: string | null;
+    diagnostic?: DeliveryDiagnostic | null;
     contacts?: { name: string | null; psid: string | null } | { name: string | null; psid: string | null }[] | null;
 };
 
@@ -12,6 +15,7 @@ export type CampaignRecipientError = {
     contactName: string | null;
     contactPsid: string | null;
     error: string;
+    diagnostic: DeliveryDiagnostic;
 };
 
 export function normalizeCampaignRecipientErrors(
@@ -28,7 +32,8 @@ export function normalizeCampaignRecipientErrors(
             contactId: row.contact_id,
             contactName: contactRecord?.name ?? null,
             contactPsid: contactRecord?.psid ?? null,
-            error
+            error,
+            diagnostic: readDeliveryDiagnostic(row.diagnostic, error)
         };
     });
 }

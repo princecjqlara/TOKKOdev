@@ -1511,7 +1511,8 @@ describe('sendCampaignById', () => {
                 expect.objectContaining({
                     contact_id: 'contact_1',
                     success: false,
-                    error_message: deletedConversationError.message
+                    error_message: deletedConversationError.message,
+                    diagnostic: expect.objectContaining({ kind: 'conversation_unavailable', code: 100, subcode: 2534001 })
                 }),
                 expect.objectContaining({
                     contact_id: 'contact_2',
@@ -1521,6 +1522,30 @@ describe('sendCampaignById', () => {
             ])
         }));
         expect(supabase.releaseBatchUpdate).not.toHaveBeenCalled();
+    });
+
+    it.each([{ code: 'PGRST000', retryable: true }, { code: 'PGRST202', retryable: false }])(
+        'keeps recipients queued for backend failure during a send: $code', async ({ code, retryable }) => {
+        const supabase = createSupabaseMock('draft', { recipients: [{ id: 'r', contact_id: 'c', contacts: { psid: 'psid' } }] });
+        vi.mocked(sendMessage).mockRejectedValue({ code, message: 'Database operation failed' });
+        const result = await sendCampaignById({ campaignId: 'campaign_1', supabase: supabase as never, sendRetryAttempts: 0 });
+        expect(result.body).toMatchObject({ failed: 0, remaining: 1, retryable });
+        expect(supabase.finishBatchRpc).not.toHaveBeenCalled();
+        expect(supabase.campaignUpdate).toHaveBeenLastCalledWith(expect.objectContaining({
+            last_error_diagnostic: expect.objectContaining({ kind: 'backend_failure', source: 'backend', backendCode: code })
+        }));
+    });
+
+    it('persists code 551 evidence without guessing from a vague provider message', async () => {
+        const supabase = createSupabaseMock('draft', { recipients: [{ id: 'recipient_1', contact_id: 'contact_1', contacts: { psid: 'psid_1' } }] });
+        vi.mocked(sendMessage).mockRejectedValue(Object.assign(new Error('Cannot complete this request'),
+            { name: 'FacebookGraphApiError', code: 551, subcode: 1545041, status: 400 }));
+        const result = await sendCampaignById({ campaignId: 'campaign_1', supabase: supabase as never });
+        expect(result.failed).toBe(1);
+        expect(supabase.finishBatchRpc).toHaveBeenCalledWith(expect.objectContaining({ p_results: [expect.objectContaining({
+            error_message: 'Cannot complete this request',
+            diagnostic: expect.objectContaining({ kind: 'recipient_unavailable', code: 551, subcode: 1545041 })
+        })] }));
     });
 
     it('takes thread control and retries when another app controls the thread', async () => {
@@ -1743,7 +1768,8 @@ describe('sendCampaignById', () => {
             status: 'sending',
             background_delivery_enabled: true,
             next_attempt_at: expect.any(String),
-            last_error: databaseError.message
+            last_error: databaseError.message,
+            last_error_diagnostic: expect.objectContaining({ kind: 'backend_failure', source: 'backend' })
         }));
         expect(sendMessage).not.toHaveBeenCalled();
         expect(supabase.finishBatchRpc).not.toHaveBeenCalled();

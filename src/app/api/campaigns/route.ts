@@ -95,6 +95,7 @@ export async function GET(request: NextRequest) {
             .from('campaigns')
             .select('*, pages(name)', { count: 'exact' })
             .in('page_id', accessiblePageIds)
+            .order(searchParams.get('latestBulk') === 'true' ? 'started_at' : 'created_at', { ascending: false, nullsFirst: false })
             .order('created_at', { ascending: false });
 
         // Direct recovery links search the user's assigned Pages regardless
@@ -103,6 +104,10 @@ export async function GET(request: NextRequest) {
             query = query.eq('id', campaignId);
         } else if (pageId) {
             query = query.eq('page_id', pageId);
+        }
+
+        if (!campaignId && searchParams.get('latestBulk') === 'true') {
+            query = query.or('sent_count.gt.0,failed_count.gt.0,started_at.not.is.null,status.in.(sending,completed,cancelled)');
         }
 
         // Date range filter

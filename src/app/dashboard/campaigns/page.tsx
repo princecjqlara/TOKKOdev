@@ -5,6 +5,8 @@ import { useSession } from 'next-auth/react';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Plus, Send, Trash2, Users, Clock, CheckCircle, XCircle, MessageSquare, StopCircle, FileText, Calendar, Image as ImageIcon } from 'lucide-react';
 import Pagination from '@/components/Pagination';
+import CampaignResults from '@/components/CampaignResults';
+import { FAILURE_INFO, readDeliveryDiagnostic, type DeliveryDiagnostic } from '@/lib/delivery-diagnostics';
 import Modal from '@/components/Modal';
 import { Campaign, Page, Contact, PaginatedResponse } from '@/types';
 import { getCampaignMessagePreview } from '@/lib/campaign-message-sequence';
@@ -176,6 +178,7 @@ type CampaignRecipientError = {
     contactName: string | null;
     contactPsid: string | null;
     error: string;
+    diagnostic?: DeliveryDiagnostic;
 };
 
 type TemplateStatus = {
@@ -236,6 +239,8 @@ export default function CampaignsPage() {
     // Error modal state
     const [errorsCampaignId, setErrorsCampaignId] = useState<string | null>(null);
     const [campaignErrors, setCampaignErrors] = useState<CampaignRecipientError[]>([]);
+    const errorRequests = useRef(createRequestGate());
+    const [errorsFetchError, setErrorsFetchError] = useState<string | null>(null);
     const [errorsLoading, setErrorsLoading] = useState(false);
     const [errorsPage, setErrorsPage] = useState(1);
     const [errorsPageSize, setErrorsPageSize] = useState(25);
@@ -395,7 +400,9 @@ export default function CampaignsPage() {
         targetPage: number = errorsPage,
         targetPageSize: number = errorsPageSize
     ) => {
+        const token = errorRequests.current.next();
         setErrorsLoading(true);
+        setErrorsFetchError(null);
         try {
             const params = new URLSearchParams({
                 status: 'failed',
@@ -403,16 +410,21 @@ export default function CampaignsPage() {
                 pageSize: targetPageSize.toString()
             });
 
-            const res = await fetch(`/api/campaigns/${campaignId}/recipients?${params}`);
-            const data: PaginatedResponse<CampaignRecipientError> = await res.json();
+            const data: PaginatedResponse<CampaignRecipientError> = await requestWithTimeout(async signal => {
+                const res = await fetch(`/api/campaigns/${campaignId}/recipients?${params}`, { signal });
+                if (!res.ok) throw new Error('Recipient failure details could not be loaded.');
+                return res.json();
+            }, 12_000, 'Recipient failure details timed out.');
+            if (!errorRequests.current.isLatest(token)) return;
 
             setCampaignErrors(data.items || []);
             setErrorsTotal(data.total || 0);
             setErrorsArchivedAt(data.archivedAt || null);
         } catch (error) {
             console.error('Error fetching campaign errors:', error);
+            if (errorRequests.current.isLatest(token)) setErrorsFetchError('Recipient failure details could not be loaded. Campaign totals are still available.');
         } finally {
-            setErrorsLoading(false);
+            if (errorRequests.current.isLatest(token)) setErrorsLoading(false);
         }
     };
 
@@ -1364,7 +1376,7 @@ export default function CampaignsPage() {
                     <div className="grid gap-4">
                         {campaigns.map((campaign) => (
                             <div key={campaign.id} className="wireframe-card flex flex-col md:flex-row items-start justify-between gap-6 hover:shadow-[4px_4px_0px_0px_rgba(0,0,0,1)] transition-shadow">
-                                <div className="flex-1 space-y-3">
+                                <div className="flex-1 min-w-0 w-full space-y-3">
                                     <div className="flex items-center gap-3 flex-wrap">
                                         <h3 className="text-xl font-black uppercase tracking-tight">{campaign.name}</h3>
                                         {getStatusBadge(campaign)}
@@ -1427,11 +1439,7 @@ export default function CampaignsPage() {
                                     {sendingCampaignId === campaign.id && sendingProgress && (
                                         <p className="text-xs font-mono text-blue-700" role="status">{sendingProgress}</p>
                                     )}
-                                    {(campaign.status === 'draft' || campaign.status === 'sending' || campaign.status === 'scheduled') && campaign.last_error && (
-                                        <p className="text-xs font-mono text-amber-700 border-l-2 border-amber-400 pl-3">
-                                            {campaign.last_error}
-                                        </p>
-                                    )}
+                                    <CampaignResults campaign={campaign} />
                                     {(campaign.status === 'sending' || campaign.status === 'scheduled') && (
                                         <p className="text-xs font-mono text-gray-600" role="status">
                                             {Math.max(0, campaign.total_recipients - campaign.sent_count - campaign.failed_count).toLocaleString()} recipients remain.
@@ -2472,6 +2480,7 @@ export default function CampaignsPage() {
             <Modal
                 isOpen={showErrorsModal}
                 onClose={() => {
+                    errorRequests.current.next();
                     setShowErrorsModal(false);
                     setErrorsCampaignId(null);
                     setCampaignErrors([]);
@@ -2479,20 +2488,24 @@ export default function CampaignsPage() {
                     setErrorsPageSize(25);
                     setErrorsTotal(0);
                     setErrorsArchivedAt(null);
+                    setErrorsFetchError(null);
                 }}
                 title="Failed Recipients"
                 size="lg"
             >
                 <div className="space-y-4">
                     <p className="font-mono text-sm text-gray-500">
-                        {errorsArchivedAt
+                        {errorsFetchError ? 'Failure details unavailable.' : errorsLoading ? 'Loading failure details...' : errorsArchivedAt
                             ? `Recipient-level history was archived on ${new Date(errorsArchivedAt).toLocaleString()}. Campaign totals are still retained.`
                             : errorsTotal > 0
                             ? `${errorsTotal} failed recipients`
                             : 'No failed recipients found.'}
                     </p>
 
-                    {errorsLoading ? (
+                    {errorsFetchError ? <div role="alert" className="border border-amber-500 bg-amber-50 p-3 text-sm">
+                        <p>{errorsFetchError}</p>
+                        <button type="button" className="font-bold underline mt-2" onClick={() => errorsCampaignId && void fetchCampaignErrors(errorsCampaignId)}>Retry recipient details</button>
+                    </div> : errorsLoading ? (
                         <div className="flex items-center justify-center h-32 border border-black">
                             <div className="animate-spin w-6 h-6 border-2 border-black border-t-transparent rounded-full" />
                         </div>
@@ -2503,7 +2516,10 @@ export default function CampaignsPage() {
                                     {errorsArchivedAt ? 'Recipient details were removed by database retention.' : 'No failed recipients in this page.'}
                                 </div>
                             ) : (
-                                campaignErrors.map((entry) => (
+                                campaignErrors.map((entry) => {
+                                    const diagnostic = readDeliveryDiagnostic(entry.diagnostic, entry.error);
+                                    const info = FAILURE_INFO[diagnostic.kind];
+                                    return (
                                     <div key={entry.id} className="border-b border-gray-200 p-3 last:border-b-0">
                                         <p className="font-bold uppercase text-sm">
                                             {entry.contactName || 'Unknown'}
@@ -2512,8 +2528,11 @@ export default function CampaignsPage() {
                                             ID: {entry.contactId.slice(0, 8)}...{entry.contactPsid ? ` | PSID: ${entry.contactPsid.slice(0, 8)}...` : ''}
                                         </p>
                                         <p className="text-xs text-red-700 mt-1">{entry.error}</p>
+                                        <p className="text-xs font-bold mt-2">{info.label}</p>
+                                        <p className="text-xs text-gray-600 mt-1">{info.explanation} {info.action}</p>
+                                        {(diagnostic.code !== undefined || diagnostic.subcode !== undefined) && <p className="text-xs font-mono mt-1">Meta code: {diagnostic.code ?? 'unknown'}{diagnostic.subcode !== undefined ? ` / subcode: ${diagnostic.subcode}` : ''}</p>}
                                     </div>
-                                ))
+                                ); })
                             )}
                         </div>
                     )}

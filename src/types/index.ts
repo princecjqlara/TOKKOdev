@@ -91,6 +91,9 @@ export interface Campaign {
   total_recipients: number;
   sent_count: number;
   failed_count: number;
+  failure_counts?: Record<string, number> | null;
+  last_error_diagnostic?: import('@/lib/delivery-diagnostics').DeliveryDiagnostic | null;
+  started_at?: string | null;
   created_by: string;
   created_at: string;
   updated_at: string;

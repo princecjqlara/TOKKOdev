@@ -1,5 +1,6 @@
 import { getSupabaseAdmin } from './supabase';
 import { databaseRequest } from './database-request';
+import type { DeliveryDiagnostic } from './delivery-diagnostics';
 
 type SupabaseAdmin = ReturnType<typeof getSupabaseAdmin>;
 
@@ -21,6 +22,7 @@ export type CampaignRecipientResult = {
     contact_id: string;
     success: boolean;
     error_message: string | null;
+    diagnostic?: DeliveryDiagnostic;
 };
 
 export async function claimCampaignRecipients({

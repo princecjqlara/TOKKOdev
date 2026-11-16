@@ -26,6 +26,7 @@ import { acquirePageDelivery, releasePageDelivery, reportPageDeliveryFeedback, r
 import { AdaptiveDeliveryController } from './adaptive-delivery';
 import { getMetaThrottleScope, getMetaThrottleKey, type MetaDeliveryFeedback } from './meta-delivery-feedback';
 import { databaseRequest, DATABASE_REQUEST_TIMEOUT_MS } from './database-request';
+import { diagnoseDeliveryError, type DeliveryDiagnostic } from './delivery-diagnostics';
 
 type SupabaseLike = ReturnType<typeof getSupabaseAdmin>;
 
@@ -61,10 +62,10 @@ const TRANSIENT_RETRY_DELAY_MS = 60_000;
 const RATE_LIMIT_RETRY_DELAY_MS = 60_000;
 const OUTBOUND_AUDIT_BATCH_SIZE = 250;
 
-type DeliveryInterruption = { error: string; retryable: boolean; yielded?: boolean };
+type DeliveryInterruption = { error: string; retryable: boolean; yielded?: boolean; diagnostic?: DeliveryDiagnostic };
 type RecipientDeliveryResult = {
     success: boolean; contactId: string; error?: string; pauseCampaign: boolean;
-    retryable?: boolean; yielded?: boolean;
+    retryable?: boolean; yielded?: boolean; diagnostic?: DeliveryDiagnostic;
 };
 class CampaignDeliveryInterruptedError extends Error {
     constructor(readonly interruption: DeliveryInterruption) { super(interruption.error); }
@@ -88,7 +89,7 @@ function isRetryableInfrastructureError(error: unknown): boolean {
     const category = categorizeSendError(error);
     // Pause for errors requiring a repair. Unexpected infrastructure failures
     // otherwise remain queued, including expired claims and empty gateway errors.
-    if (['authentication_required', 'utility_permission_missing', 'utility_template_missing', 'invalid_utility_parameter'].includes(category)) return false;
+    if (['authentication_required', 'utility_permission_missing', 'utility_template_missing', 'invalid_utility_parameter', 'permission_missing'].includes(category)) return false;
     if (['PGRST202', 'PGRST204'].includes(code) || /^(22|23|42)/.test(code)) return false;
     if (isRetryableSendError(error)) return true;
     return !(typeof record.status === 'number' && record.status >= 400 && record.status < 500
@@ -377,6 +378,7 @@ export async function sendCampaignById({
         // terminated invocation remains discoverable after its leases expire.
         const activated = await updateCampaignIfUnchanged(supabase, campaignId, {
             status: 'sending',
+            started_at: campaign.started_at || new Date().toISOString(),
             background_delivery_enabled: !dueAt && !campaign.is_loop,
             next_attempt_at: null, last_error: null, updated_at: new Date().toISOString()
         }, expectedState);
@@ -821,14 +823,17 @@ export async function sendCampaignById({
                         batchPause = currentPause && !currentPause.yielded ? currentPause : error.interruption;
                         return { success: false, contactId: recipient.contact_id, pauseCampaign: true, ...batchPause };
                     }
-                    deliveryError = (error as Error).message;
+                    const errorMessage = error && typeof error === 'object' ? (error as { message?: unknown }).message : undefined;
+                    deliveryError = typeof errorMessage === 'string' ? errorMessage : String(error || 'Unknown delivery error');
+                    const diagnostic = diagnoseDeliveryError(error);
                     pauseCampaign = shouldPauseCampaignForSendError(error);
-                    if (pauseCampaign) batchPause = { error: deliveryError || 'Delivery temporarily unavailable.', retryable: isRetryableSendError(error) };
+                    if (pauseCampaign) batchPause = { error: deliveryError || 'Delivery temporarily unavailable.', retryable: isRetryableSendError(error), diagnostic };
                     console.warn(`Failed to send to ${recipient.contact_psid}: ${deliveryError}`);
                     return {
                         success: false,
                         contactId: recipient.contact_id,
                         error: deliveryError,
+                        diagnostic,
                         pauseCampaign,
                         retryable: isRetryableSendError(error)
                     };
@@ -842,7 +847,8 @@ export async function sendCampaignById({
             const batchResults = await mapConcurrentSettled(batch, MAX_SEND_BATCH_SIZE, deliverRecipient, async result => {
                 if (result.status !== 'fulfilled' || result.value.pauseCampaign || saveFailed) return;
                 checkpointResults.push({ contact_id: result.value.contactId, success: result.value.success,
-                    error_message: result.value.success ? null : result.value.error || 'Unknown delivery error' });
+                    error_message: result.value.success ? null : result.value.error || 'Unknown delivery error',
+                    ...(!result.value.success ? { diagnostic: result.value.diagnostic || diagnoseDeliveryError(result.value.error) } : {}) });
                 // Slow Pages also need durable progress and a timely Stop
                 // check; waiting for 50 receipts can take several minutes.
                 if (checkpointResults.length < 50 && Date.now() - lastCheckpointAt < 5000) return;
@@ -881,7 +887,8 @@ export async function sendCampaignById({
                     return [{
                         contact_id: result.value.contactId,
                         success: result.value.success,
-                        error_message: result.value.success ? null : result.value.error || 'Unknown delivery error'
+                        error_message: result.value.success ? null : result.value.error || 'Unknown delivery error',
+                        ...(!result.value.success ? { diagnostic: result.value.diagnostic || diagnoseDeliveryError(result.value.error) } : {})
                     }];
                 }
 
@@ -889,7 +896,8 @@ export async function sendCampaignById({
                 return [{
                         contact_id: batch[index].contact_id,
                         success: false,
-                        error_message: result.reason instanceof Error ? result.reason.message : 'Unexpected delivery error'
+                        error_message: result.reason instanceof Error ? result.reason.message : 'Unexpected delivery error',
+                        diagnostic: diagnoseDeliveryError(result.reason, 'backend')
                 }];
             });
 
@@ -900,6 +908,7 @@ export async function sendCampaignById({
                             contactId: result.value.contactId,
                             error: result.value.error || 'Recoverable send failure',
                             retryable: result.value.retryable,
+                            diagnostic: result.value.diagnostic || diagnoseDeliveryError(result.value.error),
                             yielded: result.value.yielded === true
                         }]
                         : [];
@@ -909,6 +918,7 @@ export async function sendCampaignById({
                         contactId: batch[index].contact_id,
                         error: result.reason instanceof Error ? result.reason.message : 'Recoverable send failure',
                         retryable: isRetryableSendError(result.reason),
+                        diagnostic: diagnoseDeliveryError(result.reason, 'backend'),
                         yielded: false
                     }]
                     : [];
@@ -980,6 +990,7 @@ export async function sendCampaignById({
                         : false,
                     next_attempt_at: nextAttemptAt,
                     last_error: pausedResults[0].error,
+                    last_error_diagnostic: { ...pausedResults[0].diagnostic, message: pausedResults[0].error },
                     updated_at: new Date().toISOString()
                 }, 'sending');
                 if (!updated) return await resolveStateConflict();
@@ -1113,6 +1124,7 @@ export async function sendCampaignById({
                         : false,
                     next_attempt_at: retryAt,
                     last_error: databaseError.message || String(error),
+                    last_error_diagnostic: { ...diagnoseDeliveryError(error, 'backend'), message: databaseError.message || String(error) },
                     updated_at: new Date().toISOString()
                 }, recoveryStatus);
                 if (!updated && stoppedResult) return await resolveStateConflict();

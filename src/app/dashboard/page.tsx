@@ -3,8 +3,11 @@
 import { useSession } from 'next-auth/react';
 import { useEffect, useRef, useState } from 'react';
 import { Users, Tag, MessageSquare, RefreshCw, Clock, ArrowUpRight } from 'lucide-react';
-import { Page } from '@/types';
+import { Page, Campaign } from '@/types';
+import CampaignResults from '@/components/CampaignResults';
+import { getCampaignRecoveryUrl } from '@/lib/campaign-recovery';
 import { runContactSyncToCompletion } from '@/lib/contact-sync-client';
+import { requestWithTimeout } from '@/lib/request-timeout';
 
 interface Stats {
     totalContacts: number;
@@ -27,6 +30,8 @@ export default function DashboardPage() {
     const [syncing, setSyncing] = useState(false);
     const [pagesError, setPagesError] = useState<string | null>(null);
     const [statsError, setStatsError] = useState<string | null>(null);
+    const [latestBulk, setLatestBulk] = useState<Campaign | null>(null);
+    const [latestBulkError, setLatestBulkError] = useState<string | null>(null);
     const [reconnectRequired, setReconnectRequired] = useState(false);
     const statsRequest = useRef(0);
 
@@ -38,6 +43,31 @@ export default function DashboardPage() {
         if (selectedPageId) {
             void fetchStats(selectedPageId);
         }
+    }, [selectedPageId]);
+
+    useEffect(() => {
+        if (!selectedPageId || typeof document === 'undefined') return;
+        const controller = new AbortController();
+        let refreshing = false;
+        setLatestBulk(null);
+        setLatestBulkError(null);
+        const refresh = async () => {
+            if (refreshing) return;
+            refreshing = true;
+            try {
+                const data = await requestWithTimeout(async signal => {
+                    const response = await fetch(`/api/campaigns?pageId=${selectedPageId}&pageSize=1&latestBulk=true`, { signal });
+                    if (!response.ok) throw new Error('Latest bulk results could not be refreshed.');
+                    return response.json();
+                }, 12_000, 'Latest bulk results timed out.', controller.signal);
+                if (!controller.signal.aborted) { setLatestBulk(data.items?.[0] || null); setLatestBulkError(null); }
+            } catch {
+                if (!controller.signal.aborted) setLatestBulkError('Latest bulk results could not be refreshed. Retrying automatically.');
+            } finally { refreshing = false; }
+        };
+        void refresh();
+        const timer = window.setInterval(() => { if (!document.hidden) void refresh(); }, 15_000);
+        return () => { controller.abort(); window.clearInterval(timer); };
     }, [selectedPageId]);
 
     const fetchPages = async () => {
@@ -270,6 +300,14 @@ export default function DashboardPage() {
             </div>}
 
             {/* Quick Actions Table */}
+            {latestBulkError && <p role="alert" className="mb-4 text-sm text-amber-800">{latestBulkError}</p>}
+            {latestBulk?.page_id === selectedPageId && <div className="mb-8 space-y-3">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                    <h3 className="text-lg font-bold">{latestBulk.name}</h3>
+                    <a className="text-xs font-bold underline" href={getCampaignRecoveryUrl(latestBulk.id, latestBulk.page_id)}>View campaign and recipient errors</a>
+                </div>
+                <CampaignResults campaign={latestBulk} title="Latest bulk send" />
+            </div>}
             <div className="mb-8">
                 <h3 className="text-xl font-bold uppercase mb-6 flex items-center gap-3">
                     <span className="w-2 h-2 bg-black"></span>

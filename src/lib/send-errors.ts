@@ -10,6 +10,8 @@ export type SendErrorCategory =
     | 'invalid_utility_parameter'
     | 'rate_limited'
     | 'authentication_required'
+    | 'permission_missing'
+    | 'backend_failure'
     | 'transient'
     | 'other';
 
@@ -24,7 +26,15 @@ type StructuredSendError = {
 };
 
 function getStructuredSendError(error: unknown): StructuredSendError | null {
-    return error && typeof error === 'object' ? error as StructuredSendError : null;
+    const record = error && typeof error === 'object' ? error as StructuredSendError : null;
+    const message = typeof error === 'string' ? error : record?.message || '';
+    // Historical receipts only stored the text. Prefer structured provider
+    // evidence, but recover codes when Meta included them in the message.
+    const code = /\(#(-?\d+)\)/.exec(message);
+    const subcode = /error_subcode\s*[:=]\s*(\d+)/i.exec(message);
+    return { ...record, name: record?.name, message: record?.message,
+        code: record?.code ?? (code ? Number(code[1]) : undefined),
+        subcode: record?.subcode ?? (subcode ? Number(subcode[1]) : undefined) };
 }
 
 function getSendErrorMessage(error: unknown): string {
@@ -32,9 +42,17 @@ function getSendErrorMessage(error: unknown): string {
     return typeof structured?.message === 'string' ? structured.message : String(error || '');
 }
 
+export function getBackendSendErrorCode(error: unknown): string | null {
+    const code = error && typeof error === 'object' ? (error as { code?: unknown }).code : undefined;
+    return typeof code === 'string' && /^(?:PGRST\d{3}|DATABASE_[A-Z_]+|(?:[0-9]{2}|P0|XX|HV|F0)[0-9A-Z]{3})$/.test(code)
+        ? code : null;
+}
+
 export function categorizeSendError(error: unknown): SendErrorCategory {
     const structured = getStructuredSendError(error);
     const normalized = getSendErrorMessage(error).trim().toLowerCase();
+
+    if (getBackendSendErrorCode(error)) return 'backend_failure';
 
     if (
         structured?.subcode === 2018300 ||
@@ -85,6 +103,8 @@ export function categorizeSendError(error: unknown): SendErrorCategory {
         normalized.includes('utility template not found') ||
         normalized.includes('utility template not ready') ||
         normalized.includes('no approved utility templates') ||
+        (normalized.includes('template') && normalized.includes('not approved on this page')) ||
+        (normalized.includes('template') && normalized.includes('requires a media header')) ||
         normalized.includes('template exists but status is') ||
         normalized.includes('is not sendable') ||
         normalized.includes('status is rejected')
@@ -112,12 +132,18 @@ export function categorizeSendError(error: unknown): SendErrorCategory {
     }
 
     if (
-        normalized.includes('(#10)') ||
+        structured?.subcode === 2018278 ||
         normalized.includes('outside the allowed window') ||
         normalized.includes('policy-overview') ||
         normalized.includes('error_subcode: 2018278')
     ) {
         return 'outside_messaging_window';
+    }
+
+    // Code 10 alone is a permission error; it does not prove a window
+    // violation or that the recipient blocked the Page.
+    if (structured?.code === 10 || (typeof structured?.code === 'number' && structured.code >= 200 && structured.code <= 299)) {
+        return 'permission_missing';
     }
 
     if (
@@ -147,6 +173,10 @@ export function categorizeSendError(error: unknown): SendErrorCategory {
 
 export function isRetryableSendError(error: unknown): boolean {
     const category = categorizeSendError(error);
+    if (category === 'backend_failure') {
+        const code = getBackendSendErrorCode(error)!;
+        return !(['PGRST202', 'PGRST204'].includes(code) || /^(22|23|42)/.test(code));
+    }
     return category === 'rate_limited' || category === 'transient';
 }
 
@@ -165,6 +195,8 @@ export function shouldPauseCampaignForSendError(error: unknown): boolean {
         category === 'invalid_utility_parameter' ||
         category === 'rate_limited' ||
         category === 'authentication_required' ||
+        category === 'permission_missing' ||
+        category === 'backend_failure' ||
         category === 'transient'
     );
 }

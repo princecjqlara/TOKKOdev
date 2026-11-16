@@ -3,7 +3,7 @@ import { getServerSession } from 'next-auth';
 import { authOptions } from '@/lib/auth';
 import { getSupabaseAdmin } from '@/lib/supabase';
 import { PaginatedResponse } from '@/types';
-import { CampaignRecipientError, normalizeCampaignRecipientErrors } from '@/lib/campaign-errors';
+import { CampaignRecipientError, CampaignRecipientErrorRow, normalizeCampaignRecipientErrors } from '@/lib/campaign-errors';
 
 // GET /api/campaigns/[campaignId]/recipients - Get campaign recipients with pagination
 export async function GET(
@@ -22,15 +22,15 @@ export async function GET(
 
         const { campaignId } = await params;
         const searchParams = request.nextUrl.searchParams;
-        const page = parseInt(searchParams.get('page') || '1');
-        const pageSize = parseInt(searchParams.get('pageSize') || '25');
+        const page = Math.max(1, parseInt(searchParams.get('page') || '1') || 1);
+        const pageSize = Math.max(1, Math.min(100, parseInt(searchParams.get('pageSize') || '25') || 25));
         const status = searchParams.get('status') || 'failed';
 
         const supabase = getSupabaseAdmin();
 
         const { data: campaign } = await supabase
             .from('campaigns')
-            .select('page_id, status, recipient_history_purged_at')
+            .select('page_id, status, recipient_history_purged_at, recurrence, is_loop, started_at')
             .eq('id', campaignId)
             .single();
 
@@ -60,18 +60,23 @@ export async function GET(
         const source = status === 'failed' ? 'campaign_delivery_failures' : 'campaign_recipients';
         let query = supabase
             .from(source)
-            .select('contact_id, error_message, contacts(name, psid)', { count: 'exact' })
+            .select(source === 'campaign_delivery_failures'
+                ? 'contact_id, error_message, diagnostic, contacts(name, psid)'
+                : 'contact_id, error_message, contacts(name, psid)', { count: 'exact' })
             .eq('campaign_id', campaignId);
 
         if (source === 'campaign_recipients' && status) {
             query = query.eq('status', status === 'processing' ? 'processing' : status);
+        }
+        if (source === 'campaign_delivery_failures' && !campaign.is_loop && campaign.recurrence === 'daily' && campaign.started_at) {
+            query = query.gte('failed_at', campaign.started_at);
         }
 
         query = query
             .order(source === 'campaign_delivery_failures' ? 'failed_at' : 'created_at', { ascending: false })
             .range(from, to);
 
-        const { data: recipients, error, count } = await query;
+        const { data: recipients, error, count } = await query.returns<Array<Omit<CampaignRecipientErrorRow, 'id' | 'status'>>>();
 
         if (error) throw error;
 

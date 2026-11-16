@@ -91,6 +91,12 @@ For large campaigns, deploy the compact delivery queue in this exact order:
 
 Do not run the finalizer before step 2. Older senders calculate progress from terminal queue rows that the finalizer intentionally removes.
 
+Before deploying bulk-send results and failure diagnostics, run
+`database/migration_campaign_delivery_diagnostics.sql` after the compact queue
+prepare migration. It adds structured provider evidence, durable failure-category
+totals, and recovery diagnostics without deleting recipient data. See
+[bulk delivery reports](docs/bulk-delivery-reports.md) for interpretation and verification.
+
 5. Run the development server:
 ```bash
 npm run dev
