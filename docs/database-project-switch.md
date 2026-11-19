@@ -23,24 +23,12 @@ checks, the real Page/member selectors, and 30 API/Storage checks. The applicati
 was built with the new local environment. Receipts and the original destination
 backup are under the ignored `.vercel/database-switch-ucir` directory.
 
-## Production rollout
+## Current production rollout ? 20 November 2026 PHT
 
-The live application remains `https://tokkobeta.vercel.app`, project `tokkobeta`
-in `sircjdigiworks-4427s-projects`. The currently authenticated CLI account cannot
-access that team. Do not deploy to the separately linked `tokkodev` project or
-change Facebook callback URLs to work around that missing access.
+Production is now Vercel project **tokk-odev** in **bigclicklara-2607s-projects**, serving **https://tokkobeta.vercel.app**. The maintained checkout is **C:/Users/Cj Lara/Downloads/tokkodev**. Its ignored Vercel link matches this project. Earlier references to another team/project and lack of CLI access describe historical deployment arrangements.
 
-An owner of the live project must import
-`.vercel/database-switch-ucir/vercel-production.env` into its **Production**
-environment, replacing the existing values, then redeploy. That ignored file
-contains only the eight database-related settings. It contains credentials and
-must remain private; do not commit it. Existing OAuth/session/worker settings
-remain in the live project. `NEXT_PUBLIC_SUPABASE_ANON_KEY` holds the new
-publishable key; `SUPABASE_SERVICE_ROLE_KEY` holds the new backend secret key.
-Those legacy variable names are supported by the current application and SDK.
+All eight database variables are installed and verified in Production, Preview and Development, using **ucirfbweulbvjxmvtiox**. The active app was rebuilt with those settings. The maintained ignored local environment matches production; the historical checkout under Downloads/sunobot no longer contains database credentials.
 
-A redeploy is required because the browser's Supabase URL and publishable key
-are compiled into its JavaScript. Confirm the deployed client references
-`ucirfbweulbvjxmvtiox`, then test a real Facebook sign-in and Page selection.
-The database setup and local switch are complete; production environment changes
-have not been applied by this CLI account.
+The later diagnostics migration is installed, and its schema-cache reads pass. The source dependency audit checks 20 tables, 38 RPC names and 68 migration-added columns with no missing checked dependencies. The original counts above describe the November bootstrap, not current live data.
+
+Use [docs/environment.md](environment.md), config/deployment.json and the environment checker for current configuration. The ignored eight-key export remains private reference material; do not use historical exports from other projects. Run npm run env:check:vercel before deployment. An environment change requires a rebuild; an applied live SQL migration does not require redeploying unchanged app code.

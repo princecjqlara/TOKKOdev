@@ -2,6 +2,10 @@
 
 A Next.js application for managing Facebook Page contacts, tags, and messaging campaigns.
 
+Current production: **[tokkobeta.vercel.app](https://tokkobeta.vercel.app)**, Vercel project **tokk-odev**, Supabase project **ucirfbweulbvjxmvtiox**. The maintained checkout is `C:/Users/Cj Lara/Downloads/tokkodev`; the similarly named checkout inside `Downloads/sunobot` is historical.
+
+Read [the current environment guide](docs/environment.md) before setup or deployment. Use `.env.example` for variable names, keep credentials in ignored `.env.local`, and run `npm run env:check:vercel` before deploying.
+
 ## Features
 
 - 🔐 Facebook OAuth authentication
