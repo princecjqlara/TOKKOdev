@@ -9,6 +9,8 @@
     "start": "next start",
     "lint": "eslint \"src/**/*.{ts,tsx}\"",
     "test": "vitest run",
+    "test:release": "node scripts/run-release-tests.mjs",
+    "test:insights-sql": "node scripts/verify-inquiry-insights.mjs",
     "env:check": "node scripts/check-environment.mjs",
     "env:check:vercel": "node scripts/check-environment.mjs --vercel"
   },

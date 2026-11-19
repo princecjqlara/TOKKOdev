@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { NextRequest } from 'next/server';
 
 const mocks = vi.hoisted(() => ({
+    captureWebhookInquiry: vi.fn().mockResolvedValue(undefined),
     getSupabaseAdmin: vi.fn(),
     verifyWebhookSignature: vi.fn(),
     generateVerifyToken: vi.fn(),
@@ -12,6 +13,8 @@ const mocks = vi.hoisted(() => ({
     triggerReplyWorkflowAutomations: vi.fn(),
     stopWorkflowAutomationsFromPageMessage: vi.fn()
 }));
+
+vi.mock('@/lib/inquiry-insights', () => ({ captureWebhookInquiry: mocks.captureWebhookInquiry }));
 
 vi.mock('@/lib/supabase', () => ({
     getSupabaseAdmin: mocks.getSupabaseAdmin
@@ -77,6 +80,7 @@ function createSupabaseMock(options?: {
         name?: string | null;
         profile_pic?: string | null;
         last_inbound_at?: string | null;
+        tokko_inquiry_origin_mid?: string | null;
     } | null;
 }) {
     const pageSingle = vi.fn().mockResolvedValue({
@@ -387,8 +391,32 @@ function createSupabaseMockWithGenericUpsertFailure() {
 }
 
 describe('POST /api/facebook/webhook', () => {
+    it('captures an existing contact as a returning inquiry after resolving its Page', async () => {
+        const supabase = createSupabaseMock({ existingContact: { id: 'contact_row_1', name: 'Jane Contact' } });
+        mocks.getSupabaseAdmin.mockReturnValue(supabase);
+        const response = await POST(createWebhookRequest());
+        expect(response.status).toBe(200);
+        expect(mocks.captureWebhookInquiry).toHaveBeenCalledWith(supabase, 'page_row_1', 'fb_page_1', expect.objectContaining({ message: { mid: 'mid.1', text: 'hello there' } }), 'contact_row_1', false);
+    });
+
+    it('requests a webhook retry when inquiry storage fails instead of losing source evidence', async () => {
+        mocks.getSupabaseAdmin.mockReturnValue(createSupabaseMock({ existingContact: { id: 'contact_row_1', name: 'Jane Contact' } }));
+        mocks.captureWebhookInquiry.mockRejectedValueOnce({ code: 'DATABASE_TIMEOUT' });
+        const response = await POST(createWebhookRequest());
+        expect(response.status).toBe(500);
+        expect(mocks.captureWebhookInquiry).toHaveBeenCalledTimes(1);
+    });
+
+    it('retains new-contact classification on a retried creation message', async () => {
+        const supabase = createSupabaseMock({ existingContact: { id: 'contact_row_1', name: 'Jane Contact', tokko_inquiry_origin_mid: 'mid.1' } });
+        mocks.getSupabaseAdmin.mockReturnValue(supabase);
+        expect((await POST(createWebhookRequest())).status).toBe(200);
+        expect(mocks.captureWebhookInquiry).toHaveBeenCalledWith(supabase, 'page_row_1', 'fb_page_1', expect.anything(), 'contact_row_1', true);
+    });
+
     beforeEach(() => {
         vi.clearAllMocks();
+        mocks.captureWebhookInquiry.mockResolvedValue(undefined);
         vi.stubEnv('NODE_ENV', 'test');
         mocks.handleFollowUpWorkflowContactReply.mockResolvedValue({
             checked: 0,

@@ -6,6 +6,8 @@ Current production: **[tokkobeta.vercel.app](https://tokkobeta.vercel.app)**, Ve
 
 Read [the current environment guide](docs/environment.md) before setup or deployment. Use `.env.example` for variable names, keep credentials in ignored `.env.local`, and run `npm run env:check:vercel` before deploying.
 
+[Inquiry Insights](docs/inquiry-insights.md) reports new and returning inquiry episodes, observed CRM stages, response times and collection coverage from activation onward. It preserves the existing contact records and messaging behavior.
+
 ## Features
 
 - 🔐 Facebook OAuth authentication

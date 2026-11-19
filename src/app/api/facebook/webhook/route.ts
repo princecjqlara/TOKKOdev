@@ -8,6 +8,7 @@ import { getPhilippinesDayOfWeek, getPhilippinesHour } from '@/lib/philippines-t
 import { replaceTemplateVariables } from '@/lib/placeholders';
 import { handleFollowUpWorkflowContactReply, stopWorkflowAutomationsFromPageMessage } from '@/lib/workflow-automations';
 import { recordOutboundMessageEvent } from '@/lib/outbound-message-events';
+import { captureWebhookInquiry } from '@/lib/inquiry-insights';
 import { composeContactName, hasUsableContactName, normalizeContactName, pickPreferredContactName } from '../../../../lib/contact-names';
 
 const PROFILE_LOOKUP_FAILURE_TTL_MS = 60 * 60 * 1000;
@@ -247,6 +248,11 @@ export async function POST(request: NextRequest) {
 
                             // Page echoes can carry the manual workflow stop code.
                             if (!isFromContact) {
+                                try { await captureWebhookInquiry(supabase, page.id, pageId, event); }
+                                catch (error) {
+                                    hadCriticalFailure = true;
+                                    logError('Inquiry insight collection failed; webhook will retry', databaseErrorDetails(error));
+                                }
                                 skippedEvents += 1;
                                 const outboundMessageText = typeof event.message?.text === 'string'
                                     ? event.message.text.trim()
@@ -344,7 +350,7 @@ export async function POST(request: NextRequest) {
                         // Check if contact exists BEFORE upsert (to detect new contacts)
                         const { data: existingContact, error: existingContactError } = await supabase
                             .from('contacts')
-                            .select('id, name, last_inbound_at')
+                            .select('id, name, last_inbound_at, tokko_inquiry_origin_mid')
                             .eq('page_id', page.id)
                             .eq('psid', senderId)
                             .maybeSingle();
@@ -445,7 +451,9 @@ export async function POST(request: NextRequest) {
                                 new Date(existingContact.last_inbound_at).getTime() < interactionTime.getTime()
                             ) ? { last_inbound_at: interactionAt } : {}),
                             updated_at: new Date().toISOString(),
-                            ...(isNewContact ? { first_interaction_at: interactionAt } : {})
+                            ...(isNewContact ? { first_interaction_at: interactionAt } : {}),
+                            ...(isNewContact && eventType === 'message' && typeof event.message?.mid === 'string' && event.message.mid.length > 0 && event.message.mid.length <= 500
+                                ? { tokko_inquiry_origin_mid: event.message.mid } : {})
                         };
 
                         let { data: contact, error: contactUpsertError } = await supabase
@@ -510,6 +518,14 @@ export async function POST(request: NextRequest) {
                         }
 
                         processedContacts += 1;
+
+                        if (contact) {
+                            try { await captureWebhookInquiry(supabase, page.id, pageId, event, contact.id, isNewContact || !!existingContact?.tokko_inquiry_origin_mid && existingContact.tokko_inquiry_origin_mid === event.message?.mid); }
+                            catch (error) {
+                                hadCriticalFailure = true;
+                                logError('Inquiry insight collection failed; webhook will retry', databaseErrorDetails(error));
+                            }
+                        }
 
                         // Send welcome message to new contacts
                         if (isNewContact && contact) {

@@ -40,7 +40,7 @@ try{
  }
  if(process.argv.includes('--live')||process.argv.includes('--vercel')){
   const headers={apikey:env.SUPABASE_SERVICE_ROLE_KEY,Authorization:'Bearer '+env.SUPABASE_SERVICE_ROLE_KEY};
-  for(const [table,columns]of [['users','id'],['pages','id'],['contacts','id'],['campaigns','failure_counts,last_error_diagnostic'],['campaign_delivery_failures','diagnostic']]){const r=await fetch(env.SUPABASE_URL+'/rest/v1/'+table+'?select='+columns+'&limit=0',{headers,signal:AbortSignal.timeout(15000)});check('live_database:'+table,r.status===200);}
+  for(const [table,columns]of [['users','id'],['pages','id'],['contacts','id,tokko_inquiry_origin_mid'],['campaigns','failure_counts,last_error_diagnostic'],['campaign_delivery_failures','diagnostic'],['tokko_insight_settings','page_id,started_at,returning_after_days,response_sla_minutes'],['tokko_inquiry_events','id,page_id,contact_id,event_key,kind,occurred_at'],['tokko_inquiry_episode_facts','episode_id,kind,started_at']]){const r=await fetch(env.SUPABASE_URL+'/rest/v1/'+table+'?select='+columns+'&limit=0',{headers,signal:AbortSignal.timeout(15000)});check('live_database:'+table,r.status===200);}
   const r=await fetch(env.SUPABASE_URL+'/rest/v1/rpc/tokko_system_admin_credentials',{method:'POST',headers:{...headers,'Content-Type':'application/json'},body:'{}',signal:AbortSignal.timeout(15000)});const rows=await r.json();check('protected_administrator_configured',r.ok&&rows[0]?.email&&rows[0]?.password_hash&&rows[0]?.revision);
  }
 }catch(error){failures.push('external_check_failed');report.external_error=error.message?.startsWith('Vercel HTTP ')?error.message:(error.code||error.name);}

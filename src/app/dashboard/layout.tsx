@@ -21,7 +21,8 @@ import {
     History,
     Download,
     Clock3,
-    ShieldCheck
+    ShieldCheck,
+    BarChart3
 } from 'lucide-react';
 import { Page } from '@/types';
 import { facebookSignInCallback } from '@/lib/facebook-signin';
@@ -149,6 +150,7 @@ export default function DashboardLayout({
         { href: '/dashboard/tags', icon: Tag, label: 'Tags' },
         { href: '/dashboard/campaigns', icon: MessageSquare, label: 'Campaigns' },
         { href: '/dashboard/ads', icon: ShieldCheck, label: 'Ads Guard' },
+        { href: '/dashboard/insights', icon: BarChart3, label: 'Inquiry Insights' },
         { href: '/dashboard/automations', icon: Workflow, label: 'Follow-Ups' },
         { href: '/dashboard/templates', icon: FileText, label: 'Templates' },
         { href: '/dashboard/exports', icon: Download, label: 'Exports' },

@@ -51,3 +51,5 @@ Neither command invokes workers, sends messages, updates records or changes bill
 The diagnostics migration `20261117_001` is installed, including `campaigns.failure_counts`, `campaigns.last_error_diagnostic`, `campaign_delivery_failures.diagnostic` and atomic completion metadata. PostgREST schema-cache reads passed. The latest audit found all 20 directly referenced tables, 38 RPC names and 68 checked migration-added columns. The repair passed 28 SQL checks and 129 focused sender/reporting tests, preserving saved campaign states, queues and provider cooldowns.
 
 The operational repair receipts are in `Downloads/sunobot/outputs/tokk-odev-campaign-repair-2026-11-20`. They contain status/counts, not credentials. Meta rate limits remain provider cooldowns; do not clear them or manually replay recipients as a configuration repair.
+
+New and returning inquiry reports use additive migration `20261120_001`. The environment checker includes its event/settings tables and episode view. See [Inquiry Insights](inquiry-insights.md) for the forward-only collection contract, Page scopes and installation checks. No additional credential or chatbot setting is required.
