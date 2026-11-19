@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from 'vitest';
-import { inquiryEventFromWebhook, captureWebhookInquiry } from '../inquiry-insights';
+import { inquiryEventFromWebhook, captureWebhookInquiry, captureSavedInquiryMessages } from '../inquiry-insights';
 const inbound = (changes: any = {}) => ({ sender: { id: 'person' }, recipient: { id: 'page' }, timestamp: 1770000000000, message: { mid: 'mid-inbound', text: 'hello' }, ...changes });
 describe('forward inquiry source capture', () => {
     it('records actual customer messages and attachments without storing their contents', () => {
@@ -39,5 +39,23 @@ describe('forward inquiry source capture', () => {
         const db = { from: vi.fn(() => query), rpc: vi.fn() };
         await captureWebhookInquiry(db, 'page-row', 'page', inbound({ sender: { id: 'page' }, recipient: { id: 'untracked' } }));
         expect(db.rpc).not.toHaveBeenCalled();expect(db.from).toHaveBeenCalledWith('contacts');
+    });
+    it('reuses history IDs/times in event order without reading Meta or storing message content', async () => {
+        const query: any = { select: vi.fn(() => query), eq: vi.fn(() => query), maybeSingle: vi.fn().mockResolvedValue({ data: { id: 'contact-row' }, error: null }) };
+        const db = { from: vi.fn(() => query), rpc: vi.fn().mockResolvedValue({ data: { accepted: 2 }, error: null }) };
+        await captureSavedInquiryMessages(db, { id: 'page-row', fb_page_id: 'page' }, 'person', [
+            { id: 'reply', from: { id: 'page' }, created_time: '2026-02-01T00:05:00Z', message: 'private reply' },
+            { id: 'in', from: { id: 'person' }, created_time: '2026-02-01T00:00:00Z', message: 'private question' },
+            { id: 'other', from: { id: 'someone-else' }, created_time: '2026-02-01T00:00:00Z' }
+        ]);
+        expect(db.rpc).toHaveBeenCalledTimes(1);
+        const args = db.rpc.mock.calls[0][1];
+        expect(args.p_events.map((e: any) => e.message_id)).toEqual(['in', 'reply']);expect(args.p_events[0]).toMatchObject({ kind: 'inbound', collector: 'saved_history' });
+        expect(JSON.stringify(args)).not.toContain('private');
+    });
+    it('ignores incomplete history metadata before any database request', async () => {
+        const db = { from: vi.fn(), rpc: vi.fn() };
+        await captureSavedInquiryMessages(db, { id: 'page-row', fb_page_id: 'page' }, 'person', [{ message: 'not a source event', from: { id: 'person' } }]);
+        expect(db.from).not.toHaveBeenCalled();expect(db.rpc).not.toHaveBeenCalled();
     });
 });

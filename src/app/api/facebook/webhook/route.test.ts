@@ -3,6 +3,7 @@ import type { NextRequest } from 'next/server';
 
 const mocks = vi.hoisted(() => ({
     captureWebhookInquiry: vi.fn().mockResolvedValue(undefined),
+    captureSavedInquiryMessages: vi.fn().mockResolvedValue(undefined),
     getSupabaseAdmin: vi.fn(),
     verifyWebhookSignature: vi.fn(),
     generateVerifyToken: vi.fn(),
@@ -14,7 +15,7 @@ const mocks = vi.hoisted(() => ({
     stopWorkflowAutomationsFromPageMessage: vi.fn()
 }));
 
-vi.mock('@/lib/inquiry-insights', () => ({ captureWebhookInquiry: mocks.captureWebhookInquiry }));
+vi.mock('@/lib/inquiry-insights', () => ({ captureWebhookInquiry: mocks.captureWebhookInquiry, captureSavedInquiryMessages: mocks.captureSavedInquiryMessages }));
 
 vi.mock('@/lib/supabase', () => ({
     getSupabaseAdmin: mocks.getSupabaseAdmin

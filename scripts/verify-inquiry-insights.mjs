@@ -15,18 +15,20 @@ const report=async(kind='all',who=actor,from='2026-01-01',to='2026-04-30',h=24,a
 try{
  await db.exec(`CREATE ROLE service_role;CREATE ROLE anon;CREATE ROLE authenticated;CREATE SCHEMA app_private;
  CREATE TABLE app_private.schema_migrations(version text PRIMARY KEY,description text);
- CREATE TABLE users(id uuid PRIMARY KEY,is_active boolean DEFAULT true);
+ CREATE TABLE users(id uuid PRIMARY KEY,is_active boolean DEFAULT true,created_by uuid,account_kind text DEFAULT 'facebook',expires_at timestamptz,facebook_id text);
+ CREATE TABLE tokko_auth_identities(user_id uuid REFERENCES users,provider text,subject text);
  CREATE TABLE pages(id uuid PRIMARY KEY);
  CREATE TABLE user_pages(user_id uuid REFERENCES users,page_id uuid REFERENCES pages);
- CREATE TABLE contacts(id uuid PRIMARY KEY,page_id uuid REFERENCES pages,name text,psid text,first_interaction_at timestamptz,last_inbound_at timestamptz);
+ CREATE TABLE contacts(id uuid PRIMARY KEY,page_id uuid REFERENCES pages,name text,psid text,first_interaction_at timestamptz,last_inbound_at timestamptz,created_at timestamptz DEFAULT '2025-01-01');
  CREATE TABLE outbound_message_events(id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,page_id uuid,contact_id uuid,message_id text UNIQUE,source_type text,actor_user_id uuid,sent_at timestamptz DEFAULT now());
- CREATE FUNCTION tokko_assert_manager(p_actor uuid,p_page uuid) RETURNS void LANGUAGE plpgsql AS $$BEGIN IF p_actor<>'${actor}' OR NOT EXISTS(SELECT 1 FROM user_pages WHERE user_id=p_actor AND page_id=p_page) THEN RAISE EXCEPTION 'Manager required' USING ERRCODE='42501';END IF;END;$$;
+ CREATE FUNCTION tokko_assert_manager(p_actor uuid,p_pages uuid[]) RETURNS void LANGUAGE plpgsql AS $$BEGIN IF p_actor<>'${actor}' OR cardinality(p_pages)<>1 OR NOT EXISTS(SELECT 1 FROM user_pages WHERE user_id=p_actor AND page_id=p_pages[1]) THEN RAISE EXCEPTION 'Manager required' USING ERRCODE='42501';END IF;END;$$;
  INSERT INTO users(id) VALUES('${actor}'),('${member}'),('${stranger}');INSERT INTO pages VALUES('${page}'),('${other}');
  INSERT INTO user_pages VALUES('${actor}','${page}'),('${member}','${page}');
- INSERT INTO contacts VALUES('${contact}','${page}','New contact','psid-new',NULL,NULL),('${existing}','${page}','Existing contact','psid-existing',NULL,NULL),('${foreign}','${other}','Other Page','foreign',NULL,NULL);`);
+ UPDATE users SET facebook_id='fb-actor' WHERE id='${actor}';INSERT INTO tokko_auth_identities VALUES('${actor}','facebook','fb-actor');
+ INSERT INTO contacts(id,page_id,name,psid) VALUES('${contact}','${page}','New contact','psid-new'),('${existing}','${page}','Existing contact','psid-existing'),('${foreign}','${other}','Other Page','foreign');`);
  const migration=fs.readFileSync('database/migration_inquiry_insights.sql','utf8');await db.exec(migration);
  await db.exec("UPDATE app_private.tokko_insight_config SET started_at='2026-01-01';UPDATE tokko_insight_settings SET started_at='2026-01-01'");
- let r=await report();eq(r.episodes.total,0);eq(r.funnel.converted_rate,null);eq(r.response.sla_rate,null);eq(r.contact_coverage.first_interaction_fraction,0);
+ let r=await report();eq(r.episodes.total,0);eq(r.funnel.converted_rate,null);eq(r.response.sla_rate,null);eq(r.contact_coverage.first_interaction_fraction,0);eq(r.can_manage,true);eq((await report('all',member)).can_manage,false);
  eq((await record(contact,'old','2025-12-31T00:00:00Z')).historical_ignored,1);eq((await report()).episodes.total,0);
  eq((await record(contact,'bad',null)).invalid,1);eq((await record(contact,'bad-future','2999-01-01')).invalid,1);eq((await record(contact,'', '2026-02-01')).invalid,1);
  await record(contact,'new-1','2026-02-01T00:00:00Z','inbound',{},true);
@@ -37,6 +39,9 @@ try{
  await assert.rejects(()=>record(foreign,'cross-page','2026-03-06'));checks++;
  await assert.rejects(()=>report('all',stranger));checks++;
  eq((await report('all',member)).episodes.total,3);
+ await db.query("UPDATE users SET expires_at='2025-01-01' WHERE id=$1",[member]);
+ await assert.rejects(()=>report('all',member));checks++;
+ await db.query('UPDATE users SET expires_at=NULL WHERE id=$1',[member]);
  await db.query('INSERT INTO outbound_message_events(page_id,contact_id,message_id,source_type,actor_user_id,sent_at) VALUES($1,$2,$3,$4,$5,$6)',[page,contact,'manual-1','manual',actor,'2026-02-01T00:30:00Z']);
  r=await report();eq(r.response.human_replied,1);eq(r.response.sla_met,1);eq(r.response.median_minutes,30);
  await record(contact,'manual-1','2026-02-01T00:29:00Z','outbound');r=await report();eq(r.response.human_replied,1);eq(r.response.median_minutes,29);
@@ -68,5 +73,12 @@ try{
   eq((await db.query("SELECT has_function_privilege($1,'public.tokko_inquiry_insights(uuid,uuid,date,date,text,integer,timestamp with time zone)','EXECUTE') allowed",[role])).rows[0].allowed,false);
  }
  await db.exec(migration);eq((await report()).episodes.total,4); // idempotent reinstall preserves captured data
+ // History scans may establish a contact as newly added to this CRM, while
+ // actual message time (never import time) defines its episode date.
+ const imported='20000000-0000-4000-8000-000000000004';
+ await db.query('INSERT INTO contacts(id,page_id,name,psid,created_at) VALUES($1,$2,$3,$4,$5)',[imported,page,'New record','new-record','2026-03-15T00:00:00Z']);
+ await record(imported,'recent-history','2026-03-15T00:01:00Z','inbound',{collector:'saved_history'});
+ eq((await report('new_contact')).episodes.total,2);
+ eq(Date.parse((await report('new_contact')).items.find(i=>i.contact_id===imported).started_at),Date.parse('2026-03-15T00:01:00Z'));
  console.log(JSON.stringify({passed:true,checks,production_writes:0,customer_messages_sent:0}));
 }finally{await db.close();}

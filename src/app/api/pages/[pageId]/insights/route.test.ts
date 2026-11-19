@@ -1,14 +1,15 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { NextRequest } from 'next/server';
-const mocks = vi.hoisted(() => ({ session: vi.fn(), rpc: vi.fn() }));
+const mocks = vi.hoisted(() => ({ session: vi.fn(), rpc: vi.fn(), manager: vi.fn() }));
 vi.mock('next-auth', () => ({ getServerSession: mocks.session }));
 vi.mock('@/lib/auth', () => ({ authOptions: {} }));
 vi.mock('@/lib/supabase', () => ({ getSupabaseAdmin: () => ({ rpc: mocks.rpc }) }));
+vi.mock('@/lib/page-managers', () => ({ requireTeamPageAdministrator: mocks.manager }));
 import { GET, PATCH } from './route';
 const page = '10000000-0000-4000-8000-000000000001';
 const params = { params: Promise.resolve({ pageId: page }) };
 const request = (query = 'from=2026-01-01&to=2026-01-31') => new NextRequest('https://tokko.example/api/pages/' + page + '/insights?' + query);
-beforeEach(() => { mocks.session.mockResolvedValue({ user: { id: 'actor' } });mocks.rpc.mockResolvedValue({ data: { episodes: { total: 0 } }, error: null }); });
+beforeEach(() => { mocks.session.mockResolvedValue({ user: { id: 'actor' } });mocks.manager.mockResolvedValue([]);mocks.rpc.mockResolvedValue({ data: { episodes: { total: 0 } }, error: null }); });
 afterEach(() => { vi.clearAllMocks(); });
 describe('inquiry report access and filters', () => {
     it('requires a signed-in actor before querying data', async () => { mocks.session.mockResolvedValue(null);expect((await GET(request(), params)).status).toBe(401);expect(mocks.rpc).not.toHaveBeenCalled(); });
@@ -20,5 +21,5 @@ describe('inquiry report access and filters', () => {
     it('denies revoked Page membership and does not return internal errors', async () => { mocks.rpc.mockResolvedValue({ error: { code: '42501', message: 'private detail' } });const r = await GET(request(), params);expect(r.status).toBe(403);expect(JSON.stringify(await r.json())).not.toContain('private detail'); });
     it('reports database unavailability without a fabricated empty report', async () => { mocks.rpc.mockRejectedValue(Error('secret detail'));const r = await GET(request(), params);expect(r.status).toBe(503);expect(JSON.stringify(await r.json())).not.toContain('secret detail'); });
     it('protects settings against cross-origin mutation', async () => { const r = await PATCH(new NextRequest('https://tokko.example/api/pages/' + page + '/insights', { method: 'PATCH', headers: { origin: 'https://other.example' }, body: '{}' }), params);expect(r.status).toBe(403);expect(mocks.rpc).not.toHaveBeenCalled(); });
-    it('uses the manager-checking settings function and leaves other Page settings alone', async () => { const r = await PATCH(new NextRequest('https://tokko.example/api/pages/' + page + '/insights', { method: 'PATCH', headers: { origin: 'https://tokko.example' }, body: JSON.stringify({ returning_after_days: 7, response_sla_minutes: 30 }) }), params);expect(r.status).toBe(200);expect(mocks.rpc).toHaveBeenCalledWith('tokko_set_inquiry_policy', { p_actor: 'actor', p_page: page, p_returning_days: 7, p_sla_minutes: 30 }); });
+    it('uses the manager-checking settings function and leaves other Page settings alone', async () => { const r = await PATCH(new NextRequest('https://tokko.example/api/pages/' + page + '/insights', { method: 'PATCH', headers: { origin: 'https://tokko.example' }, body: JSON.stringify({ returning_after_days: 7, response_sla_minutes: 30 }) }), params);expect(r.status).toBe(200);expect(mocks.manager).toHaveBeenCalledWith({ user: { id: 'actor' } },[page]);expect(mocks.rpc).toHaveBeenCalledWith('tokko_set_inquiry_policy', { p_actor: 'actor', p_page: page, p_returning_days: 7, p_sla_minutes: 30 }); });
 });

@@ -4,7 +4,7 @@ Open **Inquiry Insights** in the existing dashboard navigation. Reports are scop
 
 ## Inquiry episodes
 
-- A valid customer message opens the first tracked episode. A contact created by that message is **New**. A previously existing/imported contact is **Returning** on its first tracked inbound message.
+- A valid customer message opens the first tracked episode. A contact created by that message is **New**. For already-authorized history scans, a contact record added after activation has a New first episode when a post-activation inbound message is observed. Contact records predating activation are **Returning** on their first tracked inbound message. New means new to the tracked CRM, not proof of the person's first-ever Messenger inquiry.
 - A nullable contact origin-message marker retains the New classification across webhook retries when the first metadata capture failed. Existing contacts are not assigned fabricated origin messages.
 - Further customer messages stay in the same episode until the configured inactivity gap. The default is **30 days since the previous customer message**, not since a Page reply. Page administrators can set 1–365 days and a response target of 1–1440 minutes.
 - A customer response after the gap opens a returning episode on the same contact; it never duplicates the contact or changes existing customer controls.
@@ -21,7 +21,9 @@ Known bulk campaigns are excluded from response-time statistics. Manual/human at
 
 ## Collection and privacy
 
-The signed Facebook webhook captures inbound messages and Page reply/stage echoes after contact resolution. Collection errors participate in the existing retry response; provider IDs make retries idempotent. An additive database trigger captures accepted outbound metadata from the existing source-attribution table. Bulk sends to the historical audience without a tracked inbound inquiry bypass that trigger's collection call. No sender or chatbot reply rule is changed.
+The signed Facebook webhook captures inbound messages and Page reply/stage echoes after contact resolution. Collection errors participate in the existing retry response; provider IDs make retries idempotent. Existing import/auto-tag scans also publish metadata from the messages they already read, without additional Meta requests. They are bounded sources, not a complete historical scan. Their post-activation message timestamps determine episode dates; older messages do not seed inquiries. An additive database trigger captures accepted outbound metadata from the existing source-attribution table. Bulk sends to the historical audience without a tracked inbound inquiry bypass that trigger's collection call. No sender or chatbot reply rule is changed.
+
+The Meta app's callback currently targets the shared Veo partner route, which returned HTTP 410 during activation checks. Its routing was not changed by this feature. Saved-history collection can advance through the existing enabled scans; webhook latency/freshness still depends on repairing that shared integration separately. Reports disclose captured-event coverage and do not claim complete history. No callback used by another app is overwritten.
 
 The event store keeps Page/contact IDs, provider message IDs, source type, actor ID when known, stage and timestamps. It does not store message text, attachments, PSIDs in event rows, inferred demographics or financial claims. Contact/Page deletion cascades to these events. New tables/views and RPCs are unavailable to anonymous and ordinary authenticated database roles; the server uses service access and the report function checks the actor's active Page membership. Settings additionally require existing Page-manager authority.
 

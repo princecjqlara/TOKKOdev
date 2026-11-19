@@ -68,7 +68,8 @@ BEGIN
    IF event_source='campaign' AND NOT EXISTS(SELECT 1 FROM public.tokko_inquiry_events WHERE page_id=p_page AND contact_id=p_contact AND kind='inbound') THEN CONTINUE;END IF;
   END IF;
   INSERT INTO public.tokko_inquiry_events AS saved(page_id,contact_id,event_key,message_id,kind,source,stage,occurred_at,time_basis,actor_user_id,new_contact,returning_after_days)
-  VALUES(p_page,p_contact,'message:'||mid,mid,event_kind,event_source,event_stage,at_time,basis,actor,event_kind='inbound' AND coalesce(p_new_contact,FALSE),cfg.returning_after_days)
+  VALUES(p_page,p_contact,'message:'||mid,mid,event_kind,event_source,event_stage,at_time,basis,actor,event_kind='inbound' AND (coalesce(p_new_contact,FALSE) OR
+   (coalesce(item->>'collector'='saved_history',FALSE) AND EXISTS(SELECT 1 FROM public.contacts WHERE id=p_contact AND created_at>=cfg.started_at))),cfg.returning_after_days)
   ON CONFLICT(page_id,event_key) DO UPDATE SET
    source=CASE WHEN saved.source='messenger' THEN EXCLUDED.source ELSE saved.source END,
    actor_user_id=coalesce(saved.actor_user_id,EXCLUDED.actor_user_id),
@@ -121,7 +122,7 @@ GRANT SELECT ON public.tokko_inquiry_episode_facts TO service_role;
 CREATE OR REPLACE FUNCTION public.tokko_set_inquiry_policy(p_actor UUID,p_page UUID,p_returning_days INTEGER,p_sla_minutes INTEGER)
 RETURNS JSONB LANGUAGE plpgsql SECURITY DEFINER SET search_path=public AS $$
 BEGIN
- PERFORM public.tokko_assert_manager(p_actor,p_page);
+ PERFORM public.tokko_assert_manager(p_actor,ARRAY[p_page]);
  IF p_returning_days IS NULL OR p_sla_minutes IS NULL OR p_returning_days NOT BETWEEN 1 AND 365 OR p_sla_minutes NOT BETWEEN 1 AND 1440 THEN RAISE EXCEPTION 'Invalid inquiry policy';END IF;
  INSERT INTO public.tokko_insight_settings(page_id,started_at) SELECT p_page,started_at FROM app_private.tokko_insight_config ON CONFLICT DO NOTHING;
  UPDATE public.tokko_insight_settings SET returning_after_days=p_returning_days,response_sla_minutes=p_sla_minutes,updated_at=now() WHERE page_id=p_page;
@@ -132,8 +133,9 @@ CREATE OR REPLACE FUNCTION public.tokko_inquiry_insights(p_actor UUID,p_page UUI
 RETURNS JSONB LANGUAGE plpgsql SECURITY DEFINER SET search_path=public AS $$
 DECLARE cfg public.tokko_insight_settings; result JSONB; from_time TIMESTAMPTZ; until_time TIMESTAMPTZ; can_manage BOOLEAN:=FALSE;
 BEGIN
- IF NOT EXISTS(SELECT 1 FROM public.user_pages up JOIN public.users u ON u.id=up.user_id WHERE up.user_id=p_actor AND up.page_id=p_page AND u.is_active) THEN RAISE EXCEPTION 'Page access required' USING ERRCODE='42501';END IF;
- BEGIN PERFORM public.tokko_assert_manager(p_actor,p_page);can_manage:=TRUE;EXCEPTION WHEN insufficient_privilege THEN can_manage:=FALSE;END;
+ IF NOT EXISTS(SELECT 1 FROM public.user_pages up JOIN public.users u ON u.id=up.user_id WHERE up.user_id=p_actor AND up.page_id=p_page AND u.is_active AND (u.expires_at IS NULL OR u.expires_at>now())) THEN RAISE EXCEPTION 'Page access required' USING ERRCODE='42501';END IF;
+ SELECT EXISTS(SELECT 1 FROM public.users u JOIN public.tokko_auth_identities i ON i.user_id=u.id AND i.provider='facebook' AND i.subject=u.facebook_id
+  WHERE u.id=p_actor AND u.created_by IS NULL AND u.account_kind IN ('facebook','legacy') AND u.is_active AND (u.expires_at IS NULL OR u.expires_at>now())) INTO can_manage;
  IF p_from IS NULL OR p_to IS NULL OR p_to<p_from OR p_to-p_from>365 OR p_kind IS NULL OR p_kind NOT IN ('all','new_contact','returning_contact') OR p_horizon_hours IS NULL OR p_horizon_hours NOT IN (24,168) OR p_as_of IS NULL OR p_as_of>clock_timestamp()+INTERVAL '5 minutes' THEN RAISE EXCEPTION 'Invalid reporting filters';END IF;
  SELECT * INTO cfg FROM public.tokko_insight_settings WHERE page_id=p_page;
  IF NOT FOUND THEN

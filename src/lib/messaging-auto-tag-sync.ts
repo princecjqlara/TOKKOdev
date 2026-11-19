@@ -1,10 +1,11 @@
 import type { getSupabaseAdmin } from './supabase';
 import { databaseRequest } from './database-request';
+import { captureSavedInquiryMessages } from './inquiry-insights';
 import { classifyMessengerSystemMessage, isWithinMessagingAutoTagWindow, MESSENGER_STAGE_TAG_NAMES,
     type MessengerLeadStage, type MessengerSystemSignal } from './messaging-auto-tag';
 
 type Database = ReturnType<typeof getSupabaseAdmin>;
-export type MessengerTagMessage = { message?: string; from?: { id?: string } };
+export type MessengerTagMessage = { id?: string; created_time?: string; message?: string; from?: { id?: string } };
 export type MessagingAutoTagIds = Record<MessengerLeadStage, string>;
 type PageTag = { id: string; name: string; is_default: boolean };
 
@@ -39,6 +40,7 @@ export function createContactMessagingAutoTagger(db: Database, page: {
     let idsPromise: Promise<MessagingAutoTagIds> | undefined = initialIds ? Promise.resolve(initialIds) : undefined;
 
     return async (psid: string, messages: MessengerTagMessage[]): Promise<boolean> => {
+        await captureSavedInquiryMessages(db, page, psid, messages);
         if (page.messaging_auto_tag_enabled === false || !psid || psid === page.fb_page_id) return false;
         const signals = new Set<MessengerSystemSignal>();
         for (const message of messages) {

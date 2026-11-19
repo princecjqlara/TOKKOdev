@@ -49,6 +49,30 @@ export async function captureWebhookInquiry(db: any, pageId: string, pageFaceboo
     if (result.error) throw result.error;
 }
 
+/** Reuse already-authorized history responses; this performs no Meta reads.
+ * Only provider IDs/times after the SQL activation watermark are accepted. */
+export async function captureSavedInquiryMessages(db: any, page: { id: string; fb_page_id: string }, psid: string,
+    messages: { id?: string; message?: string; from?: { id?: string }; created_time?: string }[]): Promise<void> {
+    const events = messages.flatMap(message => {
+        if (!message.id || !message.created_time || ![psid, page.fb_page_id].includes(message.from?.id || '')) return [];
+        const at = Date.parse(message.created_time);if (!Number.isFinite(at)) return [];
+        const parsed = inquiryEventFromWebhook(page.fb_page_id, {
+            sender: { id: message.from!.id }, recipient: { id: message.from!.id === psid ? page.fb_page_id : psid },
+            timestamp: at, message: { mid: message.id, text: message.message }
+        });
+        return parsed ? [{ ...parsed.event, collector: 'saved_history' }] : [];
+    }).sort((a, b) => String(a.occurred_at).localeCompare(String(b.occurred_at)));
+    if (!events.length || !psid || psid === page.fb_page_id) return;
+    const contact = await databaseRequest<any>(db.from('contacts').select('id').eq('page_id', page.id).eq('psid', psid).maybeSingle());
+    if (contact.error) throw contact.error;if (!contact.data?.id) return;
+    for (let offset = 0; offset < events.length; offset += 100) {
+        const result = await databaseRequest<any>(db.rpc('record_tokko_inquiry_events', {
+            p_page: page.id, p_contact: contact.data.id, p_events: events.slice(offset, offset + 100), p_new_contact: false
+        }));
+        if (result.error) throw result.error;
+    }
+}
+
 export type InquiryReport = {
     can_manage: boolean;
     definition_version: string; as_of: string; timezone: string;

@@ -12,7 +12,7 @@ export default function InquiryInsights({ report }: { report: InquiryReport }) {
     return <div className="space-y-6">
         <div className="border-2 border-black p-4 text-sm space-y-2">
             <p>Tracking started {date(report.collection.started_at)} PHT. Only recorded inbound messages open inquiry episodes.</p>
-            <p>A contact’s first tracked episode is New when the contact was created by its inbound message. Existing contacts and later episodes are Returning. A new episode starts after {report.collection.returning_after_days} days without a customer message.</p>
+            <p>A contact added after tracking starts has a New first episode when its inbound message is recorded. Older contact records and later episodes are Returning. A new episode starts after {report.collection.returning_after_days} days without a customer message. Episode dates use actual message times, not import dates.</p>
             <p>Dates use Philippine time. CRM stages and accepted messages do not verify payments or delivery.</p>
         </div>
         {!e.total && <section role="status" className="border-2 border-black p-6"><h2 className="font-bold">Waiting for new or returning inquiries</h2><p className="mt-2 text-sm">New inbound messages will appear here as they are recorded. Older contacts are not added as new inquiries. Try a wider date range if tracking has already received messages.</p></section>}
@@ -34,7 +34,8 @@ export default function InquiryInsights({ report }: { report: InquiryReport }) {
             <p className="text-sm text-gray-600">Known bulk campaigns are excluded from reply-time measurements. Times use the first recorded qualifying Page message; accepted-send timestamps are not delivery confirmation. Unanswered episodes are shown separately from completed reply times.</p>
         </section>
         <section className="border-2 border-black p-5 space-y-2"><h2 className="text-lg font-black">Collection and data quality</h2>
-            <p className="text-sm">Last tracked event: {date(report.collection.last_event_at)} PHT. A quiet Page alone does not prove collection failure.</p>
+            <p className="text-sm">Last tracked event: {date(report.collection.last_event_at)} PHT. Events may arrive live or through the existing Messenger history scans. Coverage is limited to the messages actually captured; a quiet Page alone does not prove collection failure.</p>
+            <p className="text-sm"><a href="/dashboard/contacts" className="underline font-bold">Open Contacts</a> to refresh the Page’s existing Messenger data. Refreshing this report alone does not fetch new conversation history.</p>
             <p className="text-sm">Invalid or missing source IDs/times: {number(report.collection.invalid_events)}. Pre-tracking events ignored: {number(report.collection.historical_events_ignored)}.</p>
             <p className="text-sm">Existing contact records with a first-interaction time: {number(report.contact_coverage.first_interaction_known)} of {number(report.contact_coverage.total)} ({rate(report.contact_coverage.first_interaction_fraction)}). This legacy field is not used to invent historical inquiry episodes.</p>
         </section>
