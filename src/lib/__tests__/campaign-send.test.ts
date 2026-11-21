@@ -916,7 +916,7 @@ describe('sendCampaignById', () => {
         expect(metrics[2].elapsedMs).toBeLessThan(metrics[1].elapsedMs * 0.9);
         expect(metrics[3].elapsedMs).toBeLessThan(metrics[0].elapsedMs / 10);
         console.info('Synthetic sender benchmark (200ms Meta latency, 20ms database latency; no real sends):', JSON.stringify(metrics));
-    });
+    }, 30_000); // Allow CPU time for 5,000 simulated sends; virtual-time assertions above measure throughput.
 
     it('reduces slow-database waits without exceeding a recovering Page message rate', async () => {
         vi.useFakeTimers();

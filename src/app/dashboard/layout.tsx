@@ -64,15 +64,22 @@ export default function DashboardLayout({
 
     useEffect(() => {
         if (!session?.user?.id) return;
+        const controller = new AbortController();
         let inFlight = false;
         const refresh = async () => {
-            if (inFlight || document.hidden) return;
+            if (inFlight || document.hidden || controller.signal.aborted) return;
             inFlight = true;
             try {
-                const response = await fetch('/api/pages?membershipOnly=1');
-                if (response.status === 401) { window.location.replace(session.signInProvider === 'facebook' ? facebookSignInCallback(window.location.pathname) : '/login'); return; }
-                if (!response.ok) return;
-                const data = await response.json();
+                const data = await requestWithTimeout(async signal => {
+                    const response = await fetch('/api/pages?membershipOnly=1', { signal });
+                    if (response.status === 401) {
+                        if (!signal.aborted) window.location.replace(session.signInProvider === 'facebook' ? facebookSignInCallback(window.location.pathname) : '/login');
+                        return null;
+                    }
+                    if (!response.ok) return null;
+                    return response.json();
+                }, 12_000, 'Refreshing Page access timed out.', controller.signal);
+                if (!data || controller.signal.aborted) return;
                 const snapshot = (data.pages || []).map((page: Page) => page.id).sort().join(',');
                 if (membershipSnapshot.current !== null && membershipSnapshot.current !== snapshot) {
                     // Remount every Page screen so revoked data/selections do not
@@ -85,14 +92,16 @@ export default function DashboardLayout({
         const timer = window.setInterval(() => { void refresh().catch(() => {}); }, 60_000);
         const onFocus = () => { void refresh().catch(() => {}); };
         window.addEventListener('focus', onFocus);
-        return () => { window.clearInterval(timer); window.removeEventListener('focus', onFocus); };
+        return () => { controller.abort(); window.clearInterval(timer); window.removeEventListener('focus', onFocus); };
     }, [session?.user?.id, session?.signInProvider]);
 
     const fetchPages = async () => {
         try {
-            const res = await fetch('/api/pages');
-            if (!res.ok) throw new Error('Could not load assigned Pages.');
-            const data = await res.json();
+            const data = await requestWithTimeout(async signal => {
+                const res = await fetch('/api/pages', { signal });
+                if (!res.ok) throw new Error('Could not load assigned Pages.');
+                return res.json();
+            }, 12_000, 'Loading assigned Pages timed out.');
             setPages(data.pages || []);
             setReconnectRequiredPages(data.reconnectRequiredPages || []);
             setFacebookDiscoveryMessage(data.facebookDiscovery?.message || null);

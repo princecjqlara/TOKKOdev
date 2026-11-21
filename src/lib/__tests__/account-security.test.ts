@@ -2,7 +2,8 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { accountPasswordFingerprint, assertSameOrigin, decryptMailToken, digest, encryptMailToken, hashAccountPassword, newAccountToken, normalizeEmail, verifyAccountPassword } from '../account-security';
 
 afterEach(() => { vi.unstubAllEnvs(); });
-describe('account credential safety', () => {
+// Exercise real scrypt work, including several comparisons per case, on slow hosts.
+describe('account credential safety', { timeout: 30_000 }, () => {
     it('binds retry fingerprints to the server secret without storing an unkeyed password verifier', () => {
         vi.stubEnv('NEXTAUTH_SECRET', 'first-test-secret');
         const first = accountPasswordFingerprint('A password for account creation');

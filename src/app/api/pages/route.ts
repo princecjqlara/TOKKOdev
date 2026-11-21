@@ -3,6 +3,8 @@ import { getSessionFromRequest } from '@/lib/get-session';
 import { getSupabaseAdmin } from '@/lib/supabase';
 import { restoreFacebookPageMemberships } from '@/lib/facebook-page-memberships';
 import { AccessError } from '@/lib/account-security';
+import { databaseRequest, databaseErrorDetails } from '@/lib/database-request';
+import { requestWithTimeout } from '@/lib/request-timeout';
 
 export const dynamic = 'force-dynamic';
 
@@ -28,20 +30,17 @@ async function getPageTokenStatus(page: PageRecord): Promise<PageTokenStatus> {
         return 'invalid';
     }
 
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 1500);
-
     try {
         const tokenProbeUrl = new URL(`https://graph.facebook.com/v21.0/${page.fb_page_id}`);
         tokenProbeUrl.searchParams.set('fields', 'id');
         tokenProbeUrl.searchParams.set('access_token', page.access_token);
 
-        const response = await fetch(tokenProbeUrl, {
-            signal: controller.signal
-        });
-        const body = await response
-            .json()
-            .catch(() => ({} as { id?: string; error?: { message?: string; code?: number } }));
+        const { response, body } = await requestWithTimeout(async signal => {
+            const response = await fetch(tokenProbeUrl, { signal });
+            const body = await response.json()
+                .catch(() => ({} as { id?: string; error?: { message?: string; code?: number } }));
+            return { response, body };
+        }, 1500, 'Page connection check timed out.');
 
         const errorMessage = body.error?.message || '';
         const isTokenError =
@@ -72,8 +71,6 @@ async function getPageTokenStatus(page: PageRecord): Promise<PageTokenStatus> {
             error: (error as Error).message
         });
         return 'unknown';
-    } finally {
-        clearTimeout(timeout);
     }
 }
 
@@ -106,7 +103,7 @@ export async function GET(request: NextRequest) {
 
         const supabase = getSupabaseAdmin();
 
-        const loadAssignments = () => supabase
+        const loadAssignments = () => databaseRequest(supabase
             .from('user_pages')
             .select(`
         page_id,
@@ -120,7 +117,7 @@ export async function GET(request: NextRequest) {
           access_token
         )
       `)
-            .eq('user_id', userId);
+            .eq('user_id', userId));
         let { data: userPages, error } = await loadAssignments();
         if (error) throw error;
         let facebookDiscovery: { restored: number; message?: string; requiresReauth?: boolean } | undefined;
@@ -189,9 +186,9 @@ export async function GET(request: NextRequest) {
         return NextResponse.json({ pages, reconnectRequiredPages, ...(facebookDiscovery ? { facebookDiscovery } : {}) },
             { headers: { 'Cache-Control': 'private, no-store' } });
     } catch (error) {
-        console.error('Error fetching pages:', error);
+        console.error('Error fetching pages:', databaseErrorDetails(error));
         return NextResponse.json(
-            { error: 'Failed to fetch pages', message: (error as Error).message },
+            { error: 'Failed to fetch pages', message: error instanceof AccessError ? error.message : 'Your assigned Pages could not be loaded. Please retry.' },
             { status: error instanceof AccessError ? error.status : 500 }
         );
     }

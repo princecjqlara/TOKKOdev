@@ -73,9 +73,11 @@ export default function DashboardPage() {
     const fetchPages = async () => {
         setLoading(true);
         try {
-            const res = await fetch('/api/pages');
-            if (!res.ok) throw new Error('Your Pages could not be loaded. Please retry.');
-            const data = await res.json();
+            const data = await requestWithTimeout(async signal => {
+                const res = await fetch('/api/pages', { signal });
+                if (!res.ok) throw new Error('Your Pages could not be loaded. Please retry.');
+                return res.json();
+            }, 12_000, 'Loading assigned Pages timed out.');
             const pageList: Page[] = data.pages || [];
             setPages(pageList);
             setPagesError(null);
@@ -95,13 +97,15 @@ export default function DashboardPage() {
         const request = ++statsRequest.current;
         setStatsError(null);
         try {
-            const results = await Promise.all([
-                fetch(`/api/pages/${pageId}/contacts?pageSize=1&includeTags=false`),
-                fetch(`/api/tags?scope=page&pageId=${pageId}&pageSize=1`),
-                fetch(`/api/campaigns?pageId=${pageId}&pageSize=1`)
-            ]);
-            if (results.some(response => !response.ok)) throw new Error('Dashboard totals could not be loaded.');
-            const [contactsData, tagsData, campaignsData] = await Promise.all(results.map(response => response.json()));
+            const [contactsData, tagsData, campaignsData] = await requestWithTimeout(async signal => {
+                const results = await Promise.all([
+                    fetch(`/api/pages/${pageId}/contacts?pageSize=1&includeTags=false`, { signal }),
+                    fetch(`/api/tags?scope=page&pageId=${pageId}&pageSize=1`, { signal }),
+                    fetch(`/api/campaigns?pageId=${pageId}&pageSize=1`, { signal })
+                ]);
+                if (results.some(response => !response.ok)) throw new Error('Dashboard totals could not be loaded.');
+                return Promise.all(results.map(response => response.json()));
+            }, 12_000, 'Loading dashboard totals timed out.');
             if (request !== statsRequest.current) return;
 
             setStats({

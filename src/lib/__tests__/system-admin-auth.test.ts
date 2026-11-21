@@ -6,7 +6,7 @@ vi.mock('../supabase', () => ({ getSupabaseAdmin: () => ({ rpc: mocks.rpc }) }))
 import { authenticateSystemAdmin, systemAdminSessionActive } from '../system-admin-auth';
 
 let hash: string;
-beforeAll(async () => { hash = await hashAccountPassword('test-admin-password'); });
+beforeAll(async () => { hash = await hashAccountPassword('test-admin-password'); }, 30_000);
 beforeEach(() => {
     vi.clearAllMocks(); mocks.rate.mockResolvedValue(undefined);
     mocks.rpc.mockResolvedValue({ data: [], error: null });
@@ -14,7 +14,8 @@ beforeEach(() => {
 });
 afterEach(() => { vi.unstubAllEnvs(); });
 
-describe('separate administrator authentication', () => {
+// Keep real password verification in the release gate without a five-second CPU limit.
+describe('separate administrator authentication', { timeout: 30_000 }, () => {
     it('requires both configured credentials and returns no password material', async () => {
         const user = await authenticateSystemAdmin({ email: ' ADMIN@example.test ', password: 'test-admin-password' }, 'test-ip');
         expect(user).toMatchObject({ id: 'tokko-system-admin', email: 'admin@example.test' });

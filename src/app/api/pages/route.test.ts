@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { NextRequest } from 'next/server';
 import { AccessError } from '@/lib/account-security';
 
@@ -60,6 +60,7 @@ function createSupabaseMock() {
 }
 
 describe('GET /api/pages', () => {
+    afterEach(() => { vi.useRealTimers(); });
     beforeEach(() => {
         vi.clearAllMocks();
         vi.unstubAllGlobals();
@@ -267,6 +268,41 @@ describe('GET /api/pages', () => {
         expect(response.status).toBe(200);
         expect(body.pages).toHaveLength(2);
         expect(body.reconnectRequiredPages).toEqual([]);
+    });
+
+    it.each(['request', 'response body'])('keeps assigned Pages available when the Facebook %s stalls', async stage => {
+        vi.useFakeTimers();
+        const signals: AbortSignal[] = [];
+        vi.mocked(fetch).mockImplementation(async (_url, options) => {
+            signals.push(options!.signal as AbortSignal);
+            if (stage === 'request') return new Promise(() => {});
+            return { ok: true, json: () => new Promise(() => {}) } as Response;
+        });
+        const pending = GET(createRequest());
+        await vi.advanceTimersByTimeAsync(1500);
+        const response = await pending;
+        const body = await response.json();
+        expect(response.status).toBe(200);
+        expect(body.pages).toHaveLength(2);
+        expect(body.reconnectRequiredPages).toEqual([]);
+        expect(signals).toHaveLength(2);
+        expect(signals.every(signal => signal.aborted)).toBe(true);
+        expect(JSON.stringify(body)).not.toMatch(/access_token|old_invalid_token|fresh_valid_token/);
+    });
+
+    it('returns a retryable service error when the assignment database stalls', async () => {
+        vi.useFakeTimers();
+        const db = createSupabaseMock();
+        db.eq.mockImplementation(() => new Promise(() => {}));
+        mocks.getSupabaseAdmin.mockReturnValue(db);
+        const pending = GET(createRequest());
+        await vi.advanceTimersByTimeAsync(8000);
+        const response = await pending;
+        const body = await response.json();
+        expect(response.status).toBe(503);
+        expect(body.pages).toBeUndefined();
+        expect(body.message).toContain('temporarily unavailable');
+        expect(fetch).not.toHaveBeenCalled();
     });
 
     it.each([

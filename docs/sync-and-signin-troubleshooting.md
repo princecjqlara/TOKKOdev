@@ -228,6 +228,16 @@ revoked or that its password was incorrect. Email login distinguishes a temporar
 service outage, too many attempts, and rejected credentials. For individual login
 failures, record the exact displayed message and the selected sign-in provider.
 
+Dashboard Page lists and totals stop waiting after twelve seconds and show their
+retry controls. Assignment database reads have an eight-second deadline. Optional
+Facebook connection checks have a 1.5-second deadline including the response body;
+a timeout keeps the assigned Page available with an unknown connection status.
+These deadlines also apply when a stalled transport ignores cancellation.
+Background Page-access refreshes use the same twelve-second deadline and try again
+on the next minute tick or window focus. Leaving the dashboard cancels that check.
+Regression tests exercise stalled requests, stalled bodies, retry recovery, and
+continued membership checking; Vercel runs them before compiling each deployment.
+
 Run `node --env-file=.env.local scripts/verify-page-access.mjs` for a read-only
 audit of Page assignments and the queries used by members. This does not exercise
 live OAuth, submitted passwords, scheduler execution, or message delivery.

@@ -12,7 +12,7 @@ export default defineConfig({
         include: ['src/**/*.test.ts'],
         // Leave CPU capacity for password hashing and application processes.
         // Unbounded workers can make correct credential tests time out.
-        maxWorkers: 4,
+        maxWorkers: 2,
         minWorkers: 1
     }
 });
